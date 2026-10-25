@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using dc;
 using dc.en;
 using dc.pr;
+using dc.tool.atk;
+using dc.tool.mv;
 using DeadCellsMultiplayerX.Common.Data.Snapshot;
 using DeadCellsMultiplayerX.Common.Serializers;
 using DeadCellsMultiplayerX.Utils;
@@ -90,9 +92,10 @@ namespace DeadCellsMultiplayerX.Client.Guest.WorldX.Remote
 
             if (mob != null)
             {
-                // 先销毁再解除映射 让 onDie Hook 仍能识别这是远端怪物
-                if (!mob.destroyed)
-                    mob.destroy();
+                var atk = AttackUtils.Class.createFromHero(session.Game.hero, (object)999999, null);
+                atk.dmgType = new DamageType.Physical();
+                atk.addTag(18);
+                AttackUtils.Class.hit(atk, mob);
 
                 netIds.Remove(mob);
             }
@@ -113,7 +116,8 @@ namespace DeadCellsMultiplayerX.Client.Guest.WorldX.Remote
         {
             if (spawn == null || mobs.ContainsKey(spawn.NetId)) return;
 
-            var level = ResolveLevel(spawn.LevelId, spawn.SubLevelIndex);
+            var level = LevelUtils.ResolveLevel(
+                session.Game, spawn.LevelId, spawn.SubLevelIndex);
             if (level == null) return;
 
             // 每个关卡第一次成功接收服务端怪物时 清掉本地加载的怪物防止重复
@@ -122,9 +126,7 @@ namespace DeadCellsMultiplayerX.Client.Guest.WorldX.Remote
             if (needsCleanup)
                 ClearLocalLevelMobs(level);
 
-            LevelMob? descriptor;
-
-            descriptor = DCMXSerializers.MessagePack.Deserialize<LevelMob>(spawn.EntityData);
+            LevelMob? descriptor = DCMXSerializers.MessagePack.Deserialize<LevelMob>(spawn.EntityData);
 
             if (descriptor == null) return;
 
@@ -190,38 +192,6 @@ namespace DeadCellsMultiplayerX.Client.Guest.WorldX.Remote
             foreach (var mob in toDestroy)
                 suppressedDeaths.Remove(mob);
         }
-
-        /// <summary>
-        /// 按关卡 id 与子关卡索引查找本地 Level
-        /// </summary>
-        private Level? ResolveLevel(string levelId, int subLevelIndex)
-        {
-            var game = session.Game;
-            if (game == null) return null;
-
-            var current = game.curLevel;
-            if (Matches(current, levelId, subLevelIndex))
-                return current;
-
-            var subLevels = game.subLevels;
-            if (subLevels == null) return null;
-
-            for (int i = 0; i < subLevels.length; i++)
-            {
-                if (subLevels.getDyn(i) is Level level
-                    && Matches(level, levelId, subLevelIndex))
-                {
-                    return level;
-                }
-            }
-
-            return null;
-        }
-
-        private static bool Matches(Level? level, string levelId, int subLevelIndex)
-            => level != null
-            && (level.map?.id?.ToString() ?? string.Empty) == levelId
-            && level.GetSubLevelIndex() == subLevelIndex;
 
         private static string LevelKey(string levelId, int subLevelIndex)
             => $"{levelId}#{subLevelIndex}";

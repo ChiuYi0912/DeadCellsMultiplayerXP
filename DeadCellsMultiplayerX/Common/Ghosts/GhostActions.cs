@@ -177,23 +177,14 @@ namespace DeadCellsMultiplayerX.Common.Ghosts
         /// </summary>
         public bool CastSkill(int slot, double ratio)
         {
-            try
-            {
-                var manager = hero.activeSkillsManager;
-                if (manager == null) return false;
+            var manager = hero.activeSkillsManager;
+            if (manager == null) return false;
 
-                var before = Count();
-                manager.onActiveSkill(slot, ratio);
-                RestoreHudIcon(slot);
-                LogActionDelta("cast", slot, before);
-                return true;
-            }
-            catch (Exception ex)
-            {
-                Logger.Error(ex,
-                    "GhostActions {Owner}: cast slot {Slot} failed", ownerGuid, slot);
-                return false;
-            }
+            var before = Count();
+            manager.onActiveSkill(slot, ratio);
+            RestoreHudIcon(slot);
+            LogActionDelta("cast", slot, before);
+            return true;
         }
 
         /// <summary>
@@ -201,66 +192,57 @@ namespace DeadCellsMultiplayerX.Common.Ghosts
         /// </summary>
         public bool ReplaySkill(int slot)
         {
-            try
+            if (hero.activeSkillsManager is not BeheadedActiveSkillsManager manager)
+                return false;
+
+            var item = hero.inventory.getActiveOn(slot);
+            if (item == null)
             {
-                if (hero.activeSkillsManager is not BeheadedActiveSkillsManager manager)
-                    return false;
-
-                var item = hero.inventory.getActiveOn(slot);
-                if (item == null)
-                {
-                    Logger.Warning(
-                        "GhostActions {Owner}: replay slot {Slot} has no item",
-                        ownerGuid, slot);
-                    return false;
-                }
-
-                GetActiveSkill(slot)?.useActiveItem(item);
-
-                var data = item._itemData;
-                if (data == null)
-                {
-                    Logger.Warning(
-                        "GhostActions {Owner}: replay slot {Slot} itemData missing",
-                        ownerGuid, slot);
-                    return false;
-                }
-
-                var before = Count();
-                switch (data.group)
-                {
-                    case 0:
-                        manager.spawnDeployedTrapSkill(slot, item, data);
-                        break;
-                    case 1:
-                        manager.spawnGrenadeSkill(item, data);
-                        break;
-                    case 2:
-                        LogReplaySkip(slot, "sidekick");
-                        return true;
-                    case 3:
-                        if (data.props.mob != null)
-                        {
-                            LogReplaySkip(slot, "pet");
-                            return true;
-                        }
-
-                        manager.spawnPowerSkill(slot, item, data);
-                        break;
-                    default:
-                        return false;
-                }
-
-                RestoreHudIcon(slot);
-                LogActionDelta("replay", slot, before);
-                return true;
-            }
-            catch (Exception ex)
-            {
-                Logger.Error(ex,
-                    "GhostActions {Owner}: replay slot {Slot} failed", ownerGuid, slot);
+                Logger.Warning(
+                    "GhostActions {Owner}: replay slot {Slot} has no item",
+                    ownerGuid, slot);
                 return false;
             }
+
+            GetActiveSkill(slot)?.useActiveItem(item);
+
+            var data = item._itemData;
+            if (data == null)
+            {
+                Logger.Warning(
+                    "GhostActions {Owner}: replay slot {Slot} itemData missing",
+                    ownerGuid, slot);
+                return false;
+            }
+
+            var before = Count();
+            switch (data.group)
+            {
+                case 0:
+                    manager.spawnDeployedTrapSkill(slot, item, data);
+                    break;
+                case 1:
+                    manager.spawnGrenadeSkill(item, data);
+                    break;
+                case 2:
+                    LogReplaySkip(slot, "sidekick");
+                    return true;
+                case 3:
+                    if (data.props.mob != null)
+                    {
+                        LogReplaySkip(slot, "pet");
+                        return true;
+                    }
+
+                    manager.spawnPowerSkill(slot, item, data);
+                    break;
+                default:
+                    return false;
+            }
+
+            RestoreHudIcon(slot);
+            LogActionDelta("replay", slot, before);
+            return true;
         }
 
         /// <summary>
@@ -269,19 +251,12 @@ namespace DeadCellsMultiplayerX.Common.Ghosts
         /// </summary>
         private static void RestoreHudIcon(int slot)
         {
-            try
-            {
-                var hud = dc.ui.HUD.Class.ME;
-                if (hud?.skillPowers == null || slot < 0 || slot >= hud.skillPowers.length)
-                    return;
+            var hud = dc.ui.HUD.Class.ME;
+            if (hud?.skillPowers == null || slot < 0 || slot >= hud.skillPowers.length)
+                return;
 
-                if (hud.skillPowers.getDyn(slot) is dc.ui.hud.Skill skill)
-                    skill.showIcon();
-            }
-            catch
-            {
-                // HUD 不可用时忽略
-            }
+            if (hud.skillPowers.getDyn(slot) is dc.ui.hud.Skill skill)
+                skill.showIcon();
         }
 
         #endregion

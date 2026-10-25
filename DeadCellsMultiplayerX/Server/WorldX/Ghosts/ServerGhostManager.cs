@@ -336,7 +336,7 @@ namespace DeadCellsMultiplayerX.Server.WorldX.Ghosts
                 ghosts.Remove(guid);
             }
 
-            ghost = GhostHero.Create(game, level, guid);
+            ghost = GhostHero.Create(game, level, guid, true);
             if (ghost == null) return null;
 
             ghosts[guid] = ghost;

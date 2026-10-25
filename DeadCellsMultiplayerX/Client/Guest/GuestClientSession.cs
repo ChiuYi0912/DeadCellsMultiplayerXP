@@ -7,6 +7,7 @@ using dc.tool.atk;
 using DeadCellsMultiplayerX.Client.Event;
 using DeadCellsMultiplayerX.Client.Guest.Ghost;
 using DeadCellsMultiplayerX.Client.Guest.WorldX;
+using DeadCellsMultiplayerX.Client.Guest.WorldX.Remote;
 using DeadCellsMultiplayerX.Client.Guest.WorldX.Snapshot;
 using DeadCellsMultiplayerX.Client.Host;
 using DeadCellsMultiplayerX.Common.Data;
@@ -152,6 +153,7 @@ namespace DeadCellsMultiplayerX.Client.Guest
             Hook_Power.update += Hook_Power_update;
             Hook__AttackUtils.applyHitResult += Hook_AttackUtils_applyHitResult;
             Hook__AttackUtils.postHitResultUpdate += Hook_AttackUtils_postHitResultUpdate;
+            Hook__AttackUtils.createFromHeroAndHit += Hook_AttackUtils_createFromHeroAndHit;
             Hook_LevelAreaAffect.init += Hook_LevelAreaAffect_init;
             Hook_LevelAreaAffect.applyAnotherAffect += Hook_LevelAreaAffect_applyAnotherAffect;
             localCapture = new LocalGhostCapture(this);
@@ -277,6 +279,28 @@ namespace DeadCellsMultiplayerX.Client.Guest
             orig(atk, target);
         }
 
+        /// <summary>
+        /// 拦截本地伤害
+        /// </summary>
+        private AttackData Hook_AttackUtils_createFromHeroAndHit(
+            Hook__AttackUtils.orig_createFromHeroAndHit orig,
+            Entity parent,
+            object baseDmg,
+            int? data,
+            Entity target)
+        {
+            bool remoteTarget = target is RemoteHero
+                    || (target is Mob mob
+                    && remoteWorld?.IsRemoteMob(mob) == true);
+
+            if (parent == null && remoteTarget)
+            {
+                return null!;
+            }
+
+            return orig(parent, baseDmg, data, target);
+        }
+
 
         internal void DebugCastSkill(string itemId, int slot)
             => localCapture?.DebugCastSkill(itemId, slot);
@@ -380,6 +404,7 @@ namespace DeadCellsMultiplayerX.Client.Guest
             Hook_Power.update -= Hook_Power_update;
             Hook__AttackUtils.applyHitResult -= Hook_AttackUtils_applyHitResult;
             Hook__AttackUtils.postHitResultUpdate -= Hook_AttackUtils_postHitResultUpdate;
+            Hook__AttackUtils.createFromHeroAndHit -= Hook_AttackUtils_createFromHeroAndHit;
             Hook_LevelAreaAffect.init -= Hook_LevelAreaAffect_init;
             Hook_LevelAreaAffect.applyAnotherAffect -= Hook_LevelAreaAffect_applyAnotherAffect;
             localCapture?.Dispose();

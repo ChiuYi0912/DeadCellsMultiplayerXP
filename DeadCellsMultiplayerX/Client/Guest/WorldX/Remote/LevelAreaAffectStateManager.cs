@@ -78,7 +78,8 @@ namespace DeadCellsMultiplayerX.Client.Guest.WorldX.Remote
                 var state = states[i];
                 if (state == null) continue;
 
-                var level = ResolveLevel(game, state.LevelId, state.SubLevelIndex);
+                var level = LevelUtils.ResolveLevel(
+                    game, state.LevelId, state.SubLevelIndex);
                 if (level == null) continue;
 
                 double age = nowSec - state.ServerTimeSec;
@@ -234,30 +235,6 @@ namespace DeadCellsMultiplayerX.Client.Guest.WorldX.Remote
 
             return result;
         }
-
-        private static Level? ResolveLevel(Game game, string levelId, int subLevelIndex)
-        {
-            var current = game.curLevel;
-            if (Matches(current, levelId, subLevelIndex))
-                return current;
-
-            var subLevels = game.subLevels;
-            if (subLevels == null) return null;
-
-            for (int i = 0; i < subLevels.length; i++)
-            {
-                var level = AffectCodec.ToObject<Level>(subLevels.getDyn(i));
-                if (Matches(level, levelId, subLevelIndex))
-                    return level;
-            }
-
-            return null;
-        }
-
-        private static bool Matches(Level? level, string levelId, int subLevelIndex)
-            => level != null
-            && (level.map?.id?.ToString() ?? string.Empty) == levelId
-            && level.GetSubLevelIndex() == subLevelIndex;
 
         private static string Key(Level level, int cx, int cy, int a)
             => $"{level.map?.id}#{level.GetSubLevelIndex()}|{cx}|{cy}|{a}";

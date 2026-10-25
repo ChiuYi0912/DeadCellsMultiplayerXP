@@ -22,5 +22,44 @@ namespace DeadCellsMultiplayerX.Utils
             }
             return subLevelId;
         }
+
+        /// <summary>
+        /// 按 level id 和子关卡索引查找本地 Level
+        /// </summary>
+        public static Level? ResolveLevel(
+            Game? game, string levelId, int subLevelIndex)
+        {
+            if (game == null) return null;
+
+            var current = game.curLevel;
+            if (Matches(current, levelId, subLevelIndex))
+                return current;
+
+            var subLevels = game.subLevels;
+            if (subLevels == null) return null;
+
+            for (int i = 0; i < subLevels.length; i++)
+            {
+                if (subLevels.getDyn(i) is Level level
+                    && Matches(level, levelId, subLevelIndex))
+                {
+                    return level;
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// 判断 Level 是否匹配 level id 和子关卡索引
+        /// </summary>
+        public static bool Matches(
+            Level? level, string levelId, int subLevelIndex)
+        {
+            if (level == null) return false;
+
+            return (level.map?.id?.ToString() ?? string.Empty) == levelId
+                && level.GetSubLevelIndex() == subLevelIndex;
+        }
     }
 }

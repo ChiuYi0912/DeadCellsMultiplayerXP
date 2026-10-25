@@ -39,12 +39,11 @@ namespace DeadCellsMultiplayerX.Common.Ghosts
         /// <summary>
         /// 创建一个未注册的隐形Hero
         /// </summary>
-        public static GhostHero? Create(Game? game, Level? level, string ownerGuid)
+        public static GhostHero? Create(Game? game, Level? level, string ownerGuid, bool isserver = false)
         {
             if (game == null || level == null) return null;
 
             var hero = new Beheaded(game);
-            // awake == false 时 init 只初始化 heroSignals 与三个管理器
             hero.init();
 
             // 使用set_level/set_team会注册实体 存档与队伍成员
@@ -58,10 +57,15 @@ namespace DeadCellsMultiplayerX.Common.Ghosts
 
             var ghost = new GhostHero(hero, ownerGuid);
             ghost.SyncLevel();
-            ghost.InitMinimalGraphics(game);
-            Logger.Information(
-                "GhostHero created: owner={Owner} level={Level}#{Sub}",
-                ownerGuid, ghost.LevelId, ghost.SubLevelIndex);
+
+            var reference = game.hero;
+            hero.initSprite(reference.spr.lib, reference.spr.groupName, null, null, null, false, null, null);
+
+            hero.visible = isserver;
+            hero.spr.visible = isserver;
+
+            Logger.Information("GhostHero created: owner={Owner} level={Level}#{Sub}", ownerGuid, ghost.LevelId, ghost.SubLevelIndex);
+
             return ghost;
         }
 
@@ -99,27 +103,6 @@ namespace DeadCellsMultiplayerX.Common.Ghosts
             opposing.push(b);
             Logger.Information(
                 "Team link repaired: {A} -> {B}", a.__uid, b.__uid);
-        }
-
-        private void InitMinimalGraphics(Game game)
-        {
-            var reference = game.hero;
-            if (reference?.spr == null)
-            {
-                Logger.Warning(
-                    "GhostHero {Owner}: reference hero sprite unavailable", OwnerGuid);
-                return;
-            }
-
-            Hero.initSprite(
-                reference.spr.lib,
-                reference.spr.groupName,
-                null, null, null, false, null, null);
-
-            if (Hero.spr != null)
-                Hero.spr.visible = false;
-
-            Hero.visible = false;
         }
 
         public void SyncLevel()

@@ -138,13 +138,28 @@ namespace DeadCellsMultiplayerX.Client.Guest.WorldX.Remote
                     continue;
                 }
 
-                RemoteHeroMotion.Apply(mob, prev.Pos, next.Pos, alpha);
+                double prevX = prev.Pos.CX + prev.Pos.XR;
+                double prevY = prev.Pos.CY + prev.Pos.XY;
+                double nextX = next.Pos.CX + next.Pos.XR;
+                double nextY = next.Pos.CY + next.Pos.XY;
+
+                double x = prevX + (nextX - prevX) * alpha;
+                double y = prevY + (nextY - prevY) * alpha;
+
+                int cx = (int)Math.Floor(x);
+                int cy = (int)Math.Floor(y);
+
+                mob.setPosCase(cx, cy, x - cx, y - cy);
+                mob.dir = alpha < 0.5 ? prev.Pos.DIR : next.Pos.DIR;
+                mob.dx = 0;
+                mob.dy = 0;
+                mob.bdx = 0;
+                mob.bdy = 0;
+
                 RemoteMobAnimator.Apply(mob, prev.Anim, next.Anim, renderTimeSec);
 
-                // next 是更新的权威快照 空列表也代表服务端已清空
-                // affect 使用同步时间校准 不能用落后的动画插值时间
-                affectState.ApplySnapshot(
-                    netId, mob, next.Affects ?? prev.Affects, nowSec);
+                // 同步affect
+                affectState.ApplySnapshot(netId, mob, next.Affects ?? prev.Affects, nowSec);
 
                 int life = (int)Math.Round(prev.Life + (next.Life - prev.Life) * alpha);
                 mob.life = life;
