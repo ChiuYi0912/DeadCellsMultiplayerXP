@@ -21,9 +21,24 @@ namespace DeadCellsMultiplayerX.Common.Ghosts
     {
         private static readonly ILogger Logger = Log.ForContext("SourceContext", "GhostActions");
 
+        /// <summary>
+        /// 客户端对应的服务端hero实例
+        /// </summary>
         private readonly Hero hero;
+
+        /// <summary>
+        /// 客户id
+        /// </summary>
         private readonly string ownerGuid;
+
+        /// <summary>
+        /// 记录客户释放的技能
+        /// </summary>
         private readonly string?[] activeSignatures = new string?[2];
+
+        /// <summary>
+        /// 记录客户释放的武器
+        /// </summary>
         private readonly string?[] weaponSignatures = new string?[2];
         private readonly Weapon?[] weapons = new Weapon?[2];
 
@@ -35,84 +50,94 @@ namespace DeadCellsMultiplayerX.Common.Ghosts
 
         #region Loadout
 
-        private bool TryPrepare(
-            int slot,
-            ItemRef? snapshot,
-            InventItemKind.Indexes kind,
-            string?[] signatures,
-            out InventItem? item,
-            out bool changed)
+        /// <summary>
+        /// 准备对应客户端hero装备的技能以及武器
+        /// </summary>
+        /// <param name="slot">武器的posID,使用<see cref="Inventory.getActiveOn"/>即可装备对应武器池中的道具</param>
+        /// <param name="snapshot">快照</param>
+        /// <param name="kind">物品类型</param>
+        /// <param name="signatures">用于写入这次的签名</param>
+        /// <param name="item">out 对应物品实例,用于释放这次动作</param>
+        /// <param name="changed"></param>
+        /// <returns></returns>
+        private bool TryPrepare(int slot, ItemRef? snapshot, InventItemKind.Indexes kind,
+                    string?[] signatures, out InventItem? item, out bool changed)
         {
             item = null;
             changed = false;
 
             if (snapshot == null || string.IsNullOrEmpty(snapshot.ItemId)) return false;
-            if (slot is < 0 or > 1) return false;
+            if (slot is < 0 or > 1) return false; //不接受两次连续的攻击
+
 
             string signature = Signature(snapshot);
             var existing = GetEquipped(slot, kind);
 
             if (signatures[slot] == signature && existing != null)
             {
-                // 同一物品不重建 保留冷却/弹药状态
+                // 签名一致不重建
                 item = existing;
                 return true;
             }
 
-            try
+            //必须在对应cdb中存在
+            if (dc.Data.Class.item.byId.get(snapshot.ItemId.AsHaxeString()) == null)
             {
-                if (dc.Data.Class.item.byId.get(snapshot.ItemId.AsHaxeString()) == null)
-                {
-                    Logger.Warning(
-                        "GhostActions {Owner}: unknown {Kind} item {ItemId}",
-                        ownerGuid, kind, snapshot.ItemId);
-                    return false;
-                }
-
-                var newItem = ItemCodec.Create(snapshot, kind);
-                newItem.posID = slot;
-
-                if (existing != null)
-                    hero.inventory.remove(existing);
-
-                hero.inventory.items.push(newItem);
-                signatures[slot] = signature;
-
-                item = newItem;
-                changed = true;
-
-                Logger.Debug(
-                    "GhostActions {Owner}: slot {Slot} {Kind} item {ItemId} lv{Level}",
-                    ownerGuid, slot, kind, snapshot.ItemId, snapshot.ItemLevel);
-                return true;
-            }
-            catch (Exception ex)
-            {
-                Logger.Error(ex,
-                    "GhostActions {Owner}: set slot {Slot} {Kind} item {ItemId} failed",
-                    ownerGuid, slot, kind, snapshot.ItemId);
+                Logger.Warning("GhostActions {Owner}: unknown {Kind} item {ItemId}", ownerGuid, kind, snapshot.ItemId);
                 return false;
             }
+
+            var newItem = ItemCodec.Create(snapshot, kind);
+            newItem.posID = slot;
+
+            if (existing != null)
+                hero.inventory.remove(existing);
+
+            hero.inventory.items.push(newItem);
+            signatures[slot] = signature;
+
+            item = newItem;
+            changed = true;
+
+            Logger.Debug(
+                "GhostActions {Owner}: slot {Slot} {Kind} item {ItemId} lv{Level}",
+                ownerGuid, slot, kind, snapshot.ItemId, snapshot.ItemLevel);
+            return true;
         }
 
+
+        /// <summary>
+        /// 装备客户端对应释放的武器技能
+        /// </summary>
+        /// <param name="slot">id</param>
+        /// <param name="kind">判断池</param>
+        /// <returns></returns>
         private InventItem? GetEquipped(int slot, InventItemKind.Indexes kind)
-        {
-            return kind == InventItemKind.Indexes.Active
-                ? hero.inventory.getActiveOn(slot)
-                : hero.inventory.getEquippedWeaponOn(slot);
-        }
+        => kind == InventItemKind.Indexes.Active
+        ? hero.inventory.getActiveOn(slot)
+        : hero.inventory.getEquippedWeaponOn(slot);
 
+
+        /// <summary>
+        /// 记录签名
+        /// </summary>
+        /// <param name="snapshot">客户端发送的itemref</param>
+        /// <returns></returns>
         private static string Signature(ItemRef snapshot)
-        {
-            return $"{snapshot.ItemId}|{snapshot.ItemLevel}|{snapshot.PermanentId}|" +
-                   $"{snapshot.Ammo}|{string.Join(',', snapshot.Affixes)}|" +
-                   string.Join(',', snapshot.InactiveAffixes);
-        }
+        => $"{snapshot.ItemId}|{snapshot.ItemLevel}|{snapshot.PermanentId}|"
+        + $"{snapshot.Ammo}|{string.Join(',', snapshot.Affixes)}|"
+        + string.Join(',', snapshot.InactiveAffixes);
 
         #endregion
 
         #region Skills
 
+        /// <summary>
+        /// 释放对应技能
+        /// </summary>
+        /// <param name="slot">posid</param>
+        /// <param name="snapshot">对应快照</param>
+        /// <returns></returns>
         public bool PrepareSkill(int slot, ItemRef? snapshot)
         {
             if (!TryPrepare(
@@ -123,8 +148,7 @@ namespace DeadCellsMultiplayerX.Common.Ghosts
             var active = GetActiveSkill(slot);
             if (active == null)
             {
-                Logger.Warning(
-                    "GhostActions {Owner}: skill slot {Slot} unavailable", ownerGuid, slot);
+                Logger.Warning("GhostActions {Owner}: skill slot {Slot} unavailable", ownerGuid, slot);
                 return false;
             }
 
@@ -134,51 +158,41 @@ namespace DeadCellsMultiplayerX.Common.Ghosts
             return true;
         }
 
+
+        /// <summary>
+        /// 用于判断技能是否准备好
+        /// </summary>
+        /// <param name="slot">item posid</param>
+        /// <returns>bool</returns>
         public bool IsSkillReady(int slot)
         {
             var skill = GetActiveSkill(slot)?.skill;
             if (skill == null) return false;
-
-            try
-            {
-                return skill.isReady();
-            }
-            catch (Exception ex)
-            {
-                Logger.Warning(ex,
-                    "GhostActions {Owner}: readiness check failed slot {Slot}",
-                    ownerGuid, slot);
-                return skill.coolDownF <= 0 && skill.chargeF <= 0;
-            }
+            return skill.isReady();
         }
 
+
+        /// <summary>
+        /// 获取item posid对应的实例
+        /// </summary>
+        /// <param name="slot"></param>
+        /// <returns>HeroActiveSkill || NULL</returns>
         public HeroActiveSkill? GetActiveSkill(int slot)
         {
-            try
-            {
-                var array = hero.activeSkillsManager?.activeSkills;
-                if (array == null || slot < 0 || slot >= array.length) return null;
+            var array = hero.activeSkillsManager.activeSkills;
+            if (array == null || slot < 0 || slot >= array.length) return null;
 
-                var value = array.getDyn(slot);
-                if (value is HeroActiveSkill typed) return typed;
-                return AffectCodec.ToObject<HeroActiveSkill>(value);
-            }
-            catch (Exception ex)
-            {
-                Logger.Warning(ex,
-                    "GhostActions {Owner}: get active skill {Slot} failed",
-                    ownerGuid, slot);
-                return null;
-            }
+            var value = array.getDyn(slot);
+            if (value is HeroActiveSkill typed) return typed;
+            return AffectCodec.ToObject<HeroActiveSkill>(value);
         }
 
         /// <summary>
-        /// 服务端权威释放 走完整 onActiveSkill
+        /// 服务端权威释放
         /// </summary>
         public bool CastSkill(int slot, double ratio)
         {
             var manager = hero.activeSkillsManager;
-            if (manager == null) return false;
 
             var before = Count();
             manager.onActiveSkill(slot, ratio);
@@ -188,7 +202,7 @@ namespace DeadCellsMultiplayerX.Common.Ghosts
         }
 
         /// <summary>
-        /// 客户端表现重放 跳过冷却/HUD/成就信号
+        /// 客户端表现重放
         /// </summary>
         public bool ReplaySkill(int slot)
         {
@@ -196,38 +210,25 @@ namespace DeadCellsMultiplayerX.Common.Ghosts
                 return false;
 
             var item = hero.inventory.getActiveOn(slot);
-            if (item == null)
-            {
-                Logger.Warning(
-                    "GhostActions {Owner}: replay slot {Slot} has no item",
-                    ownerGuid, slot);
-                return false;
-            }
 
             GetActiveSkill(slot)?.useActiveItem(item);
 
             var data = item._itemData;
-            if (data == null)
-            {
-                Logger.Warning(
-                    "GhostActions {Owner}: replay slot {Slot} itemData missing",
-                    ownerGuid, slot);
-                return false;
-            }
 
             var before = Count();
             switch (data.group)
             {
-                case 0:
+                case 0://释放放置技能
                     manager.spawnDeployedTrapSkill(slot, item, data);
                     break;
-                case 1:
+                case 1://释放手榴弹技能
                     manager.spawnGrenadeSkill(item, data);
                     break;
                 case 2:
                     LogReplaySkip(slot, "sidekick");
                     return true;
-                case 3:
+                case 3://释放能力技能
+
                     if (data.props.mob != null)
                     {
                         LogReplaySkip(slot, "pet");
@@ -277,20 +278,9 @@ namespace DeadCellsMultiplayerX.Common.Ghosts
             {
                 if (item == null) return false;
 
-                // 必须用工厂创建具体武器子类 基类 Weapon 的 onExecute 不会命中怪物
-                Weapon? weapon;
-                try
-                {
-                    weapon = Weapon.Class.create.Invoke(hero, item);
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warning(ex,
-                        "GhostActions {Owner}: create weapon {ItemId} failed",
-                        ownerGuid, item.kind.Index);
-                    return false;
-                }
+                Weapon? weapon = Weapon.Class.create.Invoke(hero, item);
 
+                //防止其中一位玩家使用模组武器
                 if (weapon == null)
                 {
                     Logger.Warning(
@@ -306,12 +296,14 @@ namespace DeadCellsMultiplayerX.Common.Ghosts
             return weapons[slot] != null;
         }
 
-        public Weapon? GetWeapon(int slot)
-            => slot is >= 0 and <= 1 ? weapons[slot] : null;
+        public Weapon? GetWeapon(int slot) => slot is >= 0 and <= 1 ? weapons[slot] : null;
 
         /// <summary>
         /// 重放一次武器连招段
         /// </summary>
+        /// <param name="slot">itemposid</param>
+        /// <param name="cycle">对应连段</param>
+        /// <returns>bool</returns>
         public bool UseWeapon(int slot, int cycle)
         {
             var weapon = weapons[slot];
@@ -320,8 +312,7 @@ namespace DeadCellsMultiplayerX.Common.Ghosts
             weapon.set_cycle(cycle);
 
             var before = Count();
-            bool ranged = weapon.isBow()
-                || weapon.item?.hasTag("Ranged".AsHaxeString()) == true;
+            bool ranged = weapon.isBow() || weapon.item?.hasTag("Ranged".AsHaxeString()) == true;
             var candidates = CaptureOpponents(weapon, slot, ranged);
 
             GhostReplayGuard.BeginVisualBatch();
@@ -329,12 +320,9 @@ namespace DeadCellsMultiplayerX.Common.Ghosts
             {
                 weapon._executeImpl(1.0);
 
-                // Ghost 不在 Level 注册，具体武器依赖的 TeamIterator 可能因为
-                // 首个敌对队伍为空而一个目标都遍历不到。这里对近战武器做一次
-                // 直接 hitFromWeapon 兜底；投射物武器交给自己的 Bullet/Area。
                 if (!ranged)
                 {
-                    ApplyFallbackHits(weapon, candidates, slot);
+                    FallbackHits(weapon, candidates, slot);
                 }
             }
             finally
@@ -354,11 +342,9 @@ namespace DeadCellsMultiplayerX.Common.Ghosts
             var level = hero._level;
             if (level == null) return result;
 
-            // 直接读 team.asMobs，跳开 teamHero.opposingTeams / TeamIterator
             CollectFromTeam(level.teamMob, weapon, result, seen);
             CollectFromTeam(level.teamProp, weapon, result, seen);
 
-            // 兜底扫一遍 entities，防止 Mob 不在 team.asMobs
             var entities = level.entities;
             if (entities != null)
             {
@@ -403,22 +389,17 @@ namespace DeadCellsMultiplayerX.Common.Ghosts
             HashSet<dc.en.Mob> seen)
         {
             if (mob == null || mob.destroyed || mob.life <= 0) return;
+
             if (!seen.Add(mob)) return;
+
             if (ReferenceEquals(mob._team, hero._team)) return;
 
-            try
-            {
-                if (!weapon.canHit(mob, null)) return;
-            }
-            catch
-            {
-                return;
-            }
+            if (!weapon.canHit(mob, null)) return;
 
             result.Add((mob, mob.life));
         }
 
-        private void ApplyFallbackHits(
+        private void FallbackHits(
             Weapon weapon,
             List<(dc.en.Mob Mob, int Life)> candidates,
             int slot)
@@ -434,24 +415,14 @@ namespace DeadCellsMultiplayerX.Common.Ghosts
                 if (GhostReplayGuard.WasVisualHit(mob)) continue;
                 if (!weapon.canHit(mob, null)) continue;
 
-                try
+                weapon.hitFromWeapon(mob, HaxeProxy.Runtime.Ref<int>.In(-1));
+                hits++;
+                if (hits > 0)
                 {
-                    weapon.hitFromWeapon(mob, HaxeProxy.Runtime.Ref<int>.In(-1));
-                    hits++;
+                    Logger.Verbose(
+                        "GhostHero weapon fallback: owner={Owner} slot={Slot} item={Item} hits={Hits}",
+                        ownerGuid, slot, weapon.item?.kind.Index, hits);
                 }
-                catch (Exception ex)
-                {
-                    Logger.Warning(ex,
-                        "GhostActions {Owner}: fallback hit slot {Slot} failed",
-                        ownerGuid, slot);
-                }
-            }
-
-            if (hits > 0)
-            {
-                Logger.Verbose(
-                    "GhostHero weapon fallback: owner={Owner} slot={Slot} item={Item} hits={Hits}",
-                    ownerGuid, slot, weapon.item?.kind.Index, hits);
             }
         }
 
@@ -474,6 +445,7 @@ namespace DeadCellsMultiplayerX.Common.Ghosts
         /// </summary>
         public void Tick(double dt)
         {
+            
         }
 
         public void Dispose()
@@ -503,18 +475,10 @@ namespace DeadCellsMultiplayerX.Common.Ghosts
             for (int i = powers.length - 1; i >= 0; i--)
             {
                 var power = AffectCodec.ToObject<dc.Power>(powers.getDyn(i));
-                if (power == null || power.destroyed) continue;
-                if (!ReferenceEquals(power.owner, hero)) continue;
+                if (power == null || power?.destroyed) continue;
+                if (!ReferenceEquals(power!.owner, hero)) continue;
 
-                try
-                {
-                    power.destroy();
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warning(ex,
-                        "GhostActions {Owner}: destroy power failed", ownerGuid);
-                }
+                power.destroy();
             }
         }
 
@@ -559,22 +523,8 @@ namespace DeadCellsMultiplayerX.Common.Ghosts
         public void DiagnoseWeapon(int slot)
         {
             var weapon = GetWeapon(slot);
-            if (weapon == null)
-            {
-                Logger.Information(
-                    "GhostHero weapon diag: owner={Owner} slot={Slot} weapon unavailable",
-                    ownerGuid, slot);
-                return;
-            }
 
             var team = hero._team;
-            if (team?.opponentMobsIterator == null)
-            {
-                Logger.Information(
-                    "GhostHero weapon diag: owner={Owner} slot={Slot} team unavailable",
-                    ownerGuid, slot);
-                return;
-            }
 
             int nearby = 0;
             int hittable = 0;
@@ -595,14 +545,7 @@ namespace DeadCellsMultiplayerX.Common.Ghosts
                 nearby++;
                 life += mob.life;
 
-                try
-                {
-                    if (weapon.canHit(mob, null)) hittable++;
-                }
-                catch
-                {
-                    // 诊断用
-                }
+                if (weapon!.canHit(mob, null)) hittable++;
             }
 
             Logger.Information(
