@@ -10,6 +10,7 @@ namespace DeadCellsMultiplayerX.Common.Data.Ghosts
     {
         ActiveSkill = 0,
         Weapon = 1,
+        Talisman = 2,
     }
 
     /// <summary>

@@ -1,5 +1,6 @@
 using System;
 using dc.en;
+using dc.tool;
 using dc.tool.hero;
 using dc.tool.hero.weap;
 using DeadCellsMultiplayerX.Common.Data.Ghosts;
@@ -33,12 +34,14 @@ namespace DeadCellsMultiplayerX.Client.Guest.Ghost
         {
             Hook_HeroActiveSkillsManager.onActiveSkill += OnActiveSkill;
             Hook_BeheadedWeaponsManager.onWeaponExecute += OnWeaponExecute;
+            Hook_Inventory.add += OnInventoryAdd;
         }
 
         public void Dispose()
         {
             Hook_HeroActiveSkillsManager.onActiveSkill -= OnActiveSkill;
             Hook_BeheadedWeaponsManager.onWeaponExecute -= OnWeaponExecute;
+            Hook_Inventory.add -= OnInventoryAdd;
         }
 
 
@@ -117,6 +120,38 @@ namespace DeadCellsMultiplayerX.Client.Guest.Ghost
                 hero, HeroActionKind.Weapon, slot,
                 ItemCodec.Collect(item),
                 1.0, cycle, cx, cy, xr, yr, dir, dx, dy);
+        }
+
+        /// <summary>
+        /// 上报本地切换后的项链
+        /// </summary>
+        private InventItem OnInventoryAdd(Hook_Inventory.orig_add orig, Inventory self, InventItem item)
+        {
+            var game = session.Game;
+            var hero = game?.hero;
+
+            bool isLocal = hero != null && ReferenceEquals(self, hero.inventory);
+
+            bool isTalisman = isLocal && item?.kind is InventItemKind.Talisman;
+
+            var result = orig(self, item);
+
+            if (!isTalisman) return result;
+
+            var talisman = hero!.inventory.hasTalisman()
+                ? hero.inventory.getTalisman()
+                : item;
+
+            if (talisman == null) return result;
+
+            SendHeroAction(
+                hero, HeroActionKind.Talisman, 0,
+                ItemCodec.Collect(talisman),
+                1.0, 0,
+                hero.cx, hero.cy, hero.xr, hero.yr,
+                hero.dir, hero.dx, hero.dy);
+
+            return result;
         }
 
 

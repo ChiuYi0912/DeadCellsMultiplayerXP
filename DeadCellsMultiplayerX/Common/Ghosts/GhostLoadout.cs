@@ -92,7 +92,10 @@ namespace DeadCellsMultiplayerX.Common.Ghosts
             Array.Clear(signatures);
         }
 
-        private static string Signature(ItemRef snapshot)
+        /// <summary>
+        /// 生成物品签名
+        /// </summary>
+        internal static string Signature(ItemRef snapshot)
             => $"{snapshot.ItemId}|{snapshot.ItemLevel}|{snapshot.PermanentId}|" +
                $"{snapshot.Ammo}|{string.Join(',', snapshot.Affixes)}|" +
                string.Join(',', snapshot.InactiveAffixes);

@@ -159,6 +159,15 @@ namespace DeadCellsMultiplayerX.Client.Guest.Ghost
                                 evt.CasterGuid, evt.Slot, evt.Item?.ItemId);
                         }
                         break;
+
+                    case HeroActionKind.Talisman:
+                        if (!ghost.Actions.ApplyTalisman(evt.Item))
+                        {
+                            Logger.Warning(
+                                "Talisman replay failed: caster={Caster} item={Item}",
+                                evt.CasterGuid, evt.Item?.ItemId);
+                        }
+                        break;
                 }
             }
         }

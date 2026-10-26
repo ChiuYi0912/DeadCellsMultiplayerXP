@@ -61,6 +61,11 @@ namespace DeadCellsMultiplayerX.Utils
             dyn.SubLevelIndex = e._level.GetSubLevelIndex();
             dyn.ChangeMask |= HeroDynamic.BitLevel;
 
+            var inventory = ((Hero)e).inventory;
+            spawn.Talisman = inventory.hasTalisman()
+                ? ItemCodec.Collect(inventory.getTalisman())
+                : null;
+
             if (e.spr != null)
             {
                 dyn.Pos = new PosVector(

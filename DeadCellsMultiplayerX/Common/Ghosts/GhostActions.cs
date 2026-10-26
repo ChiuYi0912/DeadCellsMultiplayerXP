@@ -22,6 +22,11 @@ namespace DeadCellsMultiplayerX.Common.Ghosts
         private readonly GhostWeapons weapons;
 
         /// <summary>
+        /// 项链装备系统
+        /// </summary>
+        private readonly GhostTalismans talismans;
+
+        /// <summary>
         /// 为了安全管理关卡切换时Null引用
         /// </summary>
         private bool disposed;
@@ -34,8 +39,10 @@ namespace DeadCellsMultiplayerX.Common.Ghosts
             var context = new GhostActionContext(hero, ownerGuid);
             skills = new GhostSkills(context);
             weapons = new GhostWeapons(context);
+            talismans = new GhostTalismans(context);
         }
 
+        #region Tool
         /// <summary>
         /// 从当前hero的装备栏获取对应武器
         /// </summary>
@@ -49,6 +56,13 @@ namespace DeadCellsMultiplayerX.Common.Ghosts
         /// <param name="slot">1或0 对应技能栏<</param>
         /// <returns></returns>
         public HeroActiveSkill? GetActiveSkill(int slot) => skills.GetActive(slot);
+
+        /// <summary>
+        /// 获取当前项链
+        /// </summary>
+        public InventItem? GetTalisman() => talismans.Get();
+
+        #endregion
 
         #region Skills
 
@@ -124,6 +138,21 @@ namespace DeadCellsMultiplayerX.Common.Ghosts
 
         #endregion
 
+        #region Talismans
+
+        /// <summary>
+        /// 装备或清除项链
+        /// </summary>
+        /// <param name="snapshot">项链快照；null 表示清除</param>
+        /// <returns>bool 是否应用成功</returns>
+        public bool ApplyTalisman(ItemRef? snapshot)
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            return talismans.Apply(snapshot);
+        }
+
+        #endregion
+
         #region Lifecycle
 
         public void Tick(double dt)
@@ -132,6 +161,7 @@ namespace DeadCellsMultiplayerX.Common.Ghosts
 
             skills.Tick(dt);
             weapons.Tick(dt);
+            talismans.Tick(dt);
         }
 
         public void Dispose()
@@ -144,7 +174,14 @@ namespace DeadCellsMultiplayerX.Common.Ghosts
             }
             finally
             {
-                weapons.Dispose();
+                try
+                {
+                    weapons.Dispose();
+                }
+                finally
+                {
+                    talismans.Dispose();
+                }
             }
         }
 

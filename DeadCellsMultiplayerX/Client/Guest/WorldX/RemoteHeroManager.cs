@@ -83,6 +83,8 @@ namespace DeadCellsMultiplayerX.Client.Guest.WorldX
                     if (spawn == null || spawn.GUID == localGuid) continue;
                     if (heroes.TryGetValue(spawn.GUID, out var existing))
                         existing.ApplySpawn(spawn);
+
+                    PushGhostTalisman(spawn);
                 }
             }
 
@@ -137,6 +139,9 @@ namespace DeadCellsMultiplayerX.Client.Guest.WorldX
                     var currentLevel = session.Game?.curLevel;
                     if (currentLevel != null)
                         remoteWorld.Ghosts.Ensure(state.GUID, currentLevel);
+
+                    if (frames.TryGetSpawn(state.GUID, out var stateSpawn))
+                        PushGhostTalisman(stateSpawn);
 
                     hero.LevelId = state.LevelId;
                     hero.SubLevelIndex = state.SubLevelIndex;
@@ -205,6 +210,18 @@ namespace DeadCellsMultiplayerX.Client.Guest.WorldX
         }
 
         /// <summary>
+        /// 把客户端静态数据中的项链应用到对应GhostHero
+        /// </summary>
+        private void PushGhostTalisman(HeroSpawn spawn)
+        {
+            if (spawn == null) return;
+            if (!remoteWorld.Ghosts.TryGet(spawn.GUID, out var ghost))
+                return;
+
+            ghost.Actions.ApplyTalisman(spawn.Talisman);
+        }
+
+        /// <summary>
         /// 创建客户实体
         /// </summary>
         /// <param name="spawn">客户玩家显示数据</param>
@@ -219,7 +236,9 @@ namespace DeadCellsMultiplayerX.Client.Guest.WorldX
             hero.init();
             hero.ApplySpawn(spawn);
             heroes[spawn.GUID] = hero;
-            remoteWorld.Ghosts.Ensure(spawn.GUID, level);
+
+            var ghost = remoteWorld.Ghosts.Ensure(spawn.GUID, level);
+            ghost?.Actions.ApplyTalisman(spawn.Talisman);
 
             // 直接用触发创建的新关卡状态摆放,避免用旧关卡插值坐标
             hero.SnapToState(state.LevelId, state.SubLevelIndex, state.Pos);

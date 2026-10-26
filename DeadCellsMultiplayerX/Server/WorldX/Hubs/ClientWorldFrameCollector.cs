@@ -328,6 +328,22 @@ namespace DeadCellsMultiplayerX.Server.WorldX.Hubs
             return false;
         }
 
+        /// <summary>
+        /// 获取指定客户端最新的静态数据
+        /// </summary>
+        public bool TryGetHeroSpawn(string guid, out HeroSpawn spawn)
+        {
+            if (channels.TryGetValue(guid, out var channel)
+                && channel.LastSpawn != null)
+            {
+                spawn = channel.LastSpawn;
+                return true;
+            }
+
+            spawn = null!;
+            return false;
+        }
+
         public IReadOnlyCollection<HeroDynamic> GetActiveHeroDynamics()
         {
             var result = new List<HeroDynamic>();

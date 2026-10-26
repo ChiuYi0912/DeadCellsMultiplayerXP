@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using DeadCellsMultiplayerX.Common.Data.Ghosts;
 using MessagePack;
 
 namespace DeadCellsMultiplayerX.Common.Data.Snapshot
@@ -57,6 +58,11 @@ namespace DeadCellsMultiplayerX.Common.Data.Snapshot
         /// </summary>
         [Key(8)] public uint Version { get; set; }
 
+        /// <summary>
+        /// 当前项链
+        /// </summary>
+        [Key(9)] public ItemRef? Talisman { get; set; }
+
 
         /// <summary>
         /// 判断静态部分是否变化，用于决定是否重发 Spawned
@@ -71,7 +77,32 @@ namespace DeadCellsMultiplayerX.Common.Data.Snapshot
                 && ColorMapSkin == o.ColorMapSkin
                 && SubLevelId == o.SubLevelId
                 && SpriteSame(MainSprite, o.MainSprite)
-                && GlowSame(GlowData, o.GlowData);
+                && GlowSame(GlowData, o.GlowData)
+                && ItemRefSame(Talisman, o.Talisman);
+        }
+
+        private static bool ItemRefSame(ItemRef? a, ItemRef? b)
+        {
+            if (ReferenceEquals(a, b)) return true;
+            if (a == null || b == null) return false;
+
+            return a.Kind == b.Kind
+                && a.ItemId == b.ItemId
+                && a.ItemLevel == b.ItemLevel
+                && a.PosID == b.PosID
+                && a.PermanentId == b.PermanentId
+                && a.Ammo == b.Ammo
+                && ListSame(a.Affixes, b.Affixes)
+                && ListSame(a.InactiveAffixes, b.InactiveAffixes);
+        }
+
+        private static bool ListSame(
+            List<string>? a, List<string>? b)
+        {
+            if (ReferenceEquals(a, b)) return true;
+            if (a == null || b == null) return false;
+
+            return a.SequenceEqual(b);
         }
 
         private static bool SpriteSame(SpriteInfo a, SpriteInfo b)

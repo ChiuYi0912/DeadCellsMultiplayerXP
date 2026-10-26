@@ -17,6 +17,7 @@ namespace DeadCellsMultiplayerX.Server.WorldX.Ghosts
         private const double MaxCastDistanceSq = 48.0 * 48.0;
         private const long MinSkillIntervalMs = 50;
         private const long MinWeaponIntervalMs = 25;
+        private const long MinTalismanIntervalMs = 50;
 
         /// <summary>
         /// 客户端上报三系等级的上限
@@ -55,6 +56,7 @@ namespace DeadCellsMultiplayerX.Server.WorldX.Ghosts
         private readonly Dictionary<string, GhostHero> ghosts = [];
         private readonly Dictionary<string, long> lastActionIds = [];
         private readonly Dictionary<string, long> lastActionMs = [];
+        private readonly Dictionary<string, uint> appliedSpawnVersions = [];
         private readonly List<HeroActionEvent> pending = [];
 
         private int epoch = -1;
@@ -81,6 +83,7 @@ namespace DeadCellsMultiplayerX.Server.WorldX.Ghosts
             ghosts.Clear();
             lastActionIds.Clear();
             lastActionMs.Clear();
+            appliedSpawnVersions.Clear();
             pending.Clear();
         }
 
@@ -94,6 +97,8 @@ namespace DeadCellsMultiplayerX.Server.WorldX.Ghosts
             lastActionIds.Remove(guid);
             lastActionMs.Remove(guid);
             lastActionMs.Remove(WeaponKey(guid));
+            lastActionMs.Remove(TalismanKey(guid));
+            appliedSpawnVersions.Remove(guid);
         }
 
         /// <summary>
@@ -124,6 +129,8 @@ namespace DeadCellsMultiplayerX.Server.WorldX.Ghosts
             if (string.IsNullOrEmpty(senderGuid) || request == null) return null;
             if (epoch < 0 || request.Epoch != epoch) return null;
             if (request.Slot is < 0 or > 1) return null;
+            if (request.Kind == HeroActionKind.Talisman && request.Slot != 0)
+                return null;
             if (request.Item == null || string.IsNullOrEmpty(request.Item.ItemId)) return null;
             if (!double.IsFinite(request.Ratio)) return null;
             if (request.ActionId <= 0) return null;
@@ -160,12 +167,18 @@ namespace DeadCellsMultiplayerX.Server.WorldX.Ghosts
             }
 
             long now = session.CurrentTimeStamp;
-            string rateKey = request.Kind == HeroActionKind.Weapon
-                ? WeaponKey(senderGuid)
-                : senderGuid;
-            long interval = request.Kind == HeroActionKind.Weapon
-                ? MinWeaponIntervalMs
-                : MinSkillIntervalMs;
+            string rateKey = request.Kind switch
+            {
+                HeroActionKind.Weapon => WeaponKey(senderGuid),
+                HeroActionKind.Talisman => TalismanKey(senderGuid),
+                _ => senderGuid,
+            };
+            long interval = request.Kind switch
+            {
+                HeroActionKind.Weapon => MinWeaponIntervalMs,
+                HeroActionKind.Talisman => MinTalismanIntervalMs,
+                _ => MinSkillIntervalMs,
+            };
 
             if (lastActionMs.TryGetValue(rateKey, out long last)
                 && now - last < interval)
@@ -205,6 +218,8 @@ namespace DeadCellsMultiplayerX.Server.WorldX.Ghosts
                 action.Ghost.SetTiers(brutality, survival, tactic);
             }
 
+            ApplySpawnTalisman(action.Ghost);
+
             switch (request.Kind)
             {
                 case HeroActionKind.ActiveSkill:
@@ -212,6 +227,9 @@ namespace DeadCellsMultiplayerX.Server.WorldX.Ghosts
                     break;
                 case HeroActionKind.Weapon:
                     ExecuteWeapon(action);
+                    break;
+                case HeroActionKind.Talisman:
+                    ExecuteTalisman(action);
                     break;
             }
         }
@@ -262,6 +280,29 @@ namespace DeadCellsMultiplayerX.Server.WorldX.Ghosts
                 "Weapon use accepted: guid={Guid} slot={Slot} item={Item} cycle={Cycle} action={ActionId}",
                 ghost.OwnerGuid, request.Slot, request.Item.ItemId,
                 request.Cycle, request.ActionId);
+        }
+
+        /// <summary>
+        /// 服务端装备项链
+        /// </summary>
+        private void ExecuteTalisman(ValidatedAction action)
+        {
+            var request = action.Request;
+            var ghost = action.Ghost;
+
+            if (!ghost.Actions.ApplyTalisman(request.Item))
+            {
+                Logger.Warning(
+                    "Talisman rejected: guid={Guid} item={Item} action={ActionId}",
+                    ghost.OwnerGuid, request.Item.ItemId, request.ActionId);
+                return;
+            }
+
+            pending.Add(BuildEvent(action));
+
+            Logger.Information(
+                "Talisman accepted: guid={Guid} item={Item} action={ActionId}",
+                ghost.OwnerGuid, request.Item.ItemId, request.ActionId);
         }
 
         /// <summary>
@@ -334,15 +375,42 @@ namespace DeadCellsMultiplayerX.Server.WorldX.Ghosts
 
                 ghost.Dispose();
                 ghosts.Remove(guid);
+                appliedSpawnVersions.Remove(guid);
             }
 
             ghost = GhostHero.Create(game, level, guid, true);
             if (ghost == null) return null;
 
             ghosts[guid] = ghost;
+            ApplySpawnTalisman(ghost);
             return ghost;
         }
 
+        /// <summary>
+        /// 用客户端最新 spawn 中的项链同步所有 GhostHero
+        /// </summary>
+        public void SyncTalismans()
+        {
+            foreach (var ghost in ghosts.Values)
+                ApplySpawnTalisman(ghost);
+        }
+
+        private void ApplySpawnTalisman(GhostHero ghost)
+        {
+            if (!session.ClientFrames.TryGetHeroSpawn(
+                    ghost.OwnerGuid, out var spawn))
+                return;
+
+            if (appliedSpawnVersions.TryGetValue(
+                    ghost.OwnerGuid, out uint version)
+                && version == spawn.Version)
+                return;
+
+            ghost.Actions.ApplyTalisman(spawn.Talisman);
+            appliedSpawnVersions[ghost.OwnerGuid] = spawn.Version;
+        }
+
         private static string WeaponKey(string guid) => guid + ":weapon";
+        private static string TalismanKey(string guid) => guid + ":talisman";
     }
 }

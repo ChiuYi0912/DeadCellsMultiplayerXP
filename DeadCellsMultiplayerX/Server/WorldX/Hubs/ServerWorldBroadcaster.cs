@@ -197,6 +197,8 @@ namespace DeadCellsMultiplayerX.Server.WorldX.Hubs
             Sequence++;
             BroadcastFrames++;
 
+            ghosts.SyncTalismans();
+
             var mobs = mobPublisher.Collect(serverTimeMs);
 
             var frame = new WorldFrame
