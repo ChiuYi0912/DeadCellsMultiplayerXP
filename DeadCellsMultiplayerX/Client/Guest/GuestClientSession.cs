@@ -65,6 +65,28 @@ namespace DeadCellsMultiplayerX.Client.Guest
         internal RemoteWorld? RemoteWorld => remoteWorld;
         private RemoteWorld? remoteWorld;
         private LocalGhostCapture? localCapture;
+        private LocalCombatPrediction? prediction;
+        private GhostCombatResolver? ghostCombat;
+        private CombatDeathGate? deathGate;
+
+        /// <summary>
+        /// 本地武器命中预测
+        /// </summary>
+        internal LocalCombatPrediction Prediction => prediction
+            ?? throw new InvalidOperationException("Combat prediction not initialized.");
+
+        /// <summary>
+        /// 其他玩家 ghost 武器命中的帧结算
+        /// </summary>
+        internal GhostCombatResolver GhostCombat => ghostCombat
+            ?? throw new InvalidOperationException("Ghost combat not initialized.");
+
+        /// <summary>
+        /// 允许客户端 mob 执行死亡的闸门
+        /// </summary>
+        internal CombatDeathGate DeathGate => deathGate
+            ?? throw new InvalidOperationException("Death gate not initialized.");
+
         public volatile bool serverDrivenTransition = false;
         private readonly ClientWorldSendBuffer sendBuffer = new();
         private long lastServerFrameTimeMs = long.MinValue;
@@ -130,6 +152,8 @@ namespace DeadCellsMultiplayerX.Client.Guest
 
         private void InitWorld()
         {
+            prediction?.Clear();
+            deathGate?.Clear();
             remoteWorld?.Dispose();
             remoteWorld = new RemoteWorld(this, client.Guid);
             sendBuffer.ResetLocalHeroState();
@@ -137,6 +161,10 @@ namespace DeadCellsMultiplayerX.Client.Guest
 
         private void InitHooks()
         {
+            deathGate = new CombatDeathGate();
+            ghostCombat = new GhostCombatResolver(this);
+            prediction = new LocalCombatPrediction(this);
+
             Hook__Save.save += Hook__Save_save;
             Hook__File.getBytes += Hook__File_getBytes;
 
@@ -224,7 +252,7 @@ namespace DeadCellsMultiplayerX.Client.Guest
 
 
         /// <summary>
-        /// 客户端对 puppet 的命中只触发表现
+        /// 客户端对 mob 的命中只触发表现
         /// 跳过 attackTarget.applyHit 与 onHit 回调 避免本地扣血/死亡/affect
         /// 服务端快照是 mob 状态唯一权威
         /// </summary>
@@ -239,33 +267,78 @@ namespace DeadCellsMultiplayerX.Client.Guest
                 return;
             }
 
-            if (replayVisualDepth == 0
-                && atk != null
-                && atk.isSuccess())
+            if (replayVisualDepth != 0
+                || atk == null
+                || !atk.isSuccess())
             {
-                GhostReplayGuard.MarkVisualHit(mob);
-
-                Logger.Verbose(
-                    "Puppet hit visual: target={Target} dmg={Dmg} hit={Hit}",
-                    mob.type, atk.finalDmg, atk.hitResult);
-
-                replayVisualDepth++;
-                try
-                {
-                    // 受击动画/音效/血花/伤害跳字都在 Mob.onDamage
-                    mob.onDamage(atk);
-                }
-                catch (Exception ex)
-                {
-                    // 表现失败不能中断世界帧应用
-                    Logger.Warning(ex,
-                        "Puppet onDamage failed: target={Target}", mob.type);
-                }
-                finally
-                {
-                    replayVisualDepth--;
-                }
+                return;
             }
+
+            var receiver = remoteWorld.Mobs.Receiver;
+
+            if (receiver.TryGetNetId(mob, out uint netId)
+                && Prediction.IsPredictedDead(netId))
+            {
+                return;
+            }
+
+            GhostReplayGuard.MarkVisualHit(mob);
+
+            // ghost 的服务端事件已经到达，使用同帧状态结算
+            if (GhostCombat.TryHandleHit(atk, mob))
+                return;
+
+            // 本地 客户 致死走真实 orig，非致死走轻量预测
+            if (Prediction.TryHandleLocalHit(
+                    atk, mob,
+                    () => orig(atk, target),
+                    () => PlayHitVisual(atk, mob)))
+            {
+                return;
+            }
+
+            PlayHitVisual(atk, mob);
+        }
+
+        /// <summary>
+        /// 播放远端 mob 的受击表现，避免 Mob.onDamage 内部递归
+        /// </summary>
+        internal void PlayHitVisual(AttackData atk, Mob mob)
+        {
+            if (mob == null || mob.destroyed || replayVisualDepth != 0)
+                return;
+
+            Logger.Verbose(
+                "Puppet hit visual: target={Target} dmg={Dmg} hit={Hit}",
+                mob.type, atk.finalDmg, atk.hitResult);
+
+            replayVisualDepth++;
+            try
+            {
+                mob.onDamage(atk);
+            }
+            finally
+            {
+                replayVisualDepth--;
+            }
+        }
+
+        /// <summary>
+        /// 强制客户端 mob 执行原生死亡
+        /// </summary>
+        internal void ForceNativeDeath(Mob mob)
+        {
+            if (mob == null || mob.destroyed)
+                return;
+
+            using (DeathGate.Allow(mob))
+            {
+                mob.life = 0;
+                mob.onDie();
+            }
+
+            if (!mob.destroyed)
+                mob.destroy();
         }
 
         private void Hook_AttackUtils_postHitResultUpdate(
@@ -321,7 +394,14 @@ namespace DeadCellsMultiplayerX.Client.Guest
 
         private void Hook_Mob_onDie(Hook_Mob.orig_onDie orig, Mob self)
         {
-            // 远端怪物与正在清理的本地怪物不执行本地死亡掉落与存档逻辑
+            // 本地预测由服务端确认死亡时允许远端 mob 执行死亡
+            if (DeathGate.IsAllowed(self))
+            {
+                orig(self);
+                return;
+            }
+
+            // 其余远端怪物与正在清理的本地怪物不执行本地死亡掉落
             if (remoteWorld?.IsRemoteMob(self) == true
                 || remoteWorld?.IsDeathSuppressed(self) == true)
             {
@@ -392,8 +472,12 @@ namespace DeadCellsMultiplayerX.Client.Guest
         {
             base.MyDispose();
 
+            prediction?.Clear();
+            deathGate?.Clear();
+
             remoteWorld?.Dispose();
             remoteWorld = null;
+            prediction = null;
             sendBuffer.Clear();
 
             serverStream?.Dispose();

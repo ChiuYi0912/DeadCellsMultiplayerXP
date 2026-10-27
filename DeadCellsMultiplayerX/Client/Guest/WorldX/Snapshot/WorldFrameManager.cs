@@ -19,7 +19,8 @@ namespace DeadCellsMultiplayerX.Client.Guest.WorldX.Snapshot
         /// <summary>
         /// 渲染插值延迟秒数
         /// </summary>
-        private const double InterpolationDelaySeconds = 0.1;
+        private const double InterpolationDelaySeconds =
+            SnapshotTiming.InterpolationDelaySeconds;
 
         /// <summary>
         /// 乱序待处理帧上限
@@ -423,15 +424,9 @@ namespace DeadCellsMultiplayerX.Client.Guest.WorldX.Snapshot
                 FromSequence = missingFrom,
                 ToSequence = Math.Min(missingTo, missingFrom + MaxNackRange - 1),
             };
-            try
-            {
-                nackTask = session.Server.RequestWorldFrames(request);
-            }
-            catch (Exception ex)
-            {
-                Logger.Warning(ex, "RequestWorldFrames failed");
-                nackTask = null;
-            }
+            
+
+            nackTask = session.Server.RequestWorldFrames(request);
         }
 
         /// <summary>

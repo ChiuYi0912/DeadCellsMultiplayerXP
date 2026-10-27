@@ -57,9 +57,13 @@ namespace DeadCellsMultiplayerX.Client.Guest.WorldX.Remote
             if (frame.Epoch != lastEpoch)
             {
                 lastEpoch = frame.Epoch;
+                session.Prediction.Clear();
                 receiver.Clear();
                 affectState.Reset();
             }
+
+            // 必须在 receiver.Remove 之前确认，避免预测死亡的 mob 已被移除
+            session.Prediction.ConfirmFrame(frame);
 
             receiver.RetryPending();
 
@@ -69,10 +73,17 @@ namespace DeadCellsMultiplayerX.Client.Guest.WorldX.Remote
                     receiver.OnSpawned(spawn);
             }
 
+            // 服务端帧已给出 Life<=0 但还没进 DespawnedMobs,补充死亡
+            ForceFrameDeadMobs(frame);
+
+            // 本地预测致死后服务端仍存活,使用 NetId 重建
+            RepairDestroyedMobs(frame);
+
             if (frame.DespawnedMobs != null)
             {
                 foreach (var netId in frame.DespawnedMobs)
                 {
+                    session.Prediction.ConfirmDespawn(netId);
                     receiver.Remove(netId);
                     affectState.Remove(netId);
                 }
@@ -100,6 +111,7 @@ namespace DeadCellsMultiplayerX.Client.Guest.WorldX.Remote
                 if (!receiver.TryGetNetId(mob, out var netId)) continue;
                 if (!frameNetIds.Contains(netId))
                 {
+                    session.Prediction.ConfirmDespawn(netId);
                     receiver.Remove(netId);
                     affectState.Remove(netId);
                 }
@@ -120,6 +132,7 @@ namespace DeadCellsMultiplayerX.Client.Guest.WorldX.Remote
         /// <param name="nowMs"></param>
         public void Tick(long nowMs)
         {
+            session.Prediction.Tick(nowMs);
             receiver.RetryPending();
 
             double nowSec = session.SyncedTimeMs / 1000.0;
@@ -161,14 +174,95 @@ namespace DeadCellsMultiplayerX.Client.Guest.WorldX.Remote
                 // 同步affect
                 affectState.ApplySnapshot(netId, mob, next.Affects ?? prev.Affects, nowSec);
 
-                int life = (int)Math.Round(prev.Life + (next.Life - prev.Life) * alpha);
+                int serverLife = (int)Math.Round(
+                    prev.Life + (next.Life - prev.Life) * alpha);
+                long renderTimeMs = (long)Math.Round(renderTimeSec * 1000);
+
+                int life = session.Prediction.ResolveLife(
+                    netId, serverLife, renderTimeMs);
+
                 mob.life = life;
                 mob.maxLife = next.MaxLife;
             }
         }
 
+        /// <summary>
+        /// 执行由服务端发送的mob死亡指令
+        /// </summary>
+        private void ForceFrameDeadMobs(WorldFrame frame)
+        {
+            if (frame.Mobs == null) return;
+
+            foreach (var dynamic in frame.Mobs)
+            {
+                if (dynamic == null || dynamic.Life > 0) continue;
+                if (receiver.Get(dynamic.NetId) is not { destroyed: false } mob)
+                    continue;
+
+                session.Prediction.ConfirmDespawn(dynamic.NetId);
+                session.ForceNativeDeath(mob);
+            }
+        }
+
+        /// <summary>
+        /// 预测错误时,需要客户端重建对应 mob
+        /// </summary>
+        private void RepairDestroyedMobs(WorldFrame frame)
+        {
+            if (frame.Mobs == null) return;
+
+            foreach (var dynamic in frame.Mobs)
+            {
+                if (dynamic == null || dynamic.Life <= 0) continue;
+
+                // 本地预测致死还未确认前，服务端旧帧仍可能显示存活
+                if (session.Prediction.HasPendingDeathPrediction(dynamic.NetId))
+                    continue;
+
+                if (!receiver.IsMissingOrDestroyed(dynamic.NetId)) continue;
+
+                if (receiver.TryRecreate(dynamic.NetId, out var mob)
+                    && mob != null)
+                {
+                    ApplyDynamicNow(dynamic, mob);
+                    continue;
+                }
+
+                // 重建失败但旧实体已销毁,清掉旧映射，触发后续 resync 恢复
+                if (receiver.Get(dynamic.NetId) is { destroyed: true })
+                    receiver.Remove(dynamic.NetId);
+            }
+        }
+
+        private void ApplyDynamicNow(MobDynamic dynamic, Mob mob)
+        {
+            double x = dynamic.Pos.CX + dynamic.Pos.XR;
+            double y = dynamic.Pos.CY + dynamic.Pos.XY;
+
+            int cx = (int)Math.Floor(x);
+            int cy = (int)Math.Floor(y);
+
+            mob.setPosCase(cx, cy, x - cx, y - cy);
+            mob.dir = dynamic.Pos.DIR;
+            mob.dx = dynamic.Pos.DX;
+            mob.dy = dynamic.Pos.DY;
+            mob.bdx = dynamic.Pos.BDX;
+            mob.bdy = dynamic.Pos.BDY;
+
+            mob.life = dynamic.Life;
+            mob.maxLife = dynamic.MaxLife;
+
+            double nowSec = session.SyncedTimeMs / 1000.0;
+            RemoteMobAnimator.Apply(mob, dynamic.Anim, dynamic.Anim, nowSec);
+            affectState.ApplySnapshot(
+                dynamic.NetId, mob, dynamic.Affects, nowSec);
+
+            session.Prediction.ClearNetId(dynamic.NetId);
+        }
+
         public void Clear()
         {
+            session.Prediction.Clear();
             receiver.Clear();
             affectState.Reset();
         }

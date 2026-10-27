@@ -28,6 +28,8 @@ namespace DeadCellsMultiplayerX.Server.WorldX.Ghosts
                 world,
                 spawns,
                 session.ClientFrames,
+                session.MobRegistry,
+                session.MobPublisher.History,
                 () => session.CurrentTimeStamp,
                 () => Game.Class.ME);
         }

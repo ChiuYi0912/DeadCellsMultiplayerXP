@@ -114,12 +114,35 @@ namespace DeadCellsMultiplayerX.Client.Guest.Ghost
             double dy = hero.dy;
             int cycle = weapon!.get_cycle();
 
-            orig(self!, weapon);
+            int epoch = session.RemoteWorld?.Frames.Epoch ?? -1;
+            long token = epoch >= 0 ? session.Prediction.BeginWeapon() : 0;
+
+            try
+            {
+                orig(self!, weapon);
+            }
+            finally
+            {
+                if (token != 0)
+                    session.Prediction.EndWeapon();
+            }
+
+            // ActionId 和 epoch 在 orig 之后才确定
+            int sendEpoch = session.RemoteWorld?.Frames.Epoch ?? -1;
+            long actionId = 0;
+            if (sendEpoch >= 0)
+            {
+                actionId = ++nextActionId;
+
+                if (token != 0)
+                    session.Prediction.CommitWeapon(token, actionId);
+            }
 
             SendHeroAction(
                 hero, HeroActionKind.Weapon, slot,
                 ItemCodec.Collect(item),
-                1.0, cycle, cx, cy, xr, yr, dir, dx, dy);
+                1.0, cycle, cx, cy, xr, yr, dir, dx, dy,
+                sendEpoch, actionId);
         }
 
         /// <summary>
@@ -168,18 +191,20 @@ namespace DeadCellsMultiplayerX.Client.Guest.Ghost
             int cx, int cy,
             double xr, double yr,
             int dir,
-            double dx, double dy)
+            double dx, double dy,
+            int? epoch = null,
+            long? actionId = null)
         {
             var world = session.RemoteWorld;
             if (world == null) return;
 
-            int epoch = world.Frames.Epoch;
-            if (epoch < 0) return;
+            int currentEpoch = epoch ?? world.Frames.Epoch;
+            if (currentEpoch < 0) return;
 
             var request = new HeroAction
             {
-                Epoch = epoch,
-                ActionId = ++nextActionId,
+                Epoch = currentEpoch,
+                ActionId = actionId ?? ++nextActionId,
                 Kind = kind,
                 Slot = slot,
                 Item = item,

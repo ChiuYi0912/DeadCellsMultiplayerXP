@@ -151,12 +151,17 @@ namespace DeadCellsMultiplayerX.Client.Guest.Ghost
                         break;
 
                     case HeroActionKind.Weapon:
-                        if (!ghost.Actions.PrepareWeapon(evt.Slot, evt.Item)) continue;
-                        if (!ghost.Actions.UseWeapon(evt.Slot, evt.Cycle))
+                        using (session.GhostCombat.Begin(frame, evt))
                         {
-                            Logger.Warning(
-                                "Weapon replay failed: caster={Caster} slot={Slot} item={Item}",
-                                evt.CasterGuid, evt.Slot, evt.Item?.ItemId);
+                            if (!ghost.Actions.PrepareWeapon(evt.Slot, evt.Item))
+                                continue;
+
+                            if (!ghost.Actions.UseWeapon(evt.Slot, evt.Cycle))
+                            {
+                                Logger.Warning(
+                                    "Weapon replay failed: caster={Caster} slot={Slot} item={Item}",
+                                    evt.CasterGuid, evt.Slot, evt.Item?.ItemId);
+                            }
                         }
                         break;
 

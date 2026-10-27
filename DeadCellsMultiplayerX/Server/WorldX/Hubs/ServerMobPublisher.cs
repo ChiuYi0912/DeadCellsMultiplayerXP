@@ -39,11 +39,17 @@ namespace DeadCellsMultiplayerX.Server.WorldX.Hubs
         private static readonly ILogger Logger = Log.ForContext("SourceContext", "ServerMobPublisher");
 
         private readonly ServerMobRegistry registry;
+        private readonly ServerMobHistory history = new();
 
         public ServerMobPublisher(ServerMobRegistry registry)
         {
             this.registry = registry;
         }
+
+        /// <summary>
+        /// 20Hz mob 位置历史，供服务端武器命中回退使用
+        /// </summary>
+        public ServerMobHistory History => history;
 
         /// <summary>
         /// 采集本 tick 的生成 状态 与移除数据
@@ -91,6 +97,8 @@ namespace DeadCellsMultiplayerX.Server.WorldX.Hubs
 
             var removed = registry.DrainRemoved();
             result.Despawned.AddRange(removed);
+
+            history.Record(serverTimeMs, result.Mobs);
 
             return result;
         }

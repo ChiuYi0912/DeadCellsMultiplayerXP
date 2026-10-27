@@ -159,18 +159,38 @@ namespace DeadCellsMultiplayerX.Server.WorldX.Ghosts.Pipeline
     internal sealed class ExecutionStage : IActionStage
     {
         private readonly ActionExecutor executor;
+        private readonly MobRewind rewind;
 
-        public ExecutionStage(ActionExecutor executor)
+        public ExecutionStage(
+            ActionExecutor executor,
+            MobRewind rewind)
         {
             this.executor = executor;
+            this.rewind = rewind;
         }
 
         public StageResult Process(ActionContext context)
         {
-            return executor.TryExecute(
-                    context.Ghost!, context.Request!, context.Ratio)
-                ? StageResult.Continue
-                : StageResult.Reject(Rejection.ExecutionRejected);
+            var request = context.Request!;
+
+            IDisposable? scope = request.Kind == HeroActionKind.Weapon
+                ? rewind.Begin(
+                    context.Level!,
+                    request.ClientTimeMs,
+                    context.ServerTimeMs)
+                : null;
+
+            try
+            {
+                return executor.TryExecute(
+                        context.Ghost!, request, context.Ratio)
+                    ? StageResult.Continue
+                    : StageResult.Reject(Rejection.ExecutionRejected);
+            }
+            finally
+            {
+                scope?.Dispose();
+            }
         }
     }
 

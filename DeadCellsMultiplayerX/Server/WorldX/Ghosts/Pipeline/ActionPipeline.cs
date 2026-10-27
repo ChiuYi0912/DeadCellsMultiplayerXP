@@ -34,16 +34,19 @@ namespace DeadCellsMultiplayerX.Server.WorldX.Ghosts.Pipeline
             WorldState world,
             SpawnSynchronizer spawns,
             ClientWorldFrameCollector frames,
+            ServerMobRegistry registry,
+            ServerMobHistory history,
             Func<long> clock,
             Func<Game?> game)
         {
             var executor = ActionExecutor.CreateDefault();
+            var rewind = new MobRewind(registry, history);
 
             IActionStage[] stages =
             [
                 new AdmissionStage(world, frames, game),
                 new BindingStage(world, spawns),
-                new ExecutionStage(executor),
+                new ExecutionStage(executor, rewind),
                 new PublicationStage(world),
             ];
 

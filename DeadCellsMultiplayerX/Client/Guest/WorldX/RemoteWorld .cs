@@ -106,8 +106,8 @@ namespace DeadCellsMultiplayerX.Client.Guest.WorldX
         {
             heroes.ApplyFrame(frame, frames);
             areaAffects.ApplyFrame(frame);
-            mobs.ApplyFrame(frame);
             ghosts.ApplyFrame(frame);
+            mobs.ApplyFrame(frame);
         }
 
         protected override void MyDispose()

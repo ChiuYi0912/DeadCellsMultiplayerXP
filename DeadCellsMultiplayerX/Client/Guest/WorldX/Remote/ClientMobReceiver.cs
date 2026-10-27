@@ -56,6 +56,14 @@ namespace DeadCellsMultiplayerX.Client.Guest.WorldX.Remote
         public bool HasOrPending(uint netId)
             => mobs.ContainsKey(netId) || pendingSpawns.ContainsKey(netId);
 
+        public bool IsMissingOrDestroyed(uint netId)
+        {
+            if (mobs.TryGetValue(netId, out var mob))
+                return mob == null || mob.destroyed;
+
+            return pendingSpawns.ContainsKey(netId);
+        }
+
         /// <summary>
         /// 处理服务端发送的怪物生成数据
         /// </summary>
@@ -88,17 +96,43 @@ namespace DeadCellsMultiplayerX.Client.Guest.WorldX.Remote
             pendingSpawns.Remove(netId);
 
             if (!mobs.Remove(netId, out var mob))
+            {
+                session.Prediction.OnRemoved(netId);
                 return;
+            }
 
             if (mob != null)
             {
-                var atk = AttackUtils.Class.createFromHero(session.Game.hero, (object)999999, null);
-                atk.dmgType = new DamageType.Physical();
-                atk.addTag(18);
-                AttackUtils.Class.hit(atk, mob);
-
+                // 服务端确认死亡
+                session.ForceNativeDeath(mob);
                 netIds.Remove(mob);
             }
+
+            session.Prediction.OnRemoved(netId);
+        }
+
+        /// <summary>
+        /// 本地预测致死后,服务端确认仍存活时重建同一 NetId 的 mob
+        /// </summary>
+        public bool TryRecreate(uint netId, out Mob? mob)
+        {
+            mob = null;
+
+            mobs.TryGetValue(netId, out var existing);
+
+            if (existing != null && !existing.destroyed)
+                return false;
+
+            if (existing != null)
+                netIds.Remove(existing);
+
+            mobs.Remove(netId);
+
+            if (!pendingSpawns.TryGetValue(netId, out var spawn))
+                return false;
+
+            mob = TryCreate(spawn, recreate: true);
+            return mob != null;
         }
 
         /// <summary>
@@ -112,27 +146,29 @@ namespace DeadCellsMultiplayerX.Client.Guest.WorldX.Remote
             suppressedDeaths.Clear();
         }
 
-        private void TryCreate(MobSpawn spawn)
+        private Mob? TryCreate(MobSpawn spawn, bool recreate = false)
         {
-            if (spawn == null || mobs.ContainsKey(spawn.NetId)) return;
+            if (spawn == null || mobs.ContainsKey(spawn.NetId)) return null;
 
             var level = LevelUtils.ResolveLevel(
                 session.Game, spawn.LevelId, spawn.SubLevelIndex);
-            if (level == null) return;
+            if (level == null) return null;
 
             // 每个关卡第一次成功接收服务端怪物时 清掉本地加载的怪物防止重复
             string levelKey = LevelKey(spawn.LevelId, spawn.SubLevelIndex);
-            bool needsCleanup = !authoritativeLevels.Contains(levelKey);
+            bool needsCleanup = !recreate
+                && !authoritativeLevels.Contains(levelKey);
+
             if (needsCleanup)
                 ClearLocalLevelMobs(level);
 
             LevelMob? descriptor = DCMXSerializers.MessagePack.Deserialize<LevelMob>(spawn.EntityData);
 
-            if (descriptor == null) return;
+            if (descriptor == null) return null;
 
             Mob? mob = level.attachMob(descriptor);
 
-            if (mob == null) return;
+            if (mob == null) return null;
 
             mob.hasRepelling = false;
             mob.hasGravity = false;
@@ -149,6 +185,8 @@ namespace DeadCellsMultiplayerX.Client.Guest.WorldX.Remote
             Logger.Verbose(
                 "Mob spawned on client: netId={NetId} level={LevelId}#{SubLevelIndex}",
                 spawn.NetId, spawn.LevelId, spawn.SubLevelIndex);
+
+            return mob;
         }
 
         private void ClearCreatedMobs()
