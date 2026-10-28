@@ -31,6 +31,10 @@ namespace DeadCellsMultiplayerX.Client.Guest
         /// </summary>
         public Task SyncWorldFrame(WorldFrame frame);
 
+        /// <summary>
+        /// 服务端确认的 mob 命中 Ghost 事件
+        /// </summary>
+        public Task ApplyGhostHit(GhostHitEvent hit);
 
         /// <summary>
         /// 服务端请求补发缺失的客户端上传帧

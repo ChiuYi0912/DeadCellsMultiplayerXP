@@ -65,5 +65,10 @@ namespace DeadCellsMultiplayerX.Common.Data.Snapshot
         /// 服务端权威的动态关卡区域状态
         /// </summary>
         [Key(10)] public List<LevelAreaAffectState> AreaAffects { get; set; } = [];
+
+        /// <summary>
+        /// 本帧服务端判定的 mob 命中 Ghost 事件
+        /// </summary>
+        [Key(11)] public List<GhostHitEvent> GhostHits { get; set; } = [];
     }
 }

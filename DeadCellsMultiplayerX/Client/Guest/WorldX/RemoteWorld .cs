@@ -15,6 +15,11 @@ namespace DeadCellsMultiplayerX.Client.Guest.WorldX
     internal class RemoteWorld : DisposableEventReceiver
     {
         /// <summary>
+        /// 客户端 session
+        /// </summary>
+        private readonly GuestClientSession session;
+
+        /// <summary>
         /// 世界帧管理器，负责接收、应用和驱动世界帧
         /// </summary>
         private readonly WorldFrameManager frames;
@@ -51,6 +56,7 @@ namespace DeadCellsMultiplayerX.Client.Guest.WorldX
 
         public RemoteWorld(GuestClientSession session, string localGuid)
         {
+            this.session = session;
             this.localGuid = localGuid;
             frames = new WorldFrameManager(session, localGuid);
             mobs = new MobSyncManager(session, this, frames);
@@ -108,6 +114,7 @@ namespace DeadCellsMultiplayerX.Client.Guest.WorldX
             areaAffects.ApplyFrame(frame);
             ghosts.ApplyFrame(frame);
             mobs.ApplyFrame(frame);
+            session.GhostHits.ApplyFrame(frame);
         }
 
         protected override void MyDispose()

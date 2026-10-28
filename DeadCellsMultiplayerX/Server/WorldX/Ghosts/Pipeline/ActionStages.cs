@@ -135,7 +135,10 @@ namespace DeadCellsMultiplayerX.Server.WorldX.Ghosts.Pipeline
             var actor = context.Actor ?? world.GetOrCreate(context.SenderGuid);
 
             bool created = actor.EnsureGhost(
-                context.Game!, context.Level!);
+                context.Game!,
+                context.Level!,
+                context.Snapshot?.Pos?.CX ?? 0,
+                context.Snapshot?.Pos?.CY ?? 0);
 
             if (actor.Ghost == null)
                 return StageResult.Reject(Rejection.GhostUnavailable);

@@ -25,9 +25,19 @@ namespace DeadCellsMultiplayerX.Common.Ghosts
         public Beheaded Hero { get; }
 
         /// <summary>
+        /// 服务端 Ghost 使用的高生命
+        /// </summary>
+        private const int ServerLife = 1_000_000;
+
+        /// <summary>
         /// 客户端id
         /// </summary>
         public string OwnerGuid { get; }
+
+        /// <summary>
+        /// 是否由服务端创建
+        /// </summary>
+        public bool IsServer { get; }
 
         /// <summary>
         /// 生成时的关卡
@@ -44,11 +54,84 @@ namespace DeadCellsMultiplayerX.Common.Ghosts
         /// </summary>
         public GhostActions Actions { get; }
 
-        private GhostHero(Beheaded hero, string ownerGuid)
+        /// <summary>
+        /// Ghost 底层实体是否仍可用
+        /// </summary>
+        public bool IsAlive => Hero != null && !Hero.destroyed;
+
+        private GhostHero(Beheaded hero, string ownerGuid, bool isServer)
         {
             Hero = hero;
             OwnerGuid = ownerGuid;
+            IsServer = isServer;
             Actions = new GhostActions(hero, ownerGuid);
+        }
+
+        /// <summary>
+        /// 服务端 Ghost 不参与真实扣血
+        /// </summary>
+        public void SetServerVitals()
+        {
+            if (!IsServer)
+                return;
+
+            Hero.maxLife = ServerLife;
+            Hero.life = ServerLife;
+        }
+
+        /// <summary>
+        /// 显式保证 Ghost 在 teamHero.members 中
+        /// </summary>
+        public void EnsureTeamMember()
+        {
+            if (!IsServer || Hero._team == null)
+                return;
+
+            var members = Hero._team.members;
+            if (members == null)
+                return;
+
+            for (int i = 0; i < members.length; i++)
+            {
+                if (ReferenceEquals(
+                        AffectCodec.ToObject<Entity>(members.getDyn(i)), Hero))
+                    return;
+            }
+
+            Hero._team.addMember(Hero);
+        }
+
+        /// <summary>
+        /// 服务端 Ghost 只作为运行时实体，不写入服务端 save
+        /// </summary>
+        public void ExcludeFromSave()
+        {
+            var level = Hero._level;
+            level?.savedEntities?.remove(Hero);
+        }
+
+        /// <summary>
+        /// 控制服务端 Ghost 是否加入 teamHero 并成为 mob 的目标
+        /// </summary>
+        public void SetCombatEnabled(bool enabled)
+        {
+            if (!IsServer)
+                return;
+
+            if (enabled)
+            {
+                Hero.ignoreDetection = false;
+                Hero.visible = true;
+                Hero.spr.visible = true;
+            }
+
+            if (Hero._targetable != enabled)
+            {
+                Hero.set_targetable(enabled);
+            }
+
+            if (enabled)
+                EnsureTeamMember();
         }
 
         /// <summary>
@@ -95,9 +178,45 @@ namespace DeadCellsMultiplayerX.Common.Ghosts
         /// </summary>
         public bool MatchesLevel(Level level)
         {
-            if (level == null) return false;
+            if (level == null || !IsAlive) return false;
             if (!ReferenceEquals(Hero._level, level)) return false;
             return SubLevelIndex == level.GetSubLevelIndex();
+        }
+
+        /// <summary>
+        /// 把服务端 Ghost 迁移到新关卡
+        /// </summary>
+        public void Relocate(Level level, int cx, int cy)
+        {
+            if (!IsServer || level == null || Hero.destroyed)
+                return;
+
+            if (!ReferenceEquals(Hero._level, level))
+            {
+                var oldLevel = Hero._level;
+
+                Hero.set_level(level);
+                Hero.set_team(level.teamHero);
+                Hero.initGfx();
+                Hero.lastRoomId = -1;
+                ExcludeFromSave();
+                Hero.setPosCase(cx, cy, null, null);
+                Hero.cancelVelocities();
+                Hero.cancelMainSkills(null);
+                Hero.minimapTracking();
+                Hero.sprAlpha = 1.0;
+                Hero.onLevelChanged(oldLevel);
+            }
+
+            EnsureOpposing(level.teamHero, level.teamMob);
+            EnsureOpposing(level.teamHero, level.teamProp);
+            EnsureOpposing(level.teamMob, level.teamHero);
+            EnsureOpposing(level.teamProp, level.teamHero);
+
+            Hero.visible = true;
+            Hero.spr.visible = true;
+            SetServerVitals();
+            SyncLevel();
         }
 
         /// <summary>
@@ -105,10 +224,7 @@ namespace DeadCellsMultiplayerX.Common.Ghosts
         /// </summary>
         public void SetTransform(int cx, int cy, double xr, double yr, int dir, double dx, double dy)
         {
-            Hero.cx = cx;
-            Hero.cy = cy;
-            Hero.xr = xr;
-            Hero.yr = yr;
+            Hero.setPosCase(cx, cy, xr, yr);
             Hero.dir = dir;
             Hero.dx = dx;
             Hero.dy = dy;
@@ -128,8 +244,26 @@ namespace DeadCellsMultiplayerX.Common.Ghosts
         {
             Actions.Dispose();
 
-            Hero._team = null;
-            Hero._level = null;
+            if (IsServer)
+            {
+
+                if (Hero._targetable && Hero._team != null)
+                    Hero.set_targetable(false);
+
+                if (Hero._level != null)
+                {
+                    if (!Hero.destroyed)
+                        Hero.destroy();
+
+                    Hero.dispose();
+                    Hero.set_level(null);
+                }
+            }
+            else
+            {
+                Hero._team = null;
+                Hero._level = null;
+            }
 
             Logger.Information("GhostHero disposed: owner={Owner}", OwnerGuid);
         }
@@ -137,33 +271,64 @@ namespace DeadCellsMultiplayerX.Common.Ghosts
         /// <summary>
         /// 创建一个未注册的隐形Hero
         /// </summary>
-        public static GhostHero? Create(Game? game, Level? level, string ownerGuid, bool isserver = false)
+        public static GhostHero? Create(
+            Game? game,
+            Level? level,
+            string ownerGuid,
+            bool isserver = false,
+            int cx = 0,
+            int cy = 0)
         {
             if (game == null || level == null) return null;
 
+            var reference = game.hero;
+
             var hero = new Beheaded(game);
-            hero.init();
-            hero._level = level; // 使用set_level/set_team会注册实体 存档与队伍成员
-            hero._targetable = false;
-            hero._team = level.teamHero;
-            hero.life = 1000;
-            hero.maxLife = 1000;
 
-            EnsureOpposing(level.teamHero, level.teamMob);
-            EnsureOpposing(level.teamHero, level.teamProp);
-            EnsureOpposing(level.teamMob, level.teamHero);
-            EnsureOpposing(level.teamProp, level.teamHero);
+            if (isserver)
+            {
+                hero._targetable = false;
+                hero.wakeup(level, cx, cy);
 
-            var ghost = new GhostHero(hero, ownerGuid);
+                hero.life = ServerLife;
+                hero.maxLife = ServerLife;
+                hero.visible = true;
+                hero.spr.visible = true;
+            }
+            else
+            {
+                hero.init();
+                hero._level = level;
+                hero._targetable = false;
+                hero._team = level.teamHero;
+
+                hero.createAttackSource();
+                hero.createAttackTarget();
+
+                hero.life = 1000;
+                hero.maxLife = 1000;
+
+                EnsureOpposing(level.teamHero, level.teamMob);
+                EnsureOpposing(level.teamHero, level.teamProp);
+                EnsureOpposing(level.teamMob, level.teamHero);
+                EnsureOpposing(level.teamProp, level.teamHero);
+
+                hero.initSprite(
+                    reference.spr.lib,
+                    reference.spr.groupName,
+                    null, null, null, false, null, null);
+
+                hero.visible = false;
+                hero.spr.visible = false;
+            }
+
+            var ghost = new GhostHero(hero, ownerGuid, isserver);
             ghost.SyncLevel();
 
-            var reference = game.hero;
-            hero.initSprite(reference.spr.lib, reference.spr.groupName, null, null, null, false, null, null);
-
-            hero.visible = isserver;
-            hero.spr.visible = isserver;
-
-            Logger.Information("Server GhostHero created: owner={Owner} level={Level}#{Sub}", ownerGuid, ghost.LevelId, ghost.SubLevelIndex);
+            if (isserver)
+            {
+                ghost.ExcludeFromSave();
+            }
 
             return ghost;
         }

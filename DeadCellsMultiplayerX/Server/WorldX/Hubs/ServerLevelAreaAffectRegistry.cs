@@ -51,7 +51,7 @@ namespace DeadCellsMultiplayerX.Server.WorldX.Hubs
             {
                 if (affect == null || affect.level == null || affect.frames <= 0.0)
                 {
-                    (stale ??= []).Add(affect);
+                    (stale ??= []).Add(affect!);
                     continue;
                 }
 
@@ -104,7 +104,7 @@ namespace DeadCellsMultiplayerX.Server.WorldX.Hubs
                 if (affect != null && affect.level != null && affect.frames > 0.0)
                     continue;
 
-                (stale ??= []).Add(affect);
+                (stale ??= []).Add(affect!);
             }
 
             if (stale == null) return;

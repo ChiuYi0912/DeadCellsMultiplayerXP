@@ -1,4 +1,6 @@
-﻿using dc.pr;
+﻿using dc.en;
+using dc.pr;
+using DeadCellsMultiplayerX.Common.Data.Snapshot;
 using System;
 using System.Collections.Generic;
 using System.Text;
@@ -60,6 +62,17 @@ namespace DeadCellsMultiplayerX.Utils
 
             return (level.map?.id?.ToString() ?? string.Empty) == levelId
                 && level.GetSubLevelIndex() == subLevelIndex;
+        }
+
+        public static bool IsLocalLevel(Hero hero, GhostHitEvent hit)
+        {
+            var level = hero._level;
+            if (level == null)
+                return false;
+
+            string levelId = level.map?.id?.ToString() ?? string.Empty;
+            return string.Equals(levelId, hit.LevelId, StringComparison.Ordinal)
+                && level.GetSubLevelIndex() == hit.SubLevelIndex;
         }
     }
 }

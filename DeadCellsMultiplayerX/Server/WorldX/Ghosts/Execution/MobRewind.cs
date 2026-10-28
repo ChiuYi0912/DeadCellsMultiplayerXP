@@ -18,8 +18,7 @@ namespace DeadCellsMultiplayerX.Server.WorldX.Ghosts.Execution
     {
         private const long MaxRewindMs = 300;
 
-        private static readonly ILogger Logger =
-            Log.ForContext("SourceContext", "MobRewind");
+        private static readonly ILogger Logger = Log.ForContext("SourceContext", "MobRewind");
 
         private readonly ServerMobRegistry registry;
         private readonly ServerMobHistory history;
@@ -102,7 +101,7 @@ namespace DeadCellsMultiplayerX.Server.WorldX.Ghosts.Execution
         }
 
         private static void CollectTeam(
-            Team? team,
+            dc.tool.Team? team,
             List<Mob> result,
             HashSet<Mob> seen)
         {

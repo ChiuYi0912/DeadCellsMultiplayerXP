@@ -115,6 +115,7 @@ namespace DeadCellsMultiplayerX.Server
             }
 
             Hook_Entity._isOnScreen += Hook_Entity__isOnScreen;
+            Hook_Entity.canBeDetected += Hook_Entity_canBeDetected;
             // Hook_Entity.setGlowColor += Hook_Entity_setGlowColor;
             // Hook_Entity.setGlowData += Hook_Entity_setGlowData;
             Hook_Entity.dispose += Hook_Entity_dispose;
@@ -124,9 +125,100 @@ namespace DeadCellsMultiplayerX.Server
             Hook_Level.attachMob += Hook_Level_attachMob;
             Hook__Mob.create += Hook__Mob_create;
             Hook_Mob.onDie += Hook_Mob_OnDie;
+            Hook_Mob.preUpdate += Hook_Mob_preUpdate;
+            Hook_Mob.fixedUpdate += Hook_Mob_fixedUpdate;
+            Hook_Mob.postUpdate += Hook_Mob_postUpdate;
+            Hook_Mob.onDamage += Hook_Mob_onDamage;
+            Hook_Mob.onDirectHitFromHero += Hook_Mob_onDirectHitFromHero;
+            Hook_Mob.updateThreat += Hook_Mob_updateThreat;
+            Hook_Mob.setNemesisTarget += Hook_Mob_setNemesisTarget;
+            Hook_Hero.fixedUpdate += Hook_Hero_fixedUpdateAsSelf;
+            Hook_Hero.postUpdate += Hook_Hero_postUpdateAsSelf;
+            Hook_Hero.onDamage += Hook_Hero_onDamageAsSelf;
+            Hook_Hero.canBeHitBy += Hook_Hero_canBeHitBy;
             Hook_Power.update += Hook_Power_update;
             Hook__AttackUtils.applyHitResult += Hook_AttackUtils_applyHitResult;
             Hook_LevelAreaAffect.init += Hook_LevelAreaAffect_init;
+        }
+
+
+        private void Hook_Hero_fixedUpdateAsSelf(
+            Hook_Hero.orig_fixedUpdate orig,
+            Hero self)
+        {
+            if (session?.Ghosts.TryGetCombatant(self, out _) == true)
+                session.Ghosts.Aggro.RunAsHero(self, () => orig(self));
+            else
+                orig(self);
+        }
+
+        private void Hook_Hero_postUpdateAsSelf(
+            Hook_Hero.orig_postUpdate orig,
+            Hero self)
+        {
+            if (session?.Ghosts.TryGetCombatant(self, out _) == true)
+                session.Ghosts.Aggro.RunAsHero(self, () => orig(self));
+            else
+                orig(self);
+        }
+
+        private void Hook_Hero_onDamageAsSelf(
+            Hook_Hero.orig_onDamage orig,
+            Hero self,
+            AttackData atk)
+        {
+            if (session?.Ghosts.TryGetCombatant(self, out _) == true)
+                session.Ghosts.Aggro.RunAsHero(self, () => orig(self, atk));
+            else
+                orig(self, atk);
+        }
+
+        /// <summary>
+        /// 服务端 Ghost 不参与暂停/电影状态判断，否则原版 updateThreat 会反复清目标
+        /// </summary>
+        private bool Hook_Hero_canBeHitBy(
+            Hook_Hero.orig_canBeHitBy orig,
+            Hero self,
+            Entity by)
+        {
+            if (session?.Ghosts.TryGetCombatant(self, out _) == true)
+                return !self.destroyed && self.life > 0;
+
+            return orig(self, by);
+        }
+
+        /// <summary>
+        /// 原版 updateThreat 之后只做联机目标修复
+        /// </summary>
+        private void Hook_Mob_updateThreat(
+            Hook_Mob.orig_updateThreat orig,
+            Mob self)
+        {
+            orig(self);
+            session?.Ghosts.Aggro.OnThreatUpdated(self);
+        }
+
+        /// <summary>
+        /// 阻止 mob 硬锁定服务端假人，改选最近的 Ghost
+        /// </summary>
+        private void Hook_Mob_setNemesisTarget(
+            Hook_Mob.orig_setNemesisTarget orig,
+            Mob self,
+            Entity target)
+        {
+            if (session?.Ghosts.Aggro.TryRedirectNemesis(
+                    self, target, out var redirected) == true)
+            {
+                if (redirected == null)
+                {
+                    self.clearNemesisTarget();
+                    return;
+                }
+
+                target = redirected;
+            }
+
+            orig(self, target);
         }
 
         //打印命中数据
@@ -135,6 +227,18 @@ namespace DeadCellsMultiplayerX.Server
             AttackData atk,
             Entity target)
         {
+            // mob 命中 Ghost：服务端只判定命中，生命由 owner 客户端结算
+            if (target is Hero targetHero
+                && session?.Ghosts.TryGetCombatant(
+                    targetHero, out var ghost) == true)
+            {
+                var hit = session.Ghosts.RecordIncomingHit(ghost!, atk);
+                if (hit != null)
+                    session.SendGhostHit(hit);
+
+                return;
+            }
+
 #if DEBUG
             var gameHero = dc.pr.Game.Class.ME?.hero;
             if (atk?.source is Hero hero
@@ -189,9 +293,73 @@ namespace DeadCellsMultiplayerX.Server
 
         private void Hook_Mob_OnDie(Hook_Mob.orig_onDie orig, Mob self)
         {
-            orig(self);
+            if (session != null)
+                session.Ghosts.Aggro.RunAsMobHero(self, () => orig(self));
+            else
+                orig(self);
+
             session?.MobRegistry.MarkDead(self);
             EventSystem.BroadcastEvent<IOnMobOnDie, dc.en.Mob>(self);
+        }
+
+        private void Hook_Mob_preUpdate(Hook_Mob.orig_preUpdate orig, Mob self)
+        {
+            if (session != null)
+                session.Ghosts.Aggro.RunAsMobHero(self, () => orig(self));
+            else
+                orig(self);
+        }
+
+        private void Hook_Mob_fixedUpdate(Hook_Mob.orig_fixedUpdate orig, Mob self)
+        {
+            if (session != null)
+                session.Ghosts.Aggro.RunAsMobHero(self, () => orig(self));
+            else
+                orig(self);
+        }
+
+        private void Hook_Mob_postUpdate(Hook_Mob.orig_postUpdate orig, Mob self)
+        {
+            if (session != null)
+                session.Ghosts.Aggro.RunAsMobHero(self, () => orig(self));
+            else
+                orig(self);
+        }
+
+        private void Hook_Mob_onDamage(
+            Hook_Mob.orig_onDamage orig,
+            Mob self,
+            AttackData atk)
+        {
+            if (session != null)
+            {
+                var hero = session.Ghosts.Aggro.ResolveAttackerHero(atk)
+                    ?? session.Ghosts.Aggro.ResolveMobHero(self);
+                session.Ghosts.Aggro.RunAsHero(
+                    hero, () => orig(self, atk));
+            }
+            else
+            {
+                orig(self, atk);
+            }
+        }
+
+        private void Hook_Mob_onDirectHitFromHero(
+            Hook_Mob.orig_onDirectHitFromHero orig,
+            Mob self,
+            AttackData atk)
+        {
+            if (session != null)
+            {
+                var hero = session.Ghosts.Aggro.ResolveAttackerHero(atk)
+                    ?? session.Ghosts.Aggro.ResolveMobHero(self);
+                session.Ghosts.Aggro.RunAsHero(
+                    hero, () => orig(self, atk));
+            }
+            else
+            {
+                orig(self, atk);
+            }
         }
 
         private Mob Hook__Mob_create(Hook__Mob.orig_create orig, dc.String k, Level level, int cx, int cy, int dmgTier, Ref<int> lifeTier)
@@ -263,6 +431,19 @@ namespace DeadCellsMultiplayerX.Server
         private bool Hook_Entity__isOnScreen(Hook_Entity.orig__isOnScreen orig, Entity self)
         {
             return true;
+        }
+
+        /// <summary>
+        /// 不能被隐身或 ignoreDetection 清掉目标
+        /// </summary>
+        private bool Hook_Entity_canBeDetected(
+            Hook_Entity.orig_canBeDetected orig,
+            Entity self)
+        {
+            if (session?.Ghosts.TryGetCombatant(self, out _) == true)
+                return !self.destroyed;
+
+            return orig(self);
         }
 
         private void Hook_Hero_initColorMap(Hook_Hero.orig_initColorMap orig, Hero self)

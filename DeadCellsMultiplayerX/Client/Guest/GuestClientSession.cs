@@ -68,24 +68,27 @@ namespace DeadCellsMultiplayerX.Client.Guest
         private LocalCombatPrediction? prediction;
         private GhostCombatResolver? ghostCombat;
         private CombatDeathGate? deathGate;
+        private GhostHitReceiver? ghostHits;
 
         /// <summary>
         /// 本地武器命中预测
         /// </summary>
-        internal LocalCombatPrediction Prediction => prediction
-            ?? throw new InvalidOperationException("Combat prediction not initialized.");
+        internal LocalCombatPrediction Prediction => prediction ?? throw new InvalidOperationException();
 
         /// <summary>
         /// 其他玩家 ghost 武器命中的帧结算
         /// </summary>
-        internal GhostCombatResolver GhostCombat => ghostCombat
-            ?? throw new InvalidOperationException("Ghost combat not initialized.");
+        internal GhostCombatResolver GhostCombat => ghostCombat ?? throw new InvalidOperationException();
 
         /// <summary>
         /// 允许客户端 mob 执行死亡的闸门
         /// </summary>
-        internal CombatDeathGate DeathGate => deathGate
-            ?? throw new InvalidOperationException("Death gate not initialized.");
+        internal CombatDeathGate DeathGate => deathGate ?? throw new InvalidOperationException();
+
+        /// <summary>
+        /// 服务端 mob 命中 Ghost 的客户端结算器
+        /// </summary>
+        internal GhostHitReceiver GhostHits => ghostHits ?? throw new InvalidOperationException();
 
         public volatile bool serverDrivenTransition = false;
         private readonly ClientWorldSendBuffer sendBuffer = new();
@@ -154,6 +157,7 @@ namespace DeadCellsMultiplayerX.Client.Guest
         {
             prediction?.Clear();
             deathGate?.Clear();
+            ghostHits?.Clear();
             remoteWorld?.Dispose();
             remoteWorld = new RemoteWorld(this, client.Guid);
             sendBuffer.ResetLocalHeroState();
@@ -164,6 +168,9 @@ namespace DeadCellsMultiplayerX.Client.Guest
             deathGate = new CombatDeathGate();
             ghostCombat = new GhostCombatResolver(this);
             prediction = new LocalCombatPrediction(this);
+            ghostHits = new GhostHitReceiver(this);
+            localCapture = new LocalGhostCapture(this);
+            localCapture.Init();
 
             Hook__Save.save += Hook__Save_save;
             Hook__File.getBytes += Hook__File_getBytes;
@@ -184,8 +191,6 @@ namespace DeadCellsMultiplayerX.Client.Guest
             Hook__AttackUtils.createFromHeroAndHit += Hook_AttackUtils_createFromHeroAndHit;
             Hook_LevelAreaAffect.init += Hook_LevelAreaAffect_init;
             Hook_LevelAreaAffect.applyAnotherAffect += Hook_LevelAreaAffect_applyAnotherAffect;
-            localCapture = new LocalGhostCapture(this);
-            localCapture.Init();
         }
 
         /// <summary>
@@ -474,10 +479,12 @@ namespace DeadCellsMultiplayerX.Client.Guest
 
             prediction?.Clear();
             deathGate?.Clear();
+            ghostHits?.Clear();
 
             remoteWorld?.Dispose();
             remoteWorld = null;
             prediction = null;
+            ghostHits = null;
             sendBuffer.Clear();
 
             serverStream?.Dispose();
@@ -709,6 +716,17 @@ namespace DeadCellsMultiplayerX.Client.Guest
         /// </summary>
         public Task<ClientFrameBundle> RequestClientFrames(ClientFrameRangeRequest request)
             => Task.FromResult(sendBuffer.BuildBundle(request));
+
+        /// <summary>
+        /// 服务端确认的 mob 命中 Ghost
+        /// </summary>
+        public Task ApplyGhostHit(GhostHitEvent hit)
+        {
+            Debug.Assert(ghostHits != null);
+
+            ghostHits.Apply(hit);
+            return Task.CompletedTask;
+        }
 
         internal void ObserveWorldEpoch(int epoch) => sendBuffer.SetEpoch(epoch);
 

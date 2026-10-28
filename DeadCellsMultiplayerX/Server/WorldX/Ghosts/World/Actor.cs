@@ -33,19 +33,33 @@ namespace DeadCellsMultiplayerX.Server.WorldX.Ghosts.World
         public Admission Admission { get; } = new();
 
         /// <summary>
-        /// 复用同关卡 GhostHero,关卡变化时销毁并重建
+        /// 复用同关卡 GhostHero，关卡变化时原地迁移
         /// </summary>
         /// <returns>是否创建了新的 GhostHero</returns>
-        public bool EnsureGhost(Game game, Level level)
+        public bool EnsureGhost(
+            Game game,
+            Level level,
+            int cx = 0,
+            int cy = 0)
         {
-            if (Ghost != null && Ghost.MatchesLevel(level))
-                return false;
+            if (Ghost != null)
+            {
+                if (Ghost.MatchesLevel(level))
+                    return false;
 
-            Ghost?.Dispose();
-            Ghost = null;
+                if (Ghost.IsAlive)
+                {
+                    Ghost.Relocate(level, cx, cy);
+                    return false;
+                }
+
+                Ghost.Dispose();
+                Ghost = null;
+            }
+
             appliedSpawnVersion = null;
-
-            Ghost = GhostHero.Create(game, level, OwnerGuid, true);
+            Ghost = GhostHero.Create(
+                game, level, OwnerGuid, true, cx, cy);
             return Ghost != null;
         }
 
