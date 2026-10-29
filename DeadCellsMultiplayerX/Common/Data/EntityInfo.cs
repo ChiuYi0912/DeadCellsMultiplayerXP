@@ -7,6 +7,7 @@ using System.Collections.Generic;
 using System.Numerics;
 using System.Runtime.Intrinsics;
 using System.Text;
+using DeadCellsMultiplayerX.Common.Core;
 
 namespace DeadCellsMultiplayerX.Common.Data
 {

@@ -1,7 +1,7 @@
 #if DEBUG
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using DeadCellsMultiplayerX.Client;
+using DeadCellsMultiplayerX.Client.Core;
 using Serilog;
 
 namespace DeadCellsMultiplayerX

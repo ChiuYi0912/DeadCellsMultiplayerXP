@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using DeadCellsMultiplayerX.Common.Data.Ghosts;
 using MessagePack;
+using DeadCellsMultiplayerX.Common.Core;
 
 namespace DeadCellsMultiplayerX.Common.Data.Snapshot
 {

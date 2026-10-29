@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Text;
 using MessagePack;
+using DeadCellsMultiplayerX.Common.Core;
 
 namespace DeadCellsMultiplayerX.Common.Data
 {

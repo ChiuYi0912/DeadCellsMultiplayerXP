@@ -1,11 +1,11 @@
 ﻿using dc;
 using dc.en;
 using dc.libs.heaps.slib;
-using DeadCellsMultiplayerX.Client;
+using DeadCellsMultiplayerX.Client.Core;
 using DeadCellsMultiplayerX.Client.Guest;
 using DeadCellsMultiplayerX.Client.Host;
 using DeadCellsMultiplayerX.Client.Networks;
-using DeadCellsMultiplayerX.Common;
+using DeadCellsMultiplayerX.Common.Core;
 using DeadCellsMultiplayerX.Common.Data;
 using DeadCellsMultiplayerX.Common.Data.Snapshot;
 using DeadCellsMultiplayerX.Server.Events;
@@ -24,6 +24,7 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
 using System.Text;
+using DeadCellsMultiplayerX.Server.Core;
 
 namespace DeadCellsMultiplayerX.Server.Connection
 {

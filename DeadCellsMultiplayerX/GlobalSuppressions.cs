@@ -5,4 +5,4 @@
 
 using System.Diagnostics.CodeAnalysis;
 
-[assembly: SuppressMessage("Style", "IDE1006:命名样式", Justification = "<挂起>", Scope = "member", Target = "~M:DeadCellsMultiplayerX.Client.Guest.WorldX.Ghost.initGfx")]
+[assembly: SuppressMessage("Style", "IDE1006:命名样式", Justification = "<挂起>", Scope = "member", Target = "~M:DeadCellsMultiplayerX.Client.Heroes.RemoteHero.RemoteHero.initGfx")]

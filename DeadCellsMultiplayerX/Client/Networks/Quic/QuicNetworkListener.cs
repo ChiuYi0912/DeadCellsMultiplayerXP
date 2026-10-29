@@ -9,6 +9,7 @@ using System.Net.Security;
 using System.Net.Sockets;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
+using DeadCellsMultiplayerX.Client.Core;
 
 namespace DeadCellsMultiplayerX.Client.Networks.Quic
 {

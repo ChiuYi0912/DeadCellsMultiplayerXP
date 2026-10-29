@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using dc.libs.heaps.slib;
 using MessagePack;
 using MessagePack.Formatters;
+using DeadCellsMultiplayerX.Common.Core;
 
 namespace DeadCellsMultiplayerX.Common.Serializers.Data
 {

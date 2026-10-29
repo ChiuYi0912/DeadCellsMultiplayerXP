@@ -1,4 +1,5 @@
 using MessagePack;
+using DeadCellsMultiplayerX.Common.Core;
 
 namespace DeadCellsMultiplayerX.Common.Data.Snapshot
 {

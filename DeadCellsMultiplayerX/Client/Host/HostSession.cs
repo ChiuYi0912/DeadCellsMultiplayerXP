@@ -1,5 +1,5 @@
-﻿using DeadCellsMultiplayerX.Common;
-using DeadCellsMultiplayerX.Server;
+﻿using DeadCellsMultiplayerX.Common.Core;
+using DeadCellsMultiplayerX.Server.Core;
 using Microsoft;
 using Microsoft.VisualStudio.Threading;
 using ModCore.Utilities;
@@ -11,6 +11,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO.Pipes;
 using System.Text;
+using DeadCellsMultiplayerX.Client.Core;
 
 namespace DeadCellsMultiplayerX.Client.Host
 {

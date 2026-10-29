@@ -3,6 +3,7 @@ using HashlinkNET.Native.Impl;
 using HaxeProxy.Runtime;
 using MessagePack;
 using MessagePack.Formatters;
+using DeadCellsMultiplayerX.Common.Core;
 
 namespace DeadCellsMultiplayerX.Common.Serializers
 {

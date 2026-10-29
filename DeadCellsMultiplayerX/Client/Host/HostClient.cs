@@ -1,7 +1,7 @@
 ﻿using dc.sys.net;
-using DeadCellsMultiplayerX.Client.Event;
+using DeadCellsMultiplayerX.Client.Core.Event;
 using DeadCellsMultiplayerX.Client.Networks;
-using DeadCellsMultiplayerX.Server;
+using DeadCellsMultiplayerX.Server.Core;
 using DeadCellsMultiplayerX.Utils;
 using Microsoft.VisualStudio.Threading;
 using ModCore.Modules;
@@ -13,6 +13,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO.Pipes;
 using System.Text;
+using DeadCellsMultiplayerX.Client.Core;
 
 namespace DeadCellsMultiplayerX.Client.Host
 {

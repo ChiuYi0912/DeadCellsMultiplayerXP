@@ -10,6 +10,7 @@ using dc.haxe.io;
 using dc.hxbit;
 using Hashlink.Virtuals;
 using HaxeProxy.Runtime;
+using DeadCellsMultiplayerX.Common.Core;
 
 namespace DeadCellsMultiplayerX.Common.Serializers
 {

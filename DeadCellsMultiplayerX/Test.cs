@@ -1,4 +1,4 @@
-﻿using DeadCellsMultiplayerX.Client;
+﻿using DeadCellsMultiplayerX.Client.Core;
 using System;
 using System.Collections.Generic;
 using System.Text;

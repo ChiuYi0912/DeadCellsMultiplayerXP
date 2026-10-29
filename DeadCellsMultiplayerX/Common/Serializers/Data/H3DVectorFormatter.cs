@@ -3,6 +3,7 @@ using dc.h3d;
 using HaxeProxy.Runtime;
 using MessagePack;
 using MessagePack.Formatters;
+using DeadCellsMultiplayerX.Common.Core;
 
 namespace DeadCellsMultiplayerX.Common.Serializers.Data
 {

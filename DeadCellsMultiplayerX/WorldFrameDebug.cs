@@ -1,5 +1,5 @@
 #if DEBUG
-using DeadCellsMultiplayerX.Client.Guest.WorldX.Snapshot;
+using DeadCellsMultiplayerX.Client.Snapshot;
 
 namespace DeadCellsMultiplayerX
 {

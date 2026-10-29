@@ -3,6 +3,7 @@ using System.Buffers;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using DeadCellsMultiplayerX.Common.Core;
 
 namespace DeadCellsMultiplayerX.Common.Serializers
 {

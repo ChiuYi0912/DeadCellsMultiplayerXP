@@ -5,6 +5,7 @@ using dc.tool;
 using DeadCellsMultiplayerX.Common.Data.Ghosts;
 using HaxeProxy.Runtime;
 using ModCore.Utilities;
+using DeadCellsMultiplayerX.Common.Core;
 
 namespace DeadCellsMultiplayerX.Common.Serializers
 {

@@ -1,6 +1,7 @@
 ﻿
 using System.Runtime.CompilerServices;
 using MessagePack;
+using DeadCellsMultiplayerX.Common.Core;
 
 namespace DeadCellsMultiplayerX.Common.Data
 {

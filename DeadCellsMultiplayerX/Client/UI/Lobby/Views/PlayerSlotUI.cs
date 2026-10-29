@@ -3,12 +3,13 @@ using dc.h2d;
 using dc.libs.heaps.slib;
 using dc.tool;
 using dc.ui;
-using DeadCellsMultiplayerX.Client.Event;
+using DeadCellsMultiplayerX.Client.Core.Event;
 using DeadCellsMultiplayerX.Client.UI.Common;
-using DeadCellsMultiplayerX.Common;
+using DeadCellsMultiplayerX.Common.Core;
 using HaxeProxy.Runtime;
 using ModCore.Utilities;
 using Serilog;
+using DeadCellsMultiplayerX.Client.Core;
 
 namespace DeadCellsMultiplayerX.Client.UI.Lobby.Views
 {

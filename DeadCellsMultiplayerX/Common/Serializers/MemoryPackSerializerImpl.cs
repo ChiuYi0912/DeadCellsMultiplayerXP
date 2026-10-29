@@ -1,6 +1,7 @@
 using System;
 using System.Buffers;
 using MemoryPack;
+using DeadCellsMultiplayerX.Common.Core;
 
 namespace DeadCellsMultiplayerX.Common.Serializers
 {

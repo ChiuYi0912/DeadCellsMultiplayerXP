@@ -4,6 +4,7 @@ using dc.pr;
 using dc.ui;
 using DeadCellsMultiplayerX.Client.UI.Common;
 using DeadCellsMultiplayerX.Client.UI.Lobby;
+using DeadCellsMultiplayerX.Client.Core;
 
 namespace DeadCellsMultiplayerX.Client.UI
 {

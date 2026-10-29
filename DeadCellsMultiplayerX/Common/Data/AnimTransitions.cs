@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using dc.en.mob;
 using MessagePack;
+using DeadCellsMultiplayerX.Common.Core;
 
 namespace DeadCellsMultiplayerX.Common.Data
 {
