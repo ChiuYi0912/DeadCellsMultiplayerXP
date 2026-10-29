@@ -106,6 +106,8 @@ namespace DeadCellsMultiplayerX.Client.Mobs
 
             if (mob != null)
             {
+                remoteWorld.MobModifiers.Detach(mob);
+
                 // 服务端确认死亡
                 session.ForceNativeDeath(mob);
                 netIds.Remove(mob);
@@ -127,7 +129,10 @@ namespace DeadCellsMultiplayerX.Client.Mobs
                 return false;
 
             if (existing != null)
+            {
+                remoteWorld.MobModifiers.Detach(existing);
                 netIds.Remove(existing);
+            }
 
             mobs.Remove(netId);
 
@@ -182,6 +187,8 @@ namespace DeadCellsMultiplayerX.Client.Mobs
             mobs[spawn.NetId] = mob;
             netIds[mob] = spawn.NetId;
 
+            remoteWorld.MobModifiers.TryAttach(mob, session.SyncedTimeMs);
+
             if (needsCleanup)
                 authoritativeLevels.Add(levelKey);
 
@@ -196,7 +203,11 @@ namespace DeadCellsMultiplayerX.Client.Mobs
         {
             foreach (var mob in mobs.Values)
             {
-                if (mob != null && !mob.destroyed)
+                if (mob == null) continue;
+
+                remoteWorld.MobModifiers.Detach(mob);
+
+                if (!mob.destroyed)
                     mob.destroy();
             }
 

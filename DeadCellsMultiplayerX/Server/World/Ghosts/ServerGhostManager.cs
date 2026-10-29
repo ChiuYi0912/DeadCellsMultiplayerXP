@@ -6,10 +6,14 @@ using dc.pr;
 using dc.tool.atk;
 using DeadCellsMultiplayerX.Common.Data.Ghosts;
 using DeadCellsMultiplayerX.Common.Data.Snapshot;
+using DeadCellsMultiplayerX.Common.MobAI.Events;
 using DeadCellsMultiplayerX.Server.World.Ghosts.Aggro;
 using DeadCellsMultiplayerX.Server.World.Ghosts.Pipeline;
 using DeadCellsMultiplayerX.Server.World.Ghosts.Team;
 using DeadCellsMultiplayerX.Server.World.Ghosts.World;
+using DeadCellsMultiplayerX.Server.MobAI.Combat;
+using DeadCellsMultiplayerX.Server.MobAI.Events;
+using DeadCellsMultiplayerX.Server.MobAI.Modifiers;
 using DeadCellsMultiplayerX.Utils;
 using Serilog;
 using DeadCellsMultiplayerX.Server.Core;
@@ -29,6 +33,9 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts
         private readonly ActionPipeline pipeline;
         private readonly ServerTeamManager teams;
         private readonly ServerAggroManager aggro;
+        private readonly ServerMobEventBus mobEvents;
+        private readonly ServerMobModifierRegistry mobModifiers;
+        private readonly ServerMobAttackRouter mobAttacks;
         private readonly List<GhostHitEvent> hits = [];
         private long nextHitId;
 
@@ -55,6 +62,11 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts
                 session.MobPublisher.History,
                 () => session.CurrentTimeStamp,
                 () => Game.Class.ME);
+
+            mobEvents = new ServerMobEventBus();
+            mobModifiers = new ServerMobModifierRegistry(
+                session, this, teams, mobEvents);
+            mobAttacks = new ServerMobAttackRouter(events: mobEvents);
         }
 
         /// <summary>
@@ -68,6 +80,21 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts
         public ServerAggroManager Aggro => aggro;
 
         /// <summary>
+        /// 服务端 mob 修改器注册器
+        /// </summary>
+        public ServerMobModifierRegistry MobModifiers => mobModifiers;
+
+        /// <summary>
+        /// 服务端 mob 事件总线
+        /// </summary>
+        public IServerMobEventBus MobEvents => mobEvents;
+
+        /// <summary>
+        /// 服务端 mob 攻击释放路由
+        /// </summary>
+        public IServerMobAttackRouter MobAttacks => mobAttacks;
+
+        /// <summary>
         /// 实际持有 GhostHero 的数量
         /// </summary>
         public int Count => world.Count;
@@ -79,6 +106,8 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts
         {
             teams.Sync(guests, nowMs);
             aggro.Tick(nowMs);
+            mobModifiers.Tick(nowMs);
+            mobAttacks.Tick(nowMs);
         }
 
         /// <summary>
@@ -160,6 +189,9 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts
         {
             world.BeginEpoch(value);
             teams.Clear();
+
+            mobEvents.Clear();
+            mobAttacks.Clear();
             hits.Clear();
             nextHitId = 0;
 
@@ -174,6 +206,9 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts
         {
             world.Reset();
             teams.Clear();
+            mobModifiers.Clear();
+            mobEvents.Clear();
+            mobAttacks.Clear();
             hits.Clear();
             nextHitId = 0;
         }
@@ -202,5 +237,11 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts
         /// 取出本帧待广播的动作事件
         /// </summary>
         public List<HeroActionEvent> DrainActions() => world.DrainEvents();
+
+        /// <summary>
+        /// 取出 mob 修改器事件；未来由 WorldFrame 广播
+        /// </summary>
+        public IReadOnlyList<MobModifierEvent> DrainMobEvents()
+            => mobEvents.Drain();
     }
 }

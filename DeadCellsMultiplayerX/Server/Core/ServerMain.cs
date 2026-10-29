@@ -13,6 +13,7 @@ using dc.libs.heaps.slib;
 using dc.pr;
 using dc.tool;
 using dc.tool.atk;
+using dc.tool.skill;
 using DeadCellsMultiplayerX.Server.Events;
 using Serilog;
 using Hashlink;
@@ -35,6 +36,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using DeadCellsMultiplayerX.Server.Core;
+using dc.tool._Cooldown;
 
 namespace DeadCellsMultiplayerX.Server.Core
 {
@@ -133,6 +135,10 @@ namespace DeadCellsMultiplayerX.Server.Core
             Hook_Mob.onDirectHitFromHero += Hook_Mob_onDirectHitFromHero;
             Hook_Mob.updateThreat += Hook_Mob_updateThreat;
             Hook_Mob.setNemesisTarget += Hook_Mob_setNemesisTarget;
+            Hook_Mob.behaviourAi += Hook_Mob_behaviourAi;
+            Hook_Mob.aiLocked += Hook_Mob_aiLocked;
+            Hook_OldSkill.prepare += Hook_OldSkill_prepareForModifier;
+            Hook_OldMobSkill.execute += Hook_OldMobSkill_executeForModifier;
             Hook_Hero.fixedUpdate += Hook_Hero_fixedUpdateAsSelf;
             Hook_Hero.postUpdate += Hook_Hero_postUpdateAsSelf;
             Hook_Hero.onDamage += Hook_Hero_onDamageAsSelf;
@@ -142,6 +148,41 @@ namespace DeadCellsMultiplayerX.Server.Core
             Hook_LevelAreaAffect.init += Hook_LevelAreaAffect_init;
         }
 
+
+        private bool Hook_Mob_aiLocked(Hook_Mob.orig_aiLocked orig, Mob self)
+        {
+            const int AiLockId = 54525952;
+            const double InfiniteFrames = double.MaxValue;
+
+            if (session == null)
+                return orig(self);
+
+            bool? handled = session.Ghosts.MobModifiers.DispatchAiLocked(
+                self, session.CurrentTimeStamp);
+
+            if (handled == null)
+                return orig(self);
+
+            Cooldown cd = self.cd;
+            CdInst inst = cd.fastCheck.get(AiLockId);
+
+            if (handled == true)
+            {
+                if (inst == null)
+                {
+                    inst = new CdInst(AiLockId, InfiniteFrames);
+                    cd.fastCheck.set(AiLockId, inst);
+                    cd.cdList.push(inst);
+                }
+                else
+                {
+                    inst.frames = InfiniteFrames;
+                }
+                return true;
+            }
+
+            return orig(self);
+        }
 
         private void Hook_Hero_fixedUpdateAsSelf(
             Hook_Hero.orig_fixedUpdate orig,
@@ -222,18 +263,82 @@ namespace DeadCellsMultiplayerX.Server.Core
             orig(self, target);
         }
 
+        /// <summary>
+        /// 交给已注册的 mob 修改器接管原版 AI；未接管时继续原版逻辑。
+        /// </summary>
+        private void Hook_Mob_behaviourAi(
+            Hook_Mob.orig_behaviourAi orig,
+            Mob self)
+        {
+            if (session != null
+                && session.Ghosts.MobModifiers.DispatchBehaviourAi(
+                    self, session.CurrentTimeStamp))
+                return;
+
+            orig(self);
+        }
+
+        /// <summary>
+        /// 通知 mob 修改器技能已准备。
+        /// </summary>
+        private bool Hook_OldSkill_prepareForModifier(
+            Hook_OldSkill.orig_prepare orig,
+            OldSkill self,
+            int? data)
+        {
+            bool prepared = orig(self, data);
+
+            if (prepared
+                && session != null
+                && self?.owner is Mob mob)
+            {
+                session.Ghosts.MobModifiers.DispatchSkillPrepare(
+                    mob, self, session.CurrentTimeStamp);
+            }
+
+            return prepared;
+        }
+
+        /// <summary>
+        /// 通知 mob 修改器技能已执行。
+        /// </summary>
+        private void Hook_OldMobSkill_executeForModifier(
+            Hook_OldMobSkill.orig_execute orig,
+            OldMobSkill self,
+            double? ratio)
+        {
+            if (session != null && self?.owner is Mob mob)
+            {
+                session.Ghosts.MobModifiers.DispatchSkillExecute(
+                    mob, self, session.CurrentTimeStamp);
+            }
+
+            orig(self, ratio);
+        }
+
         //打印命中数据
         private void Hook_AttackUtils_applyHitResult(
             Hook__AttackUtils.orig_applyHitResult orig,
             AttackData atk,
             Entity target)
         {
+            // 自定义修改器可以先接管命中结算（例如完全自定义的 Zombie 命中）
+            var attackerMob = atk?.source as Mob ?? atk?.carrier as Mob;
+            if (attackerMob != null
+                && atk != null
+                && target != null
+                && session != null
+                && session.Ghosts.MobModifiers.DispatchAttackResult(
+                    attackerMob, atk, target,
+                    session.CurrentTimeStamp))
+                return;
+
             // mob 命中 Ghost：服务端只判定命中，生命由 owner 客户端结算
             if (target is Hero targetHero
                 && session?.Ghosts.TryGetCombatant(
                     targetHero, out var ghost) == true)
             {
-                var hit = session.Ghosts.RecordIncomingHit(ghost!, atk);
+                var hit = session.Ghosts.RecordIncomingHit(ghost!, atk!);
                 if (hit != null)
                     session.SendGhostHit(hit);
 
@@ -295,9 +400,15 @@ namespace DeadCellsMultiplayerX.Server.Core
         private void Hook_Mob_OnDie(Hook_Mob.orig_onDie orig, Mob self)
         {
             if (session != null)
+            {
+                session.Ghosts.MobModifiers.DispatchMobDied(
+                    self, session.CurrentTimeStamp);
                 session.Ghosts.Aggro.RunAsMobHero(self, () => orig(self));
+            }
             else
+            {
                 orig(self);
+            }
 
             session?.MobRegistry.MarkDead(self);
             EventSystem.BroadcastEvent<IOnMobOnDie, dc.en.Mob>(self);
@@ -306,25 +417,48 @@ namespace DeadCellsMultiplayerX.Server.Core
         private void Hook_Mob_preUpdate(Hook_Mob.orig_preUpdate orig, Mob self)
         {
             if (session != null)
+            {
+                session.Ghosts.MobModifiers.DispatchPreUpdate(
+                    self, session.CurrentTimeStamp);
                 session.Ghosts.Aggro.RunAsMobHero(self, () => orig(self));
+            }
             else
+            {
                 orig(self);
+            }
         }
+
 
         private void Hook_Mob_fixedUpdate(Hook_Mob.orig_fixedUpdate orig, Mob self)
         {
             if (session != null)
+            {
+                if (session.Ghosts.MobModifiers.DispatchFixedUpdateHandled(
+                        self, session.CurrentTimeStamp))
+                    return;
+
+                session.Ghosts.MobModifiers.DispatchFixedUpdate(self, session.CurrentTimeStamp);
+
                 session.Ghosts.Aggro.RunAsMobHero(self, () => orig(self));
+            }
             else
+            {
                 orig(self);
+            }
         }
 
         private void Hook_Mob_postUpdate(Hook_Mob.orig_postUpdate orig, Mob self)
         {
             if (session != null)
+            {
                 session.Ghosts.Aggro.RunAsMobHero(self, () => orig(self));
+                session.Ghosts.MobModifiers.DispatchPostUpdate(
+                    self, session.CurrentTimeStamp);
+            }
             else
+            {
                 orig(self);
+            }
         }
 
         private void Hook_Mob_onDamage(
@@ -368,6 +502,10 @@ namespace DeadCellsMultiplayerX.Server.Core
             var mob = orig(k, level, cx, cy, dmgTier, lifeTier);
 
             session?.MobRegistry.Register(mob, null, level);
+            if (session != null)
+                session.Ghosts.MobModifiers.TryAttach(
+                    mob, session.CurrentTimeStamp);
+
             int? safelifeTier = lifeTier.IsNull ? 0 : lifeTier.value;
             EventSystem.BroadcastEvent<IOnCreateMob, IOnCreateMob.Data>(new(mob, k, cx, cy, dmgTier, safelifeTier));
             return mob;
@@ -378,6 +516,10 @@ namespace DeadCellsMultiplayerX.Server.Core
             var mob = orig(self, m);
 
             session?.MobRegistry.Register(mob, m, self);
+            if (session != null)
+                session.Ghosts.MobModifiers.TryAttach(
+                    mob, session.CurrentTimeStamp);
+
             EventSystem.BroadcastEvent<IOnAttachMob, IOnAttachMob.Data>(new(m, mob));
 
             return mob;
@@ -393,7 +535,10 @@ namespace DeadCellsMultiplayerX.Server.Core
         private void Hook_Entity_dispose(Hook_Entity.orig_dispose orig, Entity self)
         {
             if (self is Mob mob)
+            {
+                session?.Ghosts.MobModifiers.Detach(mob);
                 session?.MobRegistry.Unregister(mob);
+            }
 
             orig(self);
 

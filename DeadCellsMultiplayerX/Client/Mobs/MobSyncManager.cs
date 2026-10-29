@@ -20,6 +20,7 @@ namespace DeadCellsMultiplayerX.Client.Mobs
         private static readonly ILogger Logger = Log.ForContext("SourceContext", "MobSyncManager");
 
         private readonly GuestClientSession session;
+        private readonly RemoteWorld remoteWorld;
         private readonly WorldFrameManager frames;
         private readonly ClientMobReceiver receiver;
         private readonly MobAffectStateManager affectState;
@@ -38,6 +39,7 @@ namespace DeadCellsMultiplayerX.Client.Mobs
             WorldFrameManager frames)
         {
             this.session = session;
+            this.remoteWorld = remoteWorld;
             this.frames = frames;
             receiver = new ClientMobReceiver(session, remoteWorld);
             affectState = new MobAffectStateManager();
@@ -172,7 +174,8 @@ namespace DeadCellsMultiplayerX.Client.Mobs
                 mob.bdx = 0;
                 mob.bdy = 0;
 
-                RemoteMobAnimator.Apply(mob, prev.Anim, next.Anim, renderTimeSec);
+                if (!remoteWorld.MobModifiers.DispatchClientUpdate(mob, nowMs))
+                    RemoteMobAnimator.Apply(mob, prev.Anim, next.Anim, renderTimeSec);
 
                 // 同步affect
                 affectState.ApplySnapshot(netId, mob, next.Affects ?? prev.Affects, nowSec);
@@ -256,7 +259,11 @@ namespace DeadCellsMultiplayerX.Client.Mobs
             mob.maxLife = dynamic.MaxLife;
 
             double nowSec = session.SyncedTimeMs / 1000.0;
-            RemoteMobAnimator.Apply(mob, dynamic.Anim, dynamic.Anim, nowSec);
+            if (!remoteWorld.MobModifiers.DispatchClientUpdate(
+                    mob, session.SyncedTimeMs))
+            {
+                RemoteMobAnimator.Apply(mob, dynamic.Anim, dynamic.Anim, nowSec);
+            }
             affectState.ApplySnapshot(
                 dynamic.NetId, mob, dynamic.Affects, nowSec);
 

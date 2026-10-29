@@ -3,7 +3,8 @@ using dc.en;
 using DeadCellsMultiplayerX.Client.Combat;
 using DeadCellsMultiplayerX.Client.Heroes.LocalHero;
 using DeadCellsMultiplayerX.Client.Heroes.Ghost;
-using DeadCellsMultiplayerX.Client.Heroes.LocalHero;
+using DeadCellsMultiplayerX.Client.MobAI.Events;
+using DeadCellsMultiplayerX.Client.MobAI.Modifiers;
 using DeadCellsMultiplayerX.Client.Mobs;
 using DeadCellsMultiplayerX.Client.Heroes.RemoteHero;
 using DeadCellsMultiplayerX.Client.Effects;
@@ -56,6 +57,16 @@ namespace DeadCellsMultiplayerX.Client.Replication
         private readonly LevelAreaAffectStateManager areaAffects;
 
         /// <summary>
+        /// 客户端 mob 事件总线（当前仅进程内骨架）
+        /// </summary>
+        private readonly ClientMobEventBus mobEvents;
+
+        /// <summary>
+        /// 客户端 mob 修改器注册器
+        /// </summary>
+        private readonly ClientMobModifierRegistry mobModifiers;
+
+        /// <summary>
         /// 本地玩家的唯一标识
         /// </summary>
         private readonly string localGuid;
@@ -71,6 +82,10 @@ namespace DeadCellsMultiplayerX.Client.Replication
             ghosts = new RemoteGhostManager(session, this);
             areaAffects = new LevelAreaAffectStateManager(session);
 
+            mobEvents = new ClientMobEventBus();
+            mobModifiers = new ClientMobModifierRegistry(
+                session, this, mobEvents);
+
             frames.FrameApplied += OnFrameApplied;
             frames.Start();
         }
@@ -80,6 +95,8 @@ namespace DeadCellsMultiplayerX.Client.Replication
         public RemoteGhostManager Ghosts => ghosts;
         public MobSyncManager Mobs => mobs;
         public LevelAreaAffectStateManager AreaAffects => areaAffects;
+        public ClientMobModifierRegistry MobModifiers => mobModifiers;
+        public ClientMobEventBus MobEvents => mobEvents;
         public WorldFrameManager Frames => frames;
         public string LocalGuid => localGuid;
         public IEnumerable<RemoteHero> AllHeroes => heroes.All;
@@ -126,6 +143,8 @@ namespace DeadCellsMultiplayerX.Client.Replication
         protected override void MyDispose()
         {
             frames.FrameApplied -= OnFrameApplied;
+            mobModifiers.Clear();
+            mobEvents.Clear();
             mobs.Clear();
             areaAffects.Reset();
             ghosts.Dispose();

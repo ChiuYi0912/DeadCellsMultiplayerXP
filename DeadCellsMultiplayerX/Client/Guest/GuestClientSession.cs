@@ -11,7 +11,6 @@ using DeadCellsMultiplayerX.Client.Heroes.Ghost;
 using DeadCellsMultiplayerX.Client.Replication;
 using DeadCellsMultiplayerX.Client.Heroes.RemoteHero;
 using DeadCellsMultiplayerX.Client.Mobs;
-using DeadCellsMultiplayerX.Client.Heroes.RemoteHero;
 using DeadCellsMultiplayerX.Client.Effects;
 using DeadCellsMultiplayerX.Client.Snapshot;
 using DeadCellsMultiplayerX.Client.Host;
@@ -400,7 +399,8 @@ namespace DeadCellsMultiplayerX.Client.Guest
 
         private bool Hook_Mob_aiLocked(Hook_Mob.orig_aiLocked orig, Mob self)
         {
-            return true;
+            return remoteWorld?.MobModifiers.DispatchAiLocked(
+                self, SyncedTimeMs) ?? true;
         }
 
         private void Hook_Mob_onDie(Hook_Mob.orig_onDie orig, Mob self)
