@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using dc.h2d;
 using dc.ui;
 using dc.uicore;
+using DeadCellsMultiplayerX.Client.Core;
 
 namespace DeadCellsMultiplayerX.Client.UI
 {

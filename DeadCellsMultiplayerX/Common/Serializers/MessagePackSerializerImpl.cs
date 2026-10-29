@@ -3,6 +3,7 @@ using dc.level;
 using DeadCellsMultiplayerX.Common.Serializers.Data;
 using MessagePack;
 using MessagePack.Resolvers;
+using DeadCellsMultiplayerX.Common.Core;
 
 namespace DeadCellsMultiplayerX.Common.Serializers
 {

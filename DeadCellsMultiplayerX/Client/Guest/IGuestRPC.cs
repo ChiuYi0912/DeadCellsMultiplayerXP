@@ -5,6 +5,7 @@ using StreamJsonRpc;
 using System;
 using System.Collections.Generic;
 using System.Text;
+using DeadCellsMultiplayerX.Client.Core;
 
 namespace DeadCellsMultiplayerX.Client.Guest
 {

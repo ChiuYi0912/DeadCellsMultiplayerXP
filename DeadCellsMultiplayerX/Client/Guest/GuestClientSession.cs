@@ -4,16 +4,21 @@ using dc.en;
 using dc.pr;
 using dc.tool;
 using dc.tool.atk;
-using DeadCellsMultiplayerX.Client.Event;
-using DeadCellsMultiplayerX.Client.Guest.Ghost;
-using DeadCellsMultiplayerX.Client.Guest.WorldX;
-using DeadCellsMultiplayerX.Client.Guest.WorldX.Remote;
-using DeadCellsMultiplayerX.Client.Guest.WorldX.Snapshot;
+using DeadCellsMultiplayerX.Client.Core.Event;
+using DeadCellsMultiplayerX.Client.Combat;
+using DeadCellsMultiplayerX.Client.Heroes.LocalHero;
+using DeadCellsMultiplayerX.Client.Heroes.Ghost;
+using DeadCellsMultiplayerX.Client.Replication;
+using DeadCellsMultiplayerX.Client.Heroes.RemoteHero;
+using DeadCellsMultiplayerX.Client.Mobs;
+using DeadCellsMultiplayerX.Client.Heroes.RemoteHero;
+using DeadCellsMultiplayerX.Client.Effects;
+using DeadCellsMultiplayerX.Client.Snapshot;
 using DeadCellsMultiplayerX.Client.Host;
 using DeadCellsMultiplayerX.Common.Data;
 using DeadCellsMultiplayerX.Common.Data.Snapshot;
 using DeadCellsMultiplayerX.Common.Ghosts;
-using DeadCellsMultiplayerX.Server;
+using DeadCellsMultiplayerX.Server.Core;
 using DeadCellsMultiplayerX.Utils;
 using Hashlink.Proxy.Clousre;
 using ModCore;
@@ -24,6 +29,7 @@ using ModCore.Modules;
 using ModCore.Utilities;
 using StreamJsonRpc;
 using System.Diagnostics;
+using DeadCellsMultiplayerX.Client.Core;
 
 namespace DeadCellsMultiplayerX.Client.Guest
 {

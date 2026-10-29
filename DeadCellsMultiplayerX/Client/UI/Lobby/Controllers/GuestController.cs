@@ -1,5 +1,6 @@
 using System;
 using System.Threading.Tasks;
+using DeadCellsMultiplayerX.Client.Core;
 
 namespace DeadCellsMultiplayerX.Client.UI.Lobby.Controllers
 {

@@ -1,7 +1,8 @@
-﻿using DeadCellsMultiplayerX.Common;
+﻿using DeadCellsMultiplayerX.Common.Core;
 using System;
 using System.Collections.Generic;
 using System.Text;
+using DeadCellsMultiplayerX.Client.Core;
 
 namespace DeadCellsMultiplayerX.Client.Networks
 {

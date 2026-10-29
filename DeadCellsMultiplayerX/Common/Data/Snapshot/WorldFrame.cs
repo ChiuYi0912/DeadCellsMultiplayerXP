@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using DeadCellsMultiplayerX.Common.Data.Ghosts;
 using MessagePack;
+using DeadCellsMultiplayerX.Common.Core;
 
 namespace DeadCellsMultiplayerX.Common.Data.Snapshot
 {

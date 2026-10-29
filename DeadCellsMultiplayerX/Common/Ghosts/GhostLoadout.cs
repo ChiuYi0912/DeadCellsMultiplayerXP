@@ -5,6 +5,7 @@ using DeadCellsMultiplayerX.Common.Data.Ghosts;
 using DeadCellsMultiplayerX.Common.Serializers;
 using ModCore.Utilities;
 using Serilog;
+using DeadCellsMultiplayerX.Common.Core;
 
 namespace DeadCellsMultiplayerX.Common.Ghosts
 {

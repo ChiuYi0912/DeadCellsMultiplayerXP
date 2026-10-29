@@ -1,4 +1,5 @@
 using ModCore.Events;
+using DeadCellsMultiplayerX.Server.Core;
 
 namespace DeadCellsMultiplayerX.Server.Events
 {

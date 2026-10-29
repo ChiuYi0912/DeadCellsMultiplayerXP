@@ -2,10 +2,10 @@
 using dc.en.inter;
 using dc.en.mob;
 using dc.tool;
-using DeadCellsMultiplayerX.Client;
+using DeadCellsMultiplayerX.Client.Core;
 using DeadCellsMultiplayerX.Common.Data.Ghosts;
 using DeadCellsMultiplayerX.Common.Ghosts;
-using DeadCellsMultiplayerX.Server;
+using DeadCellsMultiplayerX.Server.Core;
 using HaxeProxy.Runtime;
 using IngameDebugConsole;
 using ModCore.Utilities;

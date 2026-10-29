@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using dc.en;
 using Serilog;
+using DeadCellsMultiplayerX.Common.Core;
 
 namespace DeadCellsMultiplayerX.Common.Ghosts
 {

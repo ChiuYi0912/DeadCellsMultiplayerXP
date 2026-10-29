@@ -1,6 +1,6 @@
 ﻿using dc;
 using dc.pr;
-using DeadCellsMultiplayerX.Client;
+using DeadCellsMultiplayerX.Client.Core;
 using DeadCellsMultiplayerX.Utils;
 using ModCore.Events.Interfaces;
 using ModCore.Mods;

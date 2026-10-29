@@ -1,8 +1,9 @@
 ﻿using dc;
 using dc.en;
 using dc.tool;
-using DeadCellsMultiplayerX.Client.Event;
-using DeadCellsMultiplayerX.Client.Guest.WorldX;
+using DeadCellsMultiplayerX.Client.Core.Event;
+using DeadCellsMultiplayerX.Client.Replication;
+using DeadCellsMultiplayerX.Client.Heroes.RemoteHero;
 using DeadCellsMultiplayerX.Client.Host;
 using DeadCellsMultiplayerX.Client.Networks;
 using DeadCellsMultiplayerX.Common.Data;
@@ -10,6 +11,7 @@ using DeadCellsMultiplayerX.Utils;
 using StreamJsonRpc;
 using System.Diagnostics;
 
+using DeadCellsMultiplayerX.Client.Core;
 
 namespace DeadCellsMultiplayerX.Client.Guest
 {

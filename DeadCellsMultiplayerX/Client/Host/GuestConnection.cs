@@ -1,6 +1,6 @@
-﻿using DeadCellsMultiplayerX.Client.Event;
+﻿using DeadCellsMultiplayerX.Client.Core.Event;
 using DeadCellsMultiplayerX.Client.Networks;
-using DeadCellsMultiplayerX.Common;
+using DeadCellsMultiplayerX.Common.Core;
 using DeadCellsMultiplayerX.Utils;
 using ModCore.Events;
 using ModCore.Modules;
@@ -11,6 +11,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Text;
+using DeadCellsMultiplayerX.Client.Core;
 
 namespace DeadCellsMultiplayerX.Client.Host
 {

@@ -4,6 +4,7 @@ using MessagePack.Formatters;
 using dc.hl.types;
 using CoreLibrary.Core.Extensions;
 using System.Diagnostics;
+using DeadCellsMultiplayerX.Common.Core;
 
 namespace DeadCellsMultiplayerX.Common.Serializers.Data
 {

@@ -3,6 +3,7 @@ using dc.en;
 using dc.tool;
 using dc.tool.hero;
 using DeadCellsMultiplayerX.Common.Data.Ghosts;
+using DeadCellsMultiplayerX.Common.Core;
 
 namespace DeadCellsMultiplayerX.Common.Ghosts
 {

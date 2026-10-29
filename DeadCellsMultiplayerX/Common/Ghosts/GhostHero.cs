@@ -9,6 +9,7 @@ using DeadCellsMultiplayerX.Utils;
 using HaxeProxy.Runtime;
 using ModCore.Utilities;
 using Serilog;
+using DeadCellsMultiplayerX.Common.Core;
 
 namespace DeadCellsMultiplayerX.Common.Ghosts
 {

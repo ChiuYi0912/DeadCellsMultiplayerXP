@@ -2,6 +2,7 @@ using System;
 using System.Threading.Tasks;
 using dc.ui;
 using DeadCellsMultiplayerX.Client.UI.Common;
+using DeadCellsMultiplayerX.Client.Core;
 
 namespace DeadCellsMultiplayerX.Client.UI.Lobby.Controllers
 {

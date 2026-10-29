@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using dc.en;
+using DeadCellsMultiplayerX.Common.Core;
 
 namespace DeadCellsMultiplayerX.Common.Ghosts
 {
