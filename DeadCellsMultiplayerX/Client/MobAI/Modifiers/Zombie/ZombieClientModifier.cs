@@ -1,6 +1,10 @@
+using dc.pr;
+using dc.tool.skill;
 using DeadCellsMultiplayerX.Client.Guest;
 using DeadCellsMultiplayerX.Client.Replication;
+using DeadCellsMultiplayerX.Common.MobAI.Events;
 using DeadCellsMultiplayerX.Common.MobAI.Modifiers;
+using ModCore.Utilities;
 using Serilog;
 using GameZombie = dc.en.mob.Zombie;
 
@@ -30,6 +34,8 @@ namespace DeadCellsMultiplayerX.Client.MobAI.Modifiers.Zombie
         {
             hooks.OnAiLocked(_ => true);
             hooks.OnClientUpdate(_ => false);
+            hooks.OnFixedUpdate(update);
+            hooks.OnClientEvent(OnEvent);
         }
 
         /// <inheritdoc />
@@ -44,6 +50,36 @@ namespace DeadCellsMultiplayerX.Client.MobAI.Modifiers.Zombie
         public override void Detach(GameZombie mob)
         {
             Logger.Debug("Zombie client modifier detached: mob={Mob}", mob.GetType().Name);
+        }
+
+        public void OnEvent(MobHookContext context, MobModifierEvent evt)
+        {
+            
+        }
+
+        public void update(MobHookContext context)
+        {
+            if (!dc.hxd.Key.Class.isPressed(78))
+                return;
+
+            var mob = context.Mob;
+
+            mob.setAttackTarget(Game.Class.ME.hero);
+            mob.setNemesisTarget(Game.Class.ME.hero);
+
+            var skills = mob.oldSkills;
+
+            foreach (var item in skills)
+            {
+                if (item is OldMobSkill mobSkill)
+                {
+                    if (mobSkill.id.ToString() == "jump")
+                    {
+                        //mob.resetQueuedOldSkill();
+                        mobSkill.prepareOnOwnerTarget(true, null);
+                    }
+                }
+            }
         }
     }
 }

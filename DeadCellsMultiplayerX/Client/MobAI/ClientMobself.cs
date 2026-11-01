@@ -24,11 +24,11 @@ namespace DeadCellsMultiplayerX.Client.MobAI
     {
         private static readonly ILogger Logger = Log.ForContext("SourceContext", "MobBase");
 
-        public void ClientfixedUpdate(Mob self)
+        public static void ClientfixedUpdate(Mob self)
         {
             HashlinkObjectProto proto =
              ((HashlinkObjectType)HashlinkMarshal.Module.GetTypeByName("Entity")).FindProto("fixedUpdate")!;
-            proto.Function.DynamicInvoke();
+            proto.Function.DynamicInvoke(self);
 
             UpdateThreatAndNemesis(self);
             UpdateAi(self);

@@ -101,7 +101,7 @@ namespace DeadCellsMultiplayerX
             var self = game.hero;
             //Mob.Class.create("Scarecrow".AsHaxeString(), game.curLevel, self.cx, self.cy, 30, Ref<int>.In(30));
 
-            var mob = new dc.level.Mob("Scarecrow".AsHaxeString(), self.cx, self.cy, 30, 30, false);
+            var mob = new dc.level.Mob("zombie".AsHaxeString(), self.cx, self.cy, 30, 30, false);
             game.curLevel.attachMob(mob);
 
             InventItem testItem = new InventItem(

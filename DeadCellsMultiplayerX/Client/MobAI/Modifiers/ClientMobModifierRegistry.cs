@@ -85,6 +85,9 @@ namespace DeadCellsMultiplayerX.Client.MobAI.Modifiers
             Mob mob, MobModifierEvent evt, long tick)
             => inner.DispatchClientEvent(mob, evt, tick);
 
+        public void OnMobFixedUpdate(Mob mob, long tick)
+            => inner.DispatchFixedUpdate(mob, tick);
+
         /// <summary>
         /// 清空全部绑定。
         /// </summary>

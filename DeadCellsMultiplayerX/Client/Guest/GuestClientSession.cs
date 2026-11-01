@@ -7,28 +7,24 @@ using dc.tool.atk;
 using DeadCellsMultiplayerX.Client.Core.Event;
 using DeadCellsMultiplayerX.Client.Combat;
 using DeadCellsMultiplayerX.Client.Heroes.LocalHero;
-using DeadCellsMultiplayerX.Client.Heroes.Ghost;
 using DeadCellsMultiplayerX.Client.Replication;
 using DeadCellsMultiplayerX.Client.Heroes.RemoteHero;
-using DeadCellsMultiplayerX.Client.Mobs;
-using DeadCellsMultiplayerX.Client.Effects;
 using DeadCellsMultiplayerX.Client.Snapshot;
-using DeadCellsMultiplayerX.Client.Host;
-using DeadCellsMultiplayerX.Common.Data;
 using DeadCellsMultiplayerX.Common.Data.Snapshot;
 using DeadCellsMultiplayerX.Common.Ghosts;
 using DeadCellsMultiplayerX.Server.Core;
 using DeadCellsMultiplayerX.Utils;
 using Hashlink.Proxy.Clousre;
 using ModCore;
-using ModCore.Events;
 using ModCore.Events.Interfaces.Game;
-using ModCore.Events.Interfaces.Game.Hero;
 using ModCore.Modules;
 using ModCore.Utilities;
 using StreamJsonRpc;
 using System.Diagnostics;
 using DeadCellsMultiplayerX.Client.Core;
+using DeadCellsMultiplayerX.Client.MobAI;
+using dc.tool.skill;
+using DeadCellsMultiplayerX.Client.Extensions;
 
 namespace DeadCellsMultiplayerX.Client.Guest
 {
@@ -189,6 +185,9 @@ namespace DeadCellsMultiplayerX.Client.Guest
             Hook_Game.onDispose += Hook_Game_onDispose;
             Hook_Mob.aiLocked += Hook_Mob_aiLocked;
             Hook_Mob.onDie += Hook_Mob_onDie;
+            Hook_Mob.canUpdate += Hook_Mob_canUpdate;
+            Hook_Mob.fixedUpdate += Hook_Mob_fixedUpdate;
+            Hook_Mob.moveBlocked += Hook_Mob_moveBlocked;
             Hook_Game.init += Hook_Game_init;
             Hook_Power.update += Hook_Power_update;
             Hook__AttackUtils.applyHitResult += Hook_AttackUtils_applyHitResult;
@@ -196,6 +195,37 @@ namespace DeadCellsMultiplayerX.Client.Guest
             Hook__AttackUtils.createFromHeroAndHit += Hook_AttackUtils_createFromHeroAndHit;
             Hook_LevelAreaAffect.init += Hook_LevelAreaAffect_init;
             Hook_LevelAreaAffect.applyAnotherAffect += Hook_LevelAreaAffect_applyAnotherAffect;
+            Hook_OldMobSkill.update += Hook_OldMobSkill_update;
+            Hook_OldSkill.isReady += Hook_OldSkill_isReady;
+        }
+
+        private bool Hook_OldSkill_isReady(Hook_OldSkill.orig_isReady orig, OldSkill self)
+        {
+            return true;
+        }
+
+        private void Hook_OldMobSkill_update(Hook_OldMobSkill.orig_update orig, OldMobSkill self)
+        {
+            self.MobSkillUpdate();
+        }
+
+        private bool Hook_Mob_moveBlocked(Hook_Mob.orig_moveBlocked orig, Mob self)
+        {
+            return true;
+        }
+
+        private void Hook_Mob_fixedUpdate(Hook_Mob.orig_fixedUpdate orig, Mob self)
+        {
+            // orig(self);
+            ClientMobself.ClientfixedUpdate(self);
+
+            remoteWorld?.MobModifiers.OnMobFixedUpdate(
+             self, SyncedTimeMs);
+        }
+
+        private bool Hook_Mob_canUpdate(Hook_Mob.orig_canUpdate orig, Mob self)
+        {
+            return true;
         }
 
         /// <summary>
@@ -395,6 +425,9 @@ namespace DeadCellsMultiplayerX.Client.Guest
         {
             orig(self);
             self.infection.destroy();
+#if DEBUG
+            dc.ui.Console.Class.ME.flags.set("area".AsHaxeString(), 1);
+#endif
         }
 
         private bool Hook_Mob_aiLocked(Hook_Mob.orig_aiLocked orig, Mob self)
