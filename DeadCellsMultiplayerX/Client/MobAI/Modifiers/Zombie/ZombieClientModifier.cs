@@ -54,7 +54,22 @@ namespace DeadCellsMultiplayerX.Client.MobAI.Modifiers.Zombie
 
         public void OnEvent(MobHookContext context, MobModifierEvent evt)
         {
-            
+            if (context == null || evt == null) return;
+            context.Mob.setAttackTarget(Game.Class.ME.hero);
+            context.Mob.setNemesisTarget(Game.Class.ME.hero);
+
+            var skills = context.Mob.oldSkills;
+
+            foreach (var item in skills)
+            {
+                if (item is OldMobSkill mobSkill)
+                {
+                    if (mobSkill.id.ToString() == evt.SkillId)
+                    {
+                        mobSkill.prepareOnOwnerTarget(true, null);
+                    }
+                }
+            }
         }
 
         public void update(MobHookContext context)

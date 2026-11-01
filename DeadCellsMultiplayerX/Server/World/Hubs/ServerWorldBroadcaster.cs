@@ -215,7 +215,7 @@ namespace DeadCellsMultiplayerX.Server.World.Hubs
                 DespawnedMobs = mobs.Despawned,
                 Actions = ghosts.DrainActions(),
                 AreaAffects = areaAffects.Collect(serverTimeMs),
-                GhostHits = ghosts.DrainHits(),
+                MobEvents = ghosts.DrainMobEvents().ToList(),
             };
 
             if (BroadcastFrames == 1)

@@ -5,6 +5,7 @@ using dc.en;
 using dc.tool.atk;
 using dc.tool.skill;
 using DeadCellsMultiplayerX.Common.MobAI.Events;
+using DeadCellsMultiplayerX.Server.World.Ghosts.Team;
 using Serilog;
 
 namespace DeadCellsMultiplayerX.Common.MobAI.Modifiers
@@ -23,8 +24,8 @@ namespace DeadCellsMultiplayerX.Common.MobAI.Modifiers
         private readonly List<MobHandler> postUpdate = [];
         private readonly List<MobBehaviourHandler> behaviourAi = [];
         private readonly List<MobBehaviourHandler> fixedUpdateHandled = [];
-        private readonly List<MobSkillHandler> skillPrepare = [];
-        private readonly List<MobSkillHandler> skillExecute = [];
+        private readonly List<MobSkillPrepareHandler> skillPrepare = [];
+        private readonly List<MobSkillExecuteHandle> skillExecute = [];
         private readonly List<MobHandler> mobDied = [];
         private readonly List<MobAttackResultHandler> attackResult = [];
         private readonly List<MobBehaviourHandler> aiLocked = [];
@@ -49,10 +50,10 @@ namespace DeadCellsMultiplayerX.Common.MobAI.Modifiers
         public void OnFixedUpdateHandled(MobBehaviourHandler handler)
             => Add(fixedUpdateHandled, handler);
 
-        public void OnSkillPrepare(MobSkillHandler handler)
+        public void OnSkillPrepare(MobSkillPrepareHandler handler)
             => Add(skillPrepare, handler);
 
-        public void OnSkillExecute(MobSkillHandler handler)
+        public void OnSkillExecute(MobSkillExecuteHandle handler)
             => Add(skillExecute, handler);
 
         public void OnMobDied(MobHandler handler)
@@ -88,8 +89,8 @@ namespace DeadCellsMultiplayerX.Common.MobAI.Modifiers
         internal bool DispatchFixedUpdateHandled(MobHookContext context)
             => InvokeAny(fixedUpdateHandled, context, "OnFixedUpdateHandled");
 
-        internal void DispatchSkillPrepare(MobHookContext context, OldSkill skill)
-            => Invoke(skillPrepare, context, skill, "OnSkillPrepare");
+        internal void DispatchSkillPrepare(MobHookContext context, OldSkill skill, GhostCombatant target, int? data)
+            => Invoke(skillPrepare, context, skill, target, data, "OnSkillPrepare");
 
         internal void DispatchSkillExecute(MobHookContext context, OldSkill skill)
             => Invoke(skillExecute, context, skill, "OnSkillExecute");
@@ -130,7 +131,7 @@ namespace DeadCellsMultiplayerX.Common.MobAI.Modifiers
         }
 
         private static void Invoke(
-            List<MobSkillHandler> handlers,
+            List<MobSkillExecuteHandle> handlers,
             MobHookContext context,
             OldSkill skill,
             string hook)
@@ -140,6 +141,29 @@ namespace DeadCellsMultiplayerX.Common.MobAI.Modifiers
                 try
                 {
                     handler(context, skill);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warning(ex,
+                        "Mob hook failed: hook={Hook} mob={Mob} netId={NetId}",
+                        hook, context.Mob.GetType().Name, context.NetId);
+                }
+            }
+        }
+
+        private static void Invoke(
+            List<MobSkillPrepareHandler> handlers,
+            MobHookContext context,
+            OldSkill skill,
+            GhostCombatant target,
+            int? data,
+            string hook)
+        {
+            foreach (var handler in handlers)
+            {
+                try
+                {
+                    handler(context, skill, target, data);
                 }
                 catch (Exception ex)
                 {
@@ -189,7 +213,7 @@ namespace DeadCellsMultiplayerX.Common.MobAI.Modifiers
                         "Mob hook failed: hook={Hook} mob={Mob} netId={NetId}",
                         hook, context.Mob.GetType().Name, context.NetId);
                 }
-               
+
             }
 
             return false;

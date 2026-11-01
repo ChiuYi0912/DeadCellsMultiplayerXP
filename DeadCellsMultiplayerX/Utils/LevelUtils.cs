@@ -64,15 +64,5 @@ namespace DeadCellsMultiplayerX.Utils
                 && level.GetSubLevelIndex() == subLevelIndex;
         }
 
-        public static bool IsLocalLevel(Hero hero, GhostHitEvent hit)
-        {
-            var level = hero._level;
-            if (level == null)
-                return false;
-
-            string levelId = level.map?.id?.ToString() ?? string.Empty;
-            return string.Equals(levelId, hit.LevelId, StringComparison.Ordinal)
-                && level.GetSubLevelIndex() == hit.SubLevelIndex;
-        }
     }
 }

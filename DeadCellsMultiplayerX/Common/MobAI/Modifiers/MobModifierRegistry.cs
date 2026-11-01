@@ -5,6 +5,7 @@ using dc.en;
 using dc.tool.atk;
 using dc.tool.skill;
 using DeadCellsMultiplayerX.Common.MobAI.Events;
+using DeadCellsMultiplayerX.Server.World.Ghosts.Team;
 using Serilog;
 
 namespace DeadCellsMultiplayerX.Common.MobAI.Modifiers
@@ -13,7 +14,7 @@ namespace DeadCellsMultiplayerX.Common.MobAI.Modifiers
     /// 按 mob CLR 类型注册修改器
     /// 服务端和客户端各持有一个实例
     /// </summary>
-    public sealed class MobModifierRegistry<TContext>
+    internal sealed class MobModifierRegistry<TContext>
         where TContext : IMobModifierContext
     {
         private sealed class Entry
@@ -198,11 +199,10 @@ namespace DeadCellsMultiplayerX.Common.MobAI.Modifiers
         /// <summary>
         /// 技能准备通知
         /// </summary>
-        public void DispatchSkillPrepare(Mob mob, OldSkill skill, long tick)
+        public void DispatchSkillPrepare(Mob mob, OldSkill skill, GhostCombatant target, int? data, long tick)
         {
             if (TryGetEntry(mob, out var entry))
-                entry.Hooks.DispatchSkillPrepare(
-                    CreateContext(entry, tick), skill);
+                entry.Hooks.DispatchSkillPrepare(CreateContext(entry, tick), skill, target, data);
         }
 
         /// <summary>

@@ -270,6 +270,28 @@ namespace DeadCellsMultiplayerX.Client.Mobs
             session.Prediction.ClearNetId(dynamic.NetId);
         }
 
+        /// <summary>
+        /// 统一分发服务端路由出来的 mob 事件。本阶段只记录，不扣血。
+        /// </summary>
+        public void TickMobEvents(WorldFrame frame)
+        {
+            if (frame?.MobEvents == null || frame.MobEvents.Count == 0)
+                return;
+
+            foreach (var evt in frame.MobEvents)
+            {
+                if (evt == null || evt.Epoch != frame.Epoch)
+                    continue;
+
+                var mob = Receiver.Get(evt.MobNetId);
+                if (mob == null || mob.destroyed)
+                    continue;
+
+                remoteWorld.MobModifiers.DispatchClientEvent(
+                    mob, evt, session.SyncedTimeMs);
+            }
+        }
+
         public void Clear()
         {
             session.Prediction.Clear();

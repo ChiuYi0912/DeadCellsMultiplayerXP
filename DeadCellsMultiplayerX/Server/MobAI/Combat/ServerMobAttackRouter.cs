@@ -2,7 +2,6 @@ using System.Collections.Generic;
 using DeadCellsMultiplayerX.Common.MobAI.Contracts;
 using DeadCellsMultiplayerX.Common.MobAI.Events;
 using DeadCellsMultiplayerX.Server.MobAI.Events;
-using DeadCellsMultiplayerX.Server.MobAI.Execution;
 using Serilog;
 
 namespace DeadCellsMultiplayerX.Server.MobAI.Combat
@@ -15,67 +14,52 @@ namespace DeadCellsMultiplayerX.Server.MobAI.Combat
     {
         private static readonly ILogger Logger = Log.ForContext("SourceContext", "ServerMobAttackRouter");
 
-        private readonly IMobExecutor? executor;
         private readonly IServerMobEventBus? events;
-        private readonly Queue<MobActionPlan> pending = new();
+        private readonly Queue<MobModifierEvent> pendingHits = new();
+        private long nextActionId;
 
         public ServerMobAttackRouter(
-            IMobExecutor? executor = null,
             IServerMobEventBus? events = null)
         {
-            this.executor = executor;
             this.events = events;
         }
 
         /// <inheritdoc />
-        public void Submit(MobActionPlan plan)
+        public void SubmitHit(MobModifierEvent hit)
         {
-            if (plan == null || plan.ActionId <= 0 || plan.MobNetId == 0)
+            if (hit == null || hit.MobNetId == 0)
                 return;
 
-            pending.Enqueue(plan);
+            pendingHits.Enqueue(hit);
         }
 
         /// <inheritdoc />
         public IReadOnlyList<MobModifierEvent> Tick(long serverTimeMs)
         {
-            if (pending.Count == 0)
+            if (pendingHits.Count == 0)
                 return [];
 
             var result = new List<MobModifierEvent>();
 
-            while (pending.TryDequeue(out var plan))
+            while (pendingHits.TryDequeue(out var hit))
             {
-                bool started = executor?.TryStart(plan) ?? true;
-                if (!started)
-                {
-                    Logger.Debug(
-                        "Mob attack rejected by executor: mob={NetId} action={ActionId} skill={Skill}",
-                        plan.MobNetId, plan.ActionId, plan.SkillId);
-                    continue;
-                }
+                hit.ActionId = ++nextActionId;
+                hit.Kind = MobModifierEventKind.AttackHit;
+                if (hit.ServerTimeMs <= 0)
+                    hit.ServerTimeMs = serverTimeMs;
 
-                var evt = new MobModifierEvent
-                {
-                    Epoch = plan.Epoch,
-                    ActionId = plan.ActionId,
-                    MobNetId = plan.MobNetId,
-                    Kind = MobModifierEventKind.ActionStarted,
-                    SkillId = plan.SkillId,
-                    TargetGuid = plan.TargetGuid,
-                    ServerTimeMs = serverTimeMs,
-                    LevelId = plan.LevelId,
-                    SubLevelIndex = plan.SubLevelIndex,
-                };
-
-                result.Add(evt);
-                events?.Publish(evt);
+                result.Add(hit);
+                events?.Publish(hit);
             }
 
             return result;
         }
 
         /// <inheritdoc />
-        public void Clear() => pending.Clear();
+        public void Clear()
+        {
+            pendingHits.Clear();
+            nextActionId = 0;
+        }
     }
 }

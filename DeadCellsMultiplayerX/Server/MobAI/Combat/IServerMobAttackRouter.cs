@@ -11,9 +11,9 @@ namespace DeadCellsMultiplayerX.Server.MobAI.Combat
     public interface IServerMobAttackRouter
     {
         /// <summary>
-        /// 接收一次释放出来的攻击计划
+        /// 接收一次已发生的命中事件（服务端权威检测，客户端只表现）
         /// </summary>
-        void Submit(MobActionPlan plan);
+        void SubmitHit(MobModifierEvent hit);
 
         /// <summary>
         /// 推进攻击执行，返回本 Tick 产生的事件

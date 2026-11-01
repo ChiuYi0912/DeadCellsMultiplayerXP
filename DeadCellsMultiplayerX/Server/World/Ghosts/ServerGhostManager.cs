@@ -36,8 +36,6 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts
         private readonly ServerMobEventBus mobEvents;
         private readonly ServerMobModifierRegistry mobModifiers;
         private readonly ServerMobAttackRouter mobAttacks;
-        private readonly List<GhostHitEvent> hits = [];
-        private long nextHitId;
 
         public ServerGhostManager(ServerSession session)
         {
@@ -117,72 +115,6 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts
             => teams.TryGet(entity, out combatant);
 
         /// <summary>
-        /// 记录一次 mob 命中 Ghost，返回待广播/发送给 owner 的事件
-        /// </summary>
-        public GhostHitEvent? RecordIncomingHit(
-            GhostCombatant target,
-            AttackData atk)
-        {
-            if (target == null || atk == null)
-                return null;
-
-            if (!target.CombatEnabled || target.IsDead || target.Life <= 0)
-            {
-                Logger.Warning(
-                    "Ghost hit ignored: target={Guid} combat={Combat} dead={Dead} life={Life}",
-                    target.Guid, target.CombatEnabled, target.IsDead, target.Life);
-                return null;
-            }
-
-            if (!atk.isSuccess() || atk.finalDmg <= 0)
-            {
-                Logger.Debug(
-                    "Ghost hit ignored by attack result: target={Guid} success={Success} damage={Damage}",
-                    target.Guid, atk.isSuccess(), atk.finalDmg);
-                return null;
-            }
-
-            var attacker = atk.source as Mob ?? atk.carrier as Mob;
-            uint netId = attacker != null
-                && session.MobRegistry.TryGetNetId(attacker, out uint id)
-                ? id
-                : 0;
-
-            var hit = new GhostHitEvent
-            {
-                Epoch = world.Epoch,
-                HitId = ++nextHitId,
-                Guid = target.Guid,
-                AttackerNetId = netId,
-                Damage = atk.finalDmg,
-                ServerTimeMs = session.CurrentTimeStamp,
-                LevelId = target.Level?.map?.id?.ToString() ?? target.Ghost.LevelId,
-                SubLevelIndex = target.Level?.GetSubLevelIndex()
-                    ?? target.Ghost.SubLevelIndex,
-            };
-
-            hits.Add(hit);
-
-            Logger.Information(
-                "Ghost hit recorded: target={Guid} attacker={NetId} damage={Damage}",
-                hit.Guid, hit.AttackerNetId, hit.Damage);
-
-            return hit;
-        }
-
-        /// <summary>
-        /// 取出本帧待广播的 mob 命中 Ghost 事件
-        /// </summary>
-        public List<GhostHitEvent> DrainHits()
-        {
-            if (hits.Count == 0) return [];
-
-            var result = new List<GhostHitEvent>(hits);
-            hits.Clear();
-            return result;
-        }
-
-        /// <summary>
         /// 世界重置,写入新 epoch 并清空 Ghost 状态
         /// </summary>
         public void BeginEpoch(int value)
@@ -192,8 +124,6 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts
 
             mobEvents.Clear();
             mobAttacks.Clear();
-            hits.Clear();
-            nextHitId = 0;
 
             Logger.Information(
                 "Ghost action epoch begin: {Epoch}", value);
@@ -209,8 +139,6 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts
             mobModifiers.Clear();
             mobEvents.Clear();
             mobAttacks.Clear();
-            hits.Clear();
-            nextHitId = 0;
         }
 
         /// <summary>

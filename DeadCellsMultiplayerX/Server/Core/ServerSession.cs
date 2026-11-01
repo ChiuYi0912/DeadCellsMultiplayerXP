@@ -192,31 +192,6 @@ namespace DeadCellsMultiplayerX.Server.Core
             ghosts.RemoveGuest(guid);
         }
 
-        /// <summary>
-        /// 可靠地把 mob 命中 Ghost 的事件送到 owner
-        /// </summary>
-        public void SendGhostHit(GhostHitEvent hit)
-        {
-            if (hit == null || string.IsNullOrEmpty(hit.Guid))
-                return;
-
-            if (!TryGetGuest(hit.Guid, out var guest) || guest.IsDisposed)
-            {
-                Logger.Warning(
-                    "Ghost hit owner unavailable: guid={Guid} damage={Damage}",
-                    hit.Guid, hit.Damage);
-                return;
-            }
-
-            Logger.Information(
-                "Ghost hit sent: guid={Guid} damage={Damage}",
-                hit.Guid, hit.Damage);
-
-            _ = guest.guest.ApplyGhostHit(hit).ContinueWith(
-                t => Logger.Warning(t.Exception, "ApplyGhostHit failed"),
-                TaskContinuationOptions.OnlyOnFaulted);
-        }
-
         void IOnFrameUpdate.OnFrameUpdate(double dt)
         {
             timeSystem.Tick();

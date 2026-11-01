@@ -137,7 +137,7 @@ namespace DeadCellsMultiplayerX.Client.Replication
             areaAffects.ApplyFrame(frame);
             ghosts.ApplyFrame(frame);
             mobs.ApplyFrame(frame);
-            session.GhostHits.ApplyFrame(frame);
+            mobs.TickMobEvents(frame);
         }
 
         protected override void MyDispose()

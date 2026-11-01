@@ -5,7 +5,7 @@ namespace DeadCellsMultiplayerX.Common.MobAI.Modifiers
     /// <summary>
     /// 泛型修改器基类
     /// </summary>
-    public abstract class MobModifierBase<TMob> : IMobModifier<TMob>
+    internal abstract class MobModifierBase<TMob> : IMobModifier<TMob>
         where TMob : Mob
     {
         /// <inheritdoc />

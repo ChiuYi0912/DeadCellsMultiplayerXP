@@ -1,6 +1,11 @@
+using dc;
+using dc.en;
+using dc.tool.skill;
+using DeadCellsMultiplayerX.Common.MobAI.Events;
 using DeadCellsMultiplayerX.Common.MobAI.Modifiers;
 using DeadCellsMultiplayerX.Server.Core;
 using DeadCellsMultiplayerX.Server.World.Ghosts.Team;
+using DeadCellsMultiplayerX.Utils;
 using Serilog;
 using GameZombie = dc.en.mob.Zombie;
 
@@ -28,16 +33,32 @@ namespace DeadCellsMultiplayerX.Server.MobAI.Modifiers.Zombie
         }
 
         /// <inheritdoc />
-
-        /// <inheritdoc />
         public override void InitHook(IMobHookRegistry hooks)
         {
-            // 占位：未来在这里实现完全自定义的移动/决策。
-            //hooks.OnBehaviourAi(_ => true);
-            // hooks.OnFixedUpdateHandled(_ => false);
-            // hooks.OnMobDied(_ => { });
-            hooks.OnAiLocked(h => false);
-            hooks.OnFixedUpdateHandled(h => true);
+            hooks.OnSkillPrepare(SandSkills);
+        }
+
+        private void SandSkills(MobHookContext context, OldSkill skill, GhostCombatant target, int? data)
+        {
+            if (session.MobRegistry.TryGetNetId(
+                    context.Mob, out uint netId))
+            {
+                session.Ghosts.MobAttacks.SubmitHit(
+                    new MobModifierEvent
+                    {
+                        Epoch = session.Broadcaster.Epoch,
+                        MobNetId = netId,
+                        Kind = MobModifierEventKind.ActionStarted,
+                        TargetGuid = target.Guid,
+                        SkillId = skill.id.ToString(),
+                        SkillRatio = data,
+                        ServerTimeMs = session.CurrentTimeStamp,
+                        LevelId = target.Level?.map?.id?.ToString()
+                            ?? string.Empty,
+                        SubLevelIndex = target.Level
+                            ?.GetSubLevelIndex() ?? -1,
+                    });
+            }
         }
 
         /// <inheritdoc />

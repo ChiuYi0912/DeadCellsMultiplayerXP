@@ -1,3 +1,5 @@
+using MessagePack;
+
 namespace DeadCellsMultiplayerX.Common.MobAI.Events
 {
     /// <summary>
@@ -38,58 +40,61 @@ namespace DeadCellsMultiplayerX.Common.MobAI.Events
 
     /// <summary>
     /// 修改器产生的纯数据事件
-    /// 当前只用于进程内事件总线，尚未写入 WorldFrame
+    /// 同时用于服务端/客户端进程内总线与 WorldFrame 传输。
     /// </summary>
+    [MessagePackObject]
     public sealed class MobModifierEvent
     {
         /// <summary>
         /// 世界重置代号
         /// </summary>
-        public int Epoch { get; init; }
+        [Key(0)] public int Epoch { get; set; }
 
         /// <summary>
         /// 动作 id
         /// </summary>
-        public long ActionId { get; init; }
+        [Key(1)] public long ActionId { get; set; }
 
         /// <summary>
         /// 产生事件的 mob
         /// </summary>
-        public uint MobNetId { get; init; }
+        [Key(2)] public uint MobNetId { get; set; }
 
         /// <summary>
         /// 事件类型
         /// </summary>
-        public MobModifierEventKind Kind { get; init; }
+        [Key(3)] public MobModifierEventKind Kind { get; set; }
 
         /// <summary>
         /// 技能 id；非技能事件可为空
         /// </summary>
-        public string SkillId { get; init; } = string.Empty;
+        [Key(4)] public string SkillId { get; set; } = string.Empty;
 
         /// <summary>
         /// 目标玩家 guid；无目标时为空
         /// </summary>
-        public string TargetGuid { get; init; } = string.Empty;
+        [Key(5)] public string TargetGuid { get; set; } = string.Empty;
 
         /// <summary>
         /// 服务端时间戳
         /// </summary>
-        public long ServerTimeMs { get; init; }
+        [Key(6)] public long ServerTimeMs { get; set; }
 
         /// <summary>
         /// 事件发生时所在关卡
         /// </summary>
-        public string LevelId { get; init; } = string.Empty;
+        [Key(7)] public string LevelId { get; set; } = string.Empty;
 
         /// <summary>
         /// 事件发生时所在子关卡
         /// </summary>
-        public int SubLevelIndex { get; init; } = -1;
+        [Key(8)] public int SubLevelIndex { get; set; } = -1;
 
         /// <summary>
         /// 预留的自定义负载
         /// </summary>
-        public string? Data { get; init; }
+        [Key(10)] public string? Data { get; set; }
+
+        [Key(11)] public double? SkillRatio { get; set; }
     }
 }

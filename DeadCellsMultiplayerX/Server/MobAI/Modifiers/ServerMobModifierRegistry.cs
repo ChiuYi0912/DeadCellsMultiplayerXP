@@ -89,11 +89,16 @@ namespace DeadCellsMultiplayerX.Server.MobAI.Modifiers
         public void DispatchPostUpdate(Mob mob, long tick)
             => inner.DispatchPostUpdate(mob, tick);
 
-        public void DispatchSkillPrepare(Mob mob, OldSkill skill, long tick)
-            => inner.DispatchSkillPrepare(mob, skill, tick);
+        public void DispatchSkillPrepare(Mob mob, OldSkill skill, Entity target, int? data, long tick)
+        {
+            if (mob == null || mob.destroyed || skill == null || skill.destroyed) return;
+            if (!session.Ghosts.TryGetCombatant(target, out var combatant))
+                return;
 
-        public void DispatchSkillExecute(Mob mob, OldSkill skill, long tick)
-            => inner.DispatchSkillExecute(mob, skill, tick);
+            inner.DispatchSkillPrepare(mob, skill, combatant, data, tick);
+        }
+
+        public void DispatchSkillExecute(Mob mob, OldSkill skill, long tick) => inner.DispatchSkillExecute(mob, skill, tick);
 
         public void DispatchMobDied(Mob mob, long tick)
             => inner.DispatchMobDied(mob, tick);

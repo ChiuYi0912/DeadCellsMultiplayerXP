@@ -69,7 +69,6 @@ namespace DeadCellsMultiplayerX.Client.Guest
         private LocalCombatPrediction? prediction;
         private GhostCombatResolver? ghostCombat;
         private CombatDeathGate? deathGate;
-        private GhostHitReceiver? ghostHits;
 
         /// <summary>
         /// 本地武器命中预测
@@ -85,11 +84,6 @@ namespace DeadCellsMultiplayerX.Client.Guest
         /// 允许客户端 mob 执行死亡的闸门
         /// </summary>
         internal CombatDeathGate DeathGate => deathGate ?? throw new InvalidOperationException();
-
-        /// <summary>
-        /// 服务端 mob 命中 Ghost 的客户端结算器
-        /// </summary>
-        internal GhostHitReceiver GhostHits => ghostHits ?? throw new InvalidOperationException();
 
         public volatile bool serverDrivenTransition = false;
         private readonly ClientWorldSendBuffer sendBuffer = new();
@@ -158,7 +152,6 @@ namespace DeadCellsMultiplayerX.Client.Guest
         {
             prediction?.Clear();
             deathGate?.Clear();
-            ghostHits?.Clear();
             remoteWorld?.Dispose();
             remoteWorld = new RemoteWorld(this, client.Guid);
             sendBuffer.ResetLocalHeroState();
@@ -169,7 +162,6 @@ namespace DeadCellsMultiplayerX.Client.Guest
             deathGate = new CombatDeathGate();
             ghostCombat = new GhostCombatResolver(this);
             prediction = new LocalCombatPrediction(this);
-            ghostHits = new GhostHitReceiver(this);
             localCapture = new LocalGhostCapture(this);
             localCapture.Init();
 
@@ -198,7 +190,7 @@ namespace DeadCellsMultiplayerX.Client.Guest
             Hook_OldMobSkill.update += Hook_OldMobSkill_update;
             Hook_OldSkill.isReady += Hook_OldSkill_isReady;
         }
-
+        #region Hooks
         private bool Hook_OldSkill_isReady(Hook_OldSkill.orig_isReady orig, OldSkill self)
         {
             return true;
@@ -301,43 +293,33 @@ namespace DeadCellsMultiplayerX.Client.Guest
             AttackData atk,
             Entity target)
         {
-            if (target is not Mob mob || remoteWorld?.IsRemoteMob(mob) != true)
+            // 远端 Mob 只播放受击表现，本地不再直接扣血/致死。
+            if (target is Mob mob && remoteWorld?.IsRemoteMob(mob) == true)
             {
-                orig(atk, target);
+                if (replayVisualDepth == 0
+                    && atk != null
+                    && atk.isSuccess())
+                {
+                    PlayHitVisual(atk, mob);
+                }
+
                 return;
             }
 
-            if (replayVisualDepth != 0
-                || atk == null
-                || !atk.isSuccess())
-            {
-                return;
-            }
+            // if (target is Hero hero
+            //     && !ReferenceEquals(hero, Game?.hero))
+            //     return;
 
-            var receiver = remoteWorld.Mobs.Receiver;
+            // var attacker = atk?.source as Mob ?? atk?.carrier as Mob;
+            // if (target is Hero localHero
+            //     && ReferenceEquals(localHero, Game?.hero)
+            //     && attacker != null
+            //     && remoteWorld?.IsRemoteMob(attacker) == true)
+            // {
+            //     return;
+            // }
 
-            if (receiver.TryGetNetId(mob, out uint netId)
-                && Prediction.IsPredictedDead(netId))
-            {
-                return;
-            }
-
-            GhostReplayGuard.MarkVisualHit(mob);
-
-            // ghost 的服务端事件已经到达，使用同帧状态结算
-            if (GhostCombat.TryHandleHit(atk, mob))
-                return;
-
-            // 本地 客户 致死走真实 orig，非致死走轻量预测
-            if (Prediction.TryHandleLocalHit(
-                    atk, mob,
-                    () => orig(atk, target),
-                    () => PlayHitVisual(atk, mob)))
-            {
-                return;
-            }
-
-            PlayHitVisual(atk, mob);
+            orig(atk, target);
         }
 
         /// <summary>
@@ -512,18 +494,18 @@ namespace DeadCellsMultiplayerX.Client.Guest
             Dispose();
         }
 
+        #endregion
+
         protected override void MyDispose()
         {
             base.MyDispose();
 
             prediction?.Clear();
             deathGate?.Clear();
-            ghostHits?.Clear();
 
             remoteWorld?.Dispose();
             remoteWorld = null;
             prediction = null;
-            ghostHits = null;
             sendBuffer.Clear();
 
             serverStream?.Dispose();
@@ -755,17 +737,6 @@ namespace DeadCellsMultiplayerX.Client.Guest
         /// </summary>
         public Task<ClientFrameBundle> RequestClientFrames(ClientFrameRangeRequest request)
             => Task.FromResult(sendBuffer.BuildBundle(request));
-
-        /// <summary>
-        /// 服务端确认的 mob 命中 Ghost
-        /// </summary>
-        public Task ApplyGhostHit(GhostHitEvent hit)
-        {
-            Debug.Assert(ghostHits != null);
-
-            ghostHits.Apply(hit);
-            return Task.CompletedTask;
-        }
 
         internal void ObserveWorldEpoch(int epoch) => sendBuffer.SetEpoch(epoch);
 

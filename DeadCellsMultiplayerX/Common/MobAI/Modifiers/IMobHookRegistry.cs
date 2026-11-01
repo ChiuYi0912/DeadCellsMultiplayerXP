@@ -3,41 +3,46 @@ using dc.en;
 using dc.tool.atk;
 using dc.tool.skill;
 using DeadCellsMultiplayerX.Common.MobAI.Events;
+using DeadCellsMultiplayerX.Server.World.Ghosts.Team;
 
 namespace DeadCellsMultiplayerX.Common.MobAI.Modifiers
 {
     /// <summary>
     /// 服务端/客户端通用 hook 回调
     /// </summary>
-    public delegate void MobHandler(MobHookContext context);
+    internal delegate void MobHandler(MobHookContext context);
 
     /// <summary>
-    /// 技能相关 hook 回调
+    /// 技能准备 hook 回调
     /// </summary>
-    public delegate void MobSkillHandler(MobHookContext context, OldSkill skill);
+    internal delegate void MobSkillPrepareHandler(MobHookContext context, OldSkill skill, GhostCombatant target, int? data);
+
+    /// <summary>
+    /// 技能释放
+    /// </summary>
+    internal delegate void MobSkillExecuteHandle(MobHookContext context, OldSkill skill);
 
     /// <summary>
     /// 服务端命中结果 hook；返回 true 表示已处理
     /// </summary>
-    public delegate bool MobAttackResultHandler(
+    internal delegate bool MobAttackResultHandler(
         MobHookContext context, AttackData atk, Entity target);
 
     /// <summary>
     /// Mob 自定义事件 hook
     /// </summary>
-    public delegate void MobEventHandler(
-        MobHookContext context, MobModifierEvent evt);
+    internal delegate void MobEventHandler(MobHookContext context, MobModifierEvent evt);
 
     /// <summary>
     /// 可拦截 hook；返回 true 表示调用方跳过原版逻辑
     /// </summary>
-    public delegate bool MobBehaviourHandler(MobHookContext context);
+    internal delegate bool MobBehaviourHandler(MobHookContext context);
 
     /// <summary>
     /// 修改器的 hook 注册表
     /// 每个 mob 实例一个，由注册器注入 <see cref="IMobModifier.InitHook"/>。
     /// </summary>
-    public interface IMobHookRegistry
+    internal interface IMobHookRegistry
     {
         /// <summary>
         /// 服务端独立 Tick
@@ -72,12 +77,12 @@ namespace DeadCellsMultiplayerX.Common.MobAI.Modifiers
         /// <summary>
         /// 技能准备通知
         /// </summary>
-        void OnSkillPrepare(MobSkillHandler handler);
+        void OnSkillPrepare(MobSkillPrepareHandler handler);
 
         /// <summary>
         /// 技能执行通知
         /// </summary>
-        void OnSkillExecute(MobSkillHandler handler);
+        void OnSkillExecute(MobSkillExecuteHandle handler);
 
         /// <summary>
         /// mob 死亡通知

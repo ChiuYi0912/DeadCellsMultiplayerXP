@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using DeadCellsMultiplayerX.Common.Data.Ghosts;
+using DeadCellsMultiplayerX.Common.MobAI.Events;
 using MessagePack;
 using DeadCellsMultiplayerX.Common.Core;
 
@@ -68,8 +69,8 @@ namespace DeadCellsMultiplayerX.Common.Data.Snapshot
         [Key(10)] public List<LevelAreaAffectState> AreaAffects { get; set; } = [];
 
         /// <summary>
-        /// 本帧服务端判定的 mob 命中 Ghost 事件
+        /// 本帧统一路由的 mob 事件
         /// </summary>
-        [Key(11)] public List<GhostHitEvent> GhostHits { get; set; } = [];
+        [Key(11)] public List<MobModifierEvent> MobEvents { get; set; } = [];
     }
 }
