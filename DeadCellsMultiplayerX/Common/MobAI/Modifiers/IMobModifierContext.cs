@@ -32,6 +32,6 @@ namespace DeadCellsMultiplayerX.Common.MobAI.Modifiers
         /// <summary>
         /// 查询服务端/客户端提供的依赖
         /// </summary>
-        T? GetService<T>() where T : class;
+        T GetService<T>() where T : class;
     }
 }

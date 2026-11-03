@@ -1,5 +1,6 @@
 using dc.en;
 using DeadCellsMultiplayerX.Client.Guest;
+using DeadCellsMultiplayerX.Client.Heroes.Ghost;
 using DeadCellsMultiplayerX.Client.MobAI.Events;
 using DeadCellsMultiplayerX.Client.Replication;
 using DeadCellsMultiplayerX.Common.MobAI.Modifiers;
@@ -17,7 +18,8 @@ namespace DeadCellsMultiplayerX.Client.MobAI.Modifiers
             long tick,
             GuestClientSession session,
             RemoteWorld world,
-            IClientMobEventBus events)
+            IClientMobEventBus events,
+            RemoteGhostManager remoteGhost)
         {
             Mob = mob;
             NetId = netId;
@@ -25,6 +27,7 @@ namespace DeadCellsMultiplayerX.Client.MobAI.Modifiers
             Session = session;
             World = world;
             Events = events;
+            this.remoteGhost = remoteGhost;
         }
 
         /// <inheritdoc />
@@ -54,6 +57,8 @@ namespace DeadCellsMultiplayerX.Client.MobAI.Modifiers
         /// </summary>
         public IClientMobEventBus Events { get; }
 
+        public RemoteGhostManager remoteGhost { get; }
+
         /// <inheritdoc />
         public T? GetService<T>() where T : class
         {
@@ -65,6 +70,9 @@ namespace DeadCellsMultiplayerX.Client.MobAI.Modifiers
 
             if (typeof(T) == typeof(IClientMobEventBus))
                 return (T)(object)Events;
+
+            if (typeof(T) == typeof(RemoteGhostManager))
+                return (T)(object)remoteGhost;
 
             return null;
         }

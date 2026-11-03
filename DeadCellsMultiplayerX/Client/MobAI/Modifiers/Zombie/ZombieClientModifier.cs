@@ -1,9 +1,14 @@
+using dc.en;
 using dc.pr;
+using dc.tool;
+using dc.tool.atk;
 using dc.tool.skill;
 using DeadCellsMultiplayerX.Client.Guest;
+using DeadCellsMultiplayerX.Client.Heroes.Ghost;
 using DeadCellsMultiplayerX.Client.Replication;
 using DeadCellsMultiplayerX.Common.MobAI.Events;
 using DeadCellsMultiplayerX.Common.MobAI.Modifiers;
+using HaxeProxy.Runtime;
 using ModCore.Utilities;
 using Serilog;
 using GameZombie = dc.en.mob.Zombie;
@@ -55,19 +60,30 @@ namespace DeadCellsMultiplayerX.Client.MobAI.Modifiers.Zombie
         public void OnEvent(MobHookContext context, MobModifierEvent evt)
         {
             if (context == null || evt == null) return;
-            context.Mob.setAttackTarget(Game.Class.ME.hero);
-            context.Mob.setNemesisTarget(Game.Class.ME.hero);
+            Game game = session.Game;
+            Hero hero = game.hero;
+
+            var ghostmanager = context.ModifierContext.GetService<RemoteGhostManager>();
+            if (ghostmanager.TryGet(evt.TargetGuid, out var ghost))
+            {
+                hero = ghost.Hero;
+            }
+
+            context.Mob.setAttackTarget(hero);
+            context.Mob.setNemesisTarget(hero);
 
             var skills = context.Mob.oldSkills;
+
+            hero.maxLife = 9999;
+            hero.life = 9999;
 
             foreach (var item in skills)
             {
                 if (item is OldMobSkill mobSkill)
                 {
-                    if (mobSkill.id.ToString() == evt.SkillId)
-                    {
-                        mobSkill.prepareOnOwnerTarget(true, null);
-                    }
+                    if (mobSkill.id.ToString() != evt.SkillId) continue;
+
+                    mobSkill.prepareOnOwnerTarget(true, null);
                 }
             }
         }
@@ -90,7 +106,6 @@ namespace DeadCellsMultiplayerX.Client.MobAI.Modifiers.Zombie
                 {
                     if (mobSkill.id.ToString() == "jump")
                     {
-                        //mob.resetQueuedOldSkill();
                         mobSkill.prepareOnOwnerTarget(true, null);
                     }
                 }

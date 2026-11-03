@@ -25,6 +25,9 @@ using DeadCellsMultiplayerX.Client.Core;
 using DeadCellsMultiplayerX.Client.MobAI;
 using dc.tool.skill;
 using DeadCellsMultiplayerX.Client.Extensions;
+using dc.hl.types;
+using HaxeProxy.Runtime;
+using Hashlink.Proxy.Objects;
 
 namespace DeadCellsMultiplayerX.Client.Guest
 {
@@ -188,7 +191,14 @@ namespace DeadCellsMultiplayerX.Client.Guest
             Hook_LevelAreaAffect.init += Hook_LevelAreaAffect_init;
             Hook_LevelAreaAffect.applyAnotherAffect += Hook_LevelAreaAffect_applyAnotherAffect;
             Hook_OldMobSkill.update += Hook_OldMobSkill_update;
+            Hook_OldSkill.interrupt += Hook_OldSkill_interrupt;
             Hook_OldSkill.isReady += Hook_OldSkill_isReady;
+        }
+
+        private void Hook_OldSkill_interrupt(Hook_OldSkill.orig_interrupt orig, OldSkill self)
+        {
+            if (self is not OldMobSkill)
+                orig(self);
         }
         #region Hooks
         private bool Hook_OldSkill_isReady(Hook_OldSkill.orig_isReady orig, OldSkill self)
@@ -203,13 +213,13 @@ namespace DeadCellsMultiplayerX.Client.Guest
 
         private bool Hook_Mob_moveBlocked(Hook_Mob.orig_moveBlocked orig, Mob self)
         {
-            return true;
+            return false;
         }
 
         private void Hook_Mob_fixedUpdate(Hook_Mob.orig_fixedUpdate orig, Mob self)
         {
-            // orig(self);
-            ClientMobself.ClientfixedUpdate(self);
+            orig(self);
+            //ClientMobself.ClientfixedUpdate(self);
 
             remoteWorld?.MobModifiers.OnMobFixedUpdate(
              self, SyncedTimeMs);
@@ -368,8 +378,8 @@ namespace DeadCellsMultiplayerX.Client.Guest
             AttackData atk,
             Entity target)
         {
-            if (target is Mob mob && remoteWorld?.IsRemoteMob(mob) == true)
-                return;
+            // if (target is Mob mob && remoteWorld?.IsRemoteMob(mob) == true)
+            //     return;
 
             orig(atk, target);
         }

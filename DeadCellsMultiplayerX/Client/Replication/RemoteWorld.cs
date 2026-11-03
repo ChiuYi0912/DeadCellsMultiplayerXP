@@ -79,7 +79,7 @@ namespace DeadCellsMultiplayerX.Client.Replication
             mobs = new MobSyncManager(session, this, frames);
             heroes = new RemoteHeroManager(session, this);
             localHero = new LocalHeroState(session, this);
-            ghosts = new RemoteGhostManager(session, this);
+            ghosts = new RemoteGhostManager(session, this, localGuid);
             areaAffects = new LevelAreaAffectStateManager(session);
 
             mobEvents = new ClientMobEventBus();

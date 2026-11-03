@@ -25,6 +25,7 @@ namespace DeadCellsMultiplayerX.Client.Heroes.Ghost
 
         private readonly GuestClientSession session;
         private readonly RemoteWorld world;
+        public readonly string localGuid;
 
         /// <summary>
         /// 本地每个客户端对应的技能释放hero
@@ -38,10 +39,11 @@ namespace DeadCellsMultiplayerX.Client.Heroes.Ghost
 
         private int lastEpoch = int.MinValue;
 
-        public RemoteGhostManager(GuestClientSession session, RemoteWorld world)
+        public RemoteGhostManager(GuestClientSession session, RemoteWorld world, string localGuid)
         {
             this.session = session;
             this.world = world;
+            this.localGuid = localGuid;
         }
 
         public int Count => ghosts.Count;

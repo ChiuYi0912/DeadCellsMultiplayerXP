@@ -79,6 +79,7 @@ namespace DeadCellsMultiplayerX.Client.Heroes.LocalHero
             ctx.InCinematic = game.hasCinematic();
 
             UpdateLevel(game, hero);
+            UpdateLoaclTeam(hero, hero._level);
         }
 
         private void UpdateLevel(Game game, Hero hero)
@@ -110,6 +111,26 @@ namespace DeadCellsMultiplayerX.Client.Heroes.LocalHero
                     ctx.CurrentLevelId, ctx.SubLevelIndex, ctx.InSubLevel);
             }
 #endif
+        }
+
+        private void UpdateLoaclTeam(Hero hero, Level level)
+        {
+            var teamHero = level.teamHero;
+            if (teamHero == null) return;
+            if (hero._team != teamHero)
+            {
+                hero._team = teamHero;
+            }
+
+            bool found = false;
+            for (int i = 0; i < teamHero.members.length; i++)
+            {
+                if (ReferenceEquals(teamHero.members.getDyn(i), hero)) { found = true; break; }
+            }
+            if (!found)
+            {
+                teamHero.members.push(hero);
+            }
         }
 
         /// <summary>
@@ -144,7 +165,7 @@ namespace DeadCellsMultiplayerX.Client.Heroes.LocalHero
             return mainLevel != null && curLevel != mainLevel;
         }
 
-        
+
         private static int SafeGetSubLevelIndex(Level level)
         {
             try { return level.GetSubLevelIndex(); }

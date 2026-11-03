@@ -50,7 +50,7 @@ namespace DeadCellsMultiplayerX.Client.MobAI.Modifiers
                 return false;
 
             var context = new ClientMobModifierContext(
-                mob, netId, tick, session, world, events);
+                mob, netId, tick, session, world, events, world.Ghosts);
 
             return inner.TryAttach(context);
         }
