@@ -69,7 +69,7 @@ namespace DeadCellsMultiplayerX.Server.MobAI.Modifiers
         public IServerMobEventBus Events { get; }
 
         /// <inheritdoc />
-        public T? GetService<T>() where T : class
+        public T GetService<T>() where T : class
         {
             if (typeof(T) == typeof(ServerSession))
                 return (T)(object)Session;
@@ -86,7 +86,7 @@ namespace DeadCellsMultiplayerX.Server.MobAI.Modifiers
             if (typeof(T) == typeof(IServerMobEventBus))
                 return (T)(object)Events;
 
-            return null;
+            return null!;
         }
     }
 }

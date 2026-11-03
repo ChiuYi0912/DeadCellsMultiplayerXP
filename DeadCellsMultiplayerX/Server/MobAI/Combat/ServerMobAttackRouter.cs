@@ -1,21 +1,16 @@
 using System.Collections.Generic;
-using DeadCellsMultiplayerX.Common.MobAI.Contracts;
 using DeadCellsMultiplayerX.Common.MobAI.Events;
 using DeadCellsMultiplayerX.Server.MobAI.Events;
-using Serilog;
 
 namespace DeadCellsMultiplayerX.Server.MobAI.Combat
 {
     /// <summary>
-    /// 攻击释放路由骨架
-    /// 当前只负责收集计划并产生事件；具体技能执行留给未来的 IMobExecutor
+    /// 技能事件路由
     /// </summary>
     internal sealed class ServerMobAttackRouter : IServerMobAttackRouter
     {
-        private static readonly ILogger Logger = Log.ForContext("SourceContext", "ServerMobAttackRouter");
-
         private readonly IServerMobEventBus? events;
-        private readonly Queue<MobModifierEvent> pendingHits = new();
+        private readonly Queue<MobModifierEvent> pendingSkills = new();
         private long nextActionId;
 
         public ServerMobAttackRouter(
@@ -25,31 +20,30 @@ namespace DeadCellsMultiplayerX.Server.MobAI.Combat
         }
 
         /// <inheritdoc />
-        public void SubmitHit(MobModifierEvent hit)
+        public void SubmitSkill(MobModifierEvent evt)
         {
-            if (hit == null || hit.MobNetId == 0)
+            if (evt == null || evt.MobNetId == 0)
                 return;
 
-            pendingHits.Enqueue(hit);
+            pendingSkills.Enqueue(evt);
         }
 
         /// <inheritdoc />
         public IReadOnlyList<MobModifierEvent> Tick(long serverTimeMs)
         {
-            if (pendingHits.Count == 0)
+            if (pendingSkills.Count == 0)
                 return [];
 
             var result = new List<MobModifierEvent>();
 
-            while (pendingHits.TryDequeue(out var hit))
+            while (pendingSkills.TryDequeue(out var evt))
             {
-                hit.ActionId = ++nextActionId;
-                hit.Kind = MobModifierEventKind.AttackHit;
-                if (hit.ServerTimeMs <= 0)
-                    hit.ServerTimeMs = serverTimeMs;
+                evt.ActionId = ++nextActionId;
+                if (evt.ServerTimeMs <= 0)
+                    evt.ServerTimeMs = serverTimeMs;
 
-                result.Add(hit);
-                events?.Publish(hit);
+                result.Add(evt);
+                events?.Publish(evt);
             }
 
             return result;
@@ -58,7 +52,7 @@ namespace DeadCellsMultiplayerX.Server.MobAI.Combat
         /// <inheritdoc />
         public void Clear()
         {
-            pendingHits.Clear();
+            pendingSkills.Clear();
             nextActionId = 0;
         }
     }

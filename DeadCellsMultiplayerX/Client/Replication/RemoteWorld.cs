@@ -116,6 +116,7 @@ namespace DeadCellsMultiplayerX.Client.Replication
         /// <param name="nowMs">当前时间戳，单位为毫秒。</param>
         public void Tick(long nowMs)
         {
+            ghosts.Tick(nowMs);
             frames.Tick(nowMs);
             mobs.Tick(nowMs);
         }

@@ -1,10 +1,14 @@
 using dc.en;
+using dc.tool.skill;
 using DeadCellsMultiplayerX.Client.Guest;
 using DeadCellsMultiplayerX.Client.MobAI.Events;
+using DeadCellsMultiplayerX.Client.MobAI.Modifiers.Shield;
 using DeadCellsMultiplayerX.Client.MobAI.Modifiers.Zombie;
 using DeadCellsMultiplayerX.Client.Replication;
 using DeadCellsMultiplayerX.Common.MobAI.Events;
 using DeadCellsMultiplayerX.Common.MobAI.Modifiers;
+using HaxeProxy.Runtime;
+using ModCore.Utilities;
 using GameZombie = dc.en.mob.Zombie;
 
 namespace DeadCellsMultiplayerX.Client.MobAI.Modifiers
@@ -30,6 +34,8 @@ namespace DeadCellsMultiplayerX.Client.MobAI.Modifiers
 
             inner.Register<GameZombie>(
                 ctx => new ZombieClientModifier(ctx.Session, ctx.World));
+            inner.Register<dc.en.mob.Shield>(
+                ctx => new ShieldClientModifier(ctx.Session, ctx.World));
         }
 
         /// <summary>
@@ -79,11 +85,71 @@ namespace DeadCellsMultiplayerX.Client.MobAI.Modifiers
             => inner.DispatchClientUpdate(mob, tick);
 
         /// <summary>
-        /// 客户端自定义事件
+        /// 客户端自定义事件：注册过修改器的 mob 交给修改器；
+        /// 其余 mob 统一按技能 id 释放
         /// </summary>
         public void DispatchClientEvent(
             Mob mob, MobModifierEvent evt, long tick)
-            => inner.DispatchClientEvent(mob, evt, tick);
+        {
+            if (inner.TryGet(mob, out _))
+            {
+                inner.DispatchClientEvent(mob, evt, tick);
+                return;
+            }
+
+            ReleaseSkillEvent(mob, evt, tick);
+        }
+
+        /// <summary>
+        /// 未注册修改器的 mob 统一释放收到的技能事件
+        /// </summary>
+        public void ReleaseSkillEvent(Mob mob, MobModifierEvent evt, long tick)
+        {
+            if (mob == null || mob.destroyed || evt == null)
+                return;
+
+            if (evt.Kind != MobModifierEventKind.ActionStarted
+                || string.IsNullOrEmpty(evt.SkillId))
+                return;
+
+            var hero = ResolveTargetHero(evt.TargetGuid);
+            if (hero == null || hero.destroyed)
+                return;
+
+            mob.setAttackTarget(hero);
+            mob.setNemesisTarget(hero);
+
+            hero.maxLife = 9999;
+            hero.life = 9999;
+
+            var skills = mob.oldSkills;
+            if (skills == null)
+                return;
+
+            foreach (var item in skills)
+            {
+                if (item is not OldMobSkill mobSkill)
+                    continue;
+
+                if (mobSkill.id.ToString() != evt.SkillId)
+                    continue;
+
+                mobSkill.prepareOnOwnerTarget(true, null);
+            }
+        }
+
+        private Hero? ResolveTargetHero(string guid)
+        {
+            if (!string.IsNullOrEmpty(guid)
+                && world.Ghosts.TryGet(guid, out var ghost)
+                && ghost.Hero != null
+                && !ghost.Hero.destroyed)
+            {
+                return ghost.Hero;
+            }
+
+            return session.Game?.hero;
+        }
 
         public void OnMobFixedUpdate(Mob mob, long tick)
             => inner.DispatchFixedUpdate(mob, tick);

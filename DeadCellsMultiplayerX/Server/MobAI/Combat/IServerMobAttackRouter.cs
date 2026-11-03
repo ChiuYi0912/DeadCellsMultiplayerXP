@@ -1,19 +1,18 @@
 using System.Collections.Generic;
-using DeadCellsMultiplayerX.Common.MobAI.Contracts;
 using DeadCellsMultiplayerX.Common.MobAI.Events;
 
 namespace DeadCellsMultiplayerX.Server.MobAI.Combat
 {
     /// <summary>
     /// 服务端 mob 攻击释放路由
-    /// 接收修改器产生的动作计划，并在服务端 Tick 中执行/转发
+    /// 接收修改器产生的技能事件，并在服务端 Tick 中统一转发
     /// </summary>
     public interface IServerMobAttackRouter
     {
         /// <summary>
-        /// 接收一次已发生的命中事件（服务端权威检测，客户端只表现）
+        /// 接收一次 mob 技能准备事件，客户端据此播放对应技能
         /// </summary>
-        void SubmitHit(MobModifierEvent hit);
+        void SubmitSkill(MobModifierEvent evt);
 
         /// <summary>
         /// 推进攻击执行，返回本 Tick 产生的事件

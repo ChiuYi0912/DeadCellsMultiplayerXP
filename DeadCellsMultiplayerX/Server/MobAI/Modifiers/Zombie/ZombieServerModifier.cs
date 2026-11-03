@@ -43,7 +43,7 @@ namespace DeadCellsMultiplayerX.Server.MobAI.Modifiers.Zombie
             if (session.MobRegistry.TryGetNetId(
                     context.Mob, out uint netId))
             {
-                session.Ghosts.MobAttacks.SubmitHit(
+                session.Ghosts.MobAttacks.SubmitSkill(
                     new MobModifierEvent
                     {
                         Epoch = session.Broadcaster.Epoch,

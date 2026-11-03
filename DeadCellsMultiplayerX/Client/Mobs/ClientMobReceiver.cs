@@ -178,7 +178,7 @@ namespace DeadCellsMultiplayerX.Client.Mobs
 
             if (mob == null) return null;
 
-            mob.hasRepelling = false;
+            //mob.hasRepelling = false;
             mob.hasGravity = false;
             mob.gravity = 0;
             mob.collisionMode = new CollisionMode.None();

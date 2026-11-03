@@ -15,10 +15,6 @@ using GameZombie = dc.en.mob.Zombie;
 
 namespace DeadCellsMultiplayerX.Client.MobAI.Modifiers.Zombie
 {
-    /// <summary>
-    /// Zombie 客户端修改器占位实现。
-    /// 当前保持现有 AI 锁定行为，不接管动画/命中
-    /// </summary>
     internal sealed class ZombieClientModifier : MobModifierBase<GameZombie>
     {
         private static readonly ILogger Logger = Log.ForContext("SourceContext", "ZombieClientModifier");

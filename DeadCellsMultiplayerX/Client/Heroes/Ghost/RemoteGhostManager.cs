@@ -94,6 +94,34 @@ namespace DeadCellsMultiplayerX.Client.Heroes.Ghost
             ghosts.Clear();
         }
 
+        public void Tick(long nowMs)
+        {
+            SyncPositions(session?.Game?.curLevel);
+        }
+
+        public void SyncPositions(Level? level)
+        {
+            if (level == null || ghosts.Count == 0)
+                return;
+
+            foreach (var (guid, ghost) in ghosts)
+            {
+                if (ghost == null
+                    || !ghost.IsAlive
+                    || !ghost.MatchesLevel(level))
+                    continue;
+
+                if (!world.Heros.TryGet(guid, out var hero)
+                    || hero == null
+                    || hero.destroyed)
+                    continue;
+
+                ghost.SetTransform(
+                    hero.cx, hero.cy, hero.xr, hero.yr, hero.dir,
+                    hero.dx, hero.dy);
+            }
+        }
+
         /// <summary>
         /// 应用事件结果
         /// </summary>

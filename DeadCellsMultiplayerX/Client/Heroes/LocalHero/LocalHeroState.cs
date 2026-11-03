@@ -79,7 +79,8 @@ namespace DeadCellsMultiplayerX.Client.Heroes.LocalHero
             ctx.InCinematic = game.hasCinematic();
 
             UpdateLevel(game, hero);
-            UpdateLoaclTeam(hero, hero._level);
+            UpdateLoaclTeam(game);
+            UpdateArgetable(game);
         }
 
         private void UpdateLevel(Game game, Hero hero)
@@ -113,9 +114,12 @@ namespace DeadCellsMultiplayerX.Client.Heroes.LocalHero
 #endif
         }
 
-        private void UpdateLoaclTeam(Hero hero, Level level)
+        private void UpdateLoaclTeam(Game game)
         {
+            var level = game.curLevel;
             var teamHero = level.teamHero;
+            var hero = game.hero;
+
             if (teamHero == null) return;
             if (hero._team != teamHero)
             {
@@ -129,7 +133,21 @@ namespace DeadCellsMultiplayerX.Client.Heroes.LocalHero
             }
             if (!found)
             {
-                teamHero.members.push(hero);
+                teamHero.addMember(hero);
+            }
+        }
+
+        public void UpdateArgetable(Game game)
+        {
+            var hero = game.hero;
+            if (!hero._targetable
+                && hero.life > 0
+                && !hero.destroyed
+                && game != null
+                && !game.hasCinematic()
+                && !game.paused)
+            {
+                hero.set_targetable(true);
             }
         }
 

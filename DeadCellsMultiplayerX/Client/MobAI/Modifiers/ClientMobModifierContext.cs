@@ -60,7 +60,7 @@ namespace DeadCellsMultiplayerX.Client.MobAI.Modifiers
         public RemoteGhostManager remoteGhost { get; }
 
         /// <inheritdoc />
-        public T? GetService<T>() where T : class
+        public T GetService<T>() where T : class
         {
             if (typeof(T) == typeof(GuestClientSession))
                 return (T)(object)Session;
@@ -74,7 +74,7 @@ namespace DeadCellsMultiplayerX.Client.MobAI.Modifiers
             if (typeof(T) == typeof(RemoteGhostManager))
                 return (T)(object)remoteGhost;
 
-            return null;
+            return null!;
         }
     }
 }

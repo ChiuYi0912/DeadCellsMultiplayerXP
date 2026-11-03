@@ -29,9 +29,11 @@ namespace DeadCellsMultiplayerX.Client.Mobs
         /// 记录mobid
         /// </summary>
         private readonly HashSet<uint> frameNetIds = [];
+        private readonly Dictionary<uint, long> lastStepMs = [];
 
         private int lastEpoch = -1;
         private bool loggedFirstMob;
+        private const long StepDriveIntervalMs = 50;
 
         public MobSyncManager(
             GuestClientSession session,
@@ -65,6 +67,7 @@ namespace DeadCellsMultiplayerX.Client.Mobs
                 session.Prediction.Clear();
                 receiver.Clear();
                 affectState.Reset();
+                lastStepMs.Clear();
             }
 
             // 必须在 receiver.Remove 之前确认，避免预测死亡的 mob 已被移除
@@ -167,12 +170,20 @@ namespace DeadCellsMultiplayerX.Client.Mobs
                 int cx = (int)Math.Floor(x);
                 int cy = (int)Math.Floor(y);
 
+                int prevCx = mob.cx;
+                int prevCy = mob.cy;
+
                 mob.setPosCase(cx, cy, x - cx, y - cy);
                 mob.dir = alpha < 0.5 ? prev.Pos.DIR : next.Pos.DIR;
                 mob.dx = 0;
                 mob.dy = 0;
                 mob.bdx = 0;
                 mob.bdy = 0;
+
+                // 快照传送绕过了 Entity.updatePositionXY 的跨格检测，
+                // 这里补一次原版 onStep，让各 mob 的重写逻辑生效
+                if (mob.cx != prevCx || mob.cy != prevCy)
+                    DriveStep(netId, mob, nowMs);
 
                 if (!remoteWorld.MobModifiers.DispatchClientUpdate(mob, nowMs))
                     RemoteMobAnimator.Apply(mob, prev.Anim, next.Anim, renderTimeSec);
@@ -190,6 +201,20 @@ namespace DeadCellsMultiplayerX.Client.Mobs
                 mob.life = life;
                 mob.maxLife = next.MaxLife;
             }
+        }
+
+        /// <summary>
+        /// 快照跨格时补调原版 onStep
+        /// </summary>
+        private void DriveStep(uint netId, Mob mob, long nowMs)
+        {
+            if (lastStepMs.TryGetValue(netId, out long last)
+                && nowMs - last < StepDriveIntervalMs)
+                return;
+
+            lastStepMs[netId] = nowMs;
+
+            mob.onStep();
         }
 
         /// <summary>
@@ -297,6 +322,7 @@ namespace DeadCellsMultiplayerX.Client.Mobs
             session.Prediction.Clear();
             receiver.Clear();
             affectState.Reset();
+            lastStepMs.Clear();
         }
     }
 }
