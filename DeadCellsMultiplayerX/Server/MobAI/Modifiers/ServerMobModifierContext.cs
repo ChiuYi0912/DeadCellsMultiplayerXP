@@ -4,7 +4,7 @@ using DeadCellsMultiplayerX.Server.Core;
 using DeadCellsMultiplayerX.Server.MobAI.Events;
 using DeadCellsMultiplayerX.Server.World.Ghosts;
 using DeadCellsMultiplayerX.Server.World.Ghosts.Team;
-using DeadCellsMultiplayerX.Server.World.Hubs;
+using DeadCellsMultiplayerX.Server.World.Replication.Mobs;
 
 namespace DeadCellsMultiplayerX.Server.MobAI.Modifiers
 {

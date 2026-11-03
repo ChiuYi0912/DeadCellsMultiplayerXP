@@ -5,7 +5,7 @@ using dc.pr;
 using dc.tool;
 using DeadCellsMultiplayerX.Common.Data.Snapshot;
 using DeadCellsMultiplayerX.Common.Serializers;
-using DeadCellsMultiplayerX.Server.World.Hubs;
+using DeadCellsMultiplayerX.Server.World.Replication.Mobs;
 using Serilog;
 using DeadCellsMultiplayerX.Server.Core;
 

@@ -5,7 +5,7 @@ using dc.en;
 using dc.pr;
 using DeadCellsMultiplayerX.Common.Ghosts;
 using DeadCellsMultiplayerX.Server.World.Ghosts.World;
-using DeadCellsMultiplayerX.Server.World.Hubs;
+using DeadCellsMultiplayerX.Server.World.Replication.Frames;
 using DeadCellsMultiplayerX.Utils;
 using DeadCellsMultiplayerX.Server.Core;
 

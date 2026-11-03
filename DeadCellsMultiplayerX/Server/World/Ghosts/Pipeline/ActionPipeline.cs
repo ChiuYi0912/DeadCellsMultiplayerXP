@@ -4,7 +4,8 @@ using dc.pr;
 using DeadCellsMultiplayerX.Common.Data.Ghosts;
 using DeadCellsMultiplayerX.Server.World.Ghosts.Execution;
 using DeadCellsMultiplayerX.Server.World.Ghosts.World;
-using DeadCellsMultiplayerX.Server.World.Hubs;
+using DeadCellsMultiplayerX.Server.World.Replication.Frames;
+using DeadCellsMultiplayerX.Server.World.Replication.Mobs;
 using Serilog;
 using DeadCellsMultiplayerX.Server.Core;
 

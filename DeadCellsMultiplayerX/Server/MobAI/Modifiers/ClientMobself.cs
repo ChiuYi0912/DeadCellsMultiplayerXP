@@ -16,7 +16,7 @@ using Hook_Mob = dc.en.Hook_Mob;
 using Level = dc.pr.Level;
 using Mob = dc.en.Mob;
 
-namespace DeadCellsMultiplayerX.Client.MobAI
+namespace DeadCellsMultiplayerX.Client.MobBehavior
 {
     public class ServerMobself
     {

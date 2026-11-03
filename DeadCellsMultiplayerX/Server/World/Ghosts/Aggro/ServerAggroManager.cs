@@ -4,7 +4,7 @@ using dc.en;
 using dc.pr;
 using dc.tool.atk;
 using DeadCellsMultiplayerX.Server.World.Ghosts.Team;
-using DeadCellsMultiplayerX.Server.World.Hubs;
+using DeadCellsMultiplayerX.Server.World.Replication.Mobs;
 using Serilog;
 using DeadCellsMultiplayerX.Server.Core;
 

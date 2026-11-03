@@ -1,5 +1,5 @@
 using System.Collections.Generic;
-using DeadCellsMultiplayerX.Server.World.Hubs;
+using DeadCellsMultiplayerX.Server.World.Replication.Frames;
 using DeadCellsMultiplayerX.Server.Core;
 
 namespace DeadCellsMultiplayerX.Server.World.Ghosts.World
