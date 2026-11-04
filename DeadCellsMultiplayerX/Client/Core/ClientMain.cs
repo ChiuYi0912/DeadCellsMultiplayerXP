@@ -55,9 +55,6 @@ namespace DeadCellsMultiplayerX.Client.Core
             Hook__TitleScreen.__constructor__ += Hook__TitleScreen__constructor__;
             Hook_TitleScreen.onDispose += Hook_TitleScreen_onDispose;
 
-            Hook_Game.init += Hook_Game_init;
-            Hook__LevelTransition.__constructor__ += Hook__LevelTransition__constructor__;
-
             Hook_Hero.postUpdate += Hook_Hero_postUpdate;
         }
 
@@ -67,60 +64,11 @@ namespace DeadCellsMultiplayerX.Client.Core
             EventSystem.BroadcastEvent<IOnLocalHeroPostUpdate, Hero>(self);
         }
 
-        private void Hook__LevelTransition__constructor__(
-            Hook__LevelTransition.orig___constructor__ orig, LevelTransition arg1,
-            dc.String mainId, LevelMap map, int? linkId,
-            CPoint heroPosAfterBossRuneReload, Ref<bool> noLoadingData)
-        {
-            string levelid = mainId?.ToString() ?? string.Empty;
-            if (levelid == "PrisonStart" || string.IsNullOrEmpty(levelid))
-            {
-                orig(arg1, mainId, map, linkId, heroPosAfterBossRuneReload, noLoadingData);
-                return;
-            }
-
-            if (CurrentGuestClient == null)
-            {
-                orig(arg1, mainId, map, linkId, heroPosAfterBossRuneReload, noLoadingData);
-                return;
-            }
-
-            Hero hero = dc.pr.Game.Class.ME.hero;
-
-            if (CurrentGuestClient.IsServerDrivenTransition)
-            {
-                if (hero != null && !hero.destroyed)
-                {
-                    hero.set_targetable(true);
-                    hero.unlockControls();
-                }
-
-                orig(arg1, mainId, map, linkId, heroPosAfterBossRuneReload, noLoadingData);
-                return;
-            }
-
-            _ = CurrentGuestClient.SelectNextLevel(levelid);
-
-            if (hero != null && !hero.destroyed)
-            {
-                hero.set_targetable(false);
-                hero.lockControlsF(999999);
-            }
-        }
-
         private void Hook_TitleScreen_onDispose(Hook_TitleScreen.orig_onDispose orig, TitleScreen self)
         {
             orig(self);
             EventSystem.BroadcastEvent<IOnLobbyMenuDisposed>();
         }
-
-        private void Hook_Game_init(Hook_Game.orig_init orig, dc.pr.Game self)
-        {
-            orig(self);
-            self.gameSignals.heroInitDone.add(new HlAction<Hero>((hero) => EventSystem.BroadcastEvent<IOnLocalHeroInitDone, Hero>(hero)),
-            null, null, null);
-        }
-
 
         private void Hook_GlowKey_applyGlowData(Hook_GlowKey.orig_applyGlowData orig, GlowKey self,
             int i, Hashlink.Virtuals.virtual_animationIntensity_animationScale_animationSpeed_animationTextureMask_inner_key_outer_power_ glowData)

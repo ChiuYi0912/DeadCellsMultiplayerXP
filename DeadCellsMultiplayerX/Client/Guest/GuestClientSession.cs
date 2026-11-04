@@ -29,6 +29,8 @@ using dc.hl.types;
 using HaxeProxy.Runtime;
 using Hashlink.Proxy.Objects;
 using dc.en.inter;
+using ModCore.Events;
+using System.Text.Json;
 
 namespace DeadCellsMultiplayerX.Client.Guest
 {
@@ -105,6 +107,12 @@ namespace DeadCellsMultiplayerX.Client.Guest
 
         public override async Task Init()
         {
+            deathGate = new CombatDeathGate();
+            ghostCombat = new GhostCombatResolver(this);
+            prediction = new LocalCombatPrediction(this);
+            localCapture = new LocalGhostCapture(this);
+            localCapture.Init();
+
             InitHooks();
 
             rpc = serverStream.CreateJsonRpc("guest-server");
@@ -161,14 +169,234 @@ namespace DeadCellsMultiplayerX.Client.Guest
             sendBuffer.ResetLocalHeroState();
         }
 
+        /// <summary>
+        /// 载入新 level 并初始化
+        /// </summary>
+        /// <param name="saveData"></param>
+        /// <returns></returns>
+        public async Task EnterNewLevel(byte[] saveData)
+        {
+            this.saveData = saveData;
+
+            Logger.Information("Entering new level...");
+
+            Main.Class.ME.options.disableLoreRooms = true;
+
+            Main.Class.ME.cleanUser();
+            Main.Class.ME.launchGame(new LaunchMode.LoadSave(), null, null);
+
+            while (true)
+            {
+                await Task.Delay(1);
+                DisposeToken.ThrowIfCancellationRequested();
+
+                var g = dc.pr.Game.Class.ME;
+                if (g?.curLevel == null || g.subLevels == null)
+                {
+                    continue;
+                }
+                if (!Main.Class.ME.isLoading)
+                {
+                    break;
+                }
+            }
+
+            Logger.Information("Clearing entities...");
+
+            var gm = dc.pr.Game.Class.ME;
+
+            foreach (Level level in gm.subLevels)
+            {
+                List<Entity> entities = [];
+                foreach (Entity v in level.entities)
+                {
+                    if (v is Hero || v is Interactive)
+                    {
+                        continue;
+                    }
+                    if (v is Mob)
+                    {
+                        entities.Add(v);
+                    }
+
+                }
+                foreach (var v in entities)
+                {
+                    v.destroy();
+                }
+            }
+
+#if DEBUG
+            await client.RefreshLobbyInfo();
+            Debug.Assert(client.LobbyInfo != null);
+            var options = new JsonSerializerOptions { WriteIndented = true };
+            Logger.Information(
+                "Start New Game Team : {info}\n",
+                JsonSerializer.Serialize(client.LobbyInfo, options));
+#endif
+
+            replicator?.Dispose();
+            replicator = new(this);
+            //replicator.Start();
+
+            InitWorld();
+
+            Debug.Assert(rpc != null);
+        }
+
+
+        void IOnFrameUpdate.OnFrameUpdate(double dt)
+        {
+            // 同步 TimeStamp
+            TickTimeSystem();
+
+            // 世界帧 NACK 调度/超时
+            remoteWorld?.Tick(SyncedTimeMs);
+        }
+
+        /// <summary>
+        /// 服务端调用,用于通知当前客户切换关卡
+        /// </summary>
+        /// <param name="levelid"></param>
+        /// <returns></returns>
+        public Task EnterNextLevel(string levelid)
+        {
+            serverDrivenTransition = true;
+            try
+            {
+                LevelTransition.Class.@goto.Invoke(levelid.AsHaxeString());
+            }
+            finally
+            {
+                serverDrivenTransition = false;
+            }
+            return Task.CompletedTask;
+        }
+
+        void IOnLocalHeroPostUpdate.OnPostUpdate(Hero hero)
+        {
+            if (IsDisposed || uploadBroken) return;
+
+            var game = dc.pr.Game.Class.ME;
+            if (hero != game?.hero) return;
+            if (hero.destroyed) return;
+
+            // 每帧都采集最新状态;发送受背压控制,未发送的帧会被下一帧覆盖
+            if (!sendBuffer.Capture(hero, Client.Guid, SyncedTimeMs)) return;
+
+            if (uploadTask != null && !uploadTask.IsCompleted) return;
+
+            var frame = sendBuffer.BuildFrameAndRecord();
+            if (frame == null) return;
+
+#if DEBUG
+            if (WorldFrameDebug.ConsumeSkipClientUpload()) return;
+#endif
+
+            try
+            {
+                uploadTask = server.UploadClientWorldFrame(frame);
+                _ = uploadTask.ContinueWith(OnUploadFaulted, TaskContinuationOptions.OnlyOnFaulted);
+            }
+            catch (Exception ex)
+            {
+                HandleUploadFailure(ex);
+            }
+        }
+
+        private void OnUploadFaulted(Task task)
+            => HandleUploadFailure(task.Exception?.GetBaseException());
+
+        private void HandleUploadFailure(Exception? ex)
+        {
+            if (IsDisposed) return;
+
+            // 连接已经断开时,等待 Rpc_Disconnected 清理
+            if (ex is ConnectionLostException or OperationCanceledException)
+            {
+                uploadBroken = true;
+                return;
+            }
+
+            long now = Environment.TickCount64;
+            if (now - lastUploadErrorLogMs < 1000) return;
+
+            lastUploadErrorLogMs = now;
+            Logger.Warning("UploadClientWorldFrame failed: {Message}", ex?.Message ?? "unknown");
+        }
+
+        private void TickTimeSystem()
+        {
+            if (timeSystem.Ready || server == null) return;
+
+            long now = ClientTimeSystem.NowMs();
+            if (now - lastNtpRequestMs < NtpIntervalMs) return;
+            if (ntpTask != null && !ntpTask.IsCompleted) return;
+
+            lastNtpRequestMs = now;
+            ntpTask = SampleNtpAsync();
+        }
+
+        private async Task SampleNtpAsync()
+        {
+            try
+            {
+                long t0 = ClientTimeSystem.NowMs();
+                long serverTime = await Server.GetTimeStamp();
+                long t1 = ClientTimeSystem.NowMs();
+
+                timeSystem.AddSample(t0, t1, serverTime);
+            }
+            catch (Exception) when (IsDisposed) { }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, "NTP sample failed");
+            }
+        }
+
+        /// <summary>
+        /// 服务端每 tick 推送完整世界帧
+        /// </summary>
+        public Task SyncWorldFrame(WorldFrame frame)
+        {
+            if (frame == null) return Task.CompletedTask;
+
+#if DEBUG
+            if (WorldFrameDebug.ConsumeDropServerFrame())
+                return Task.CompletedTask;
+#endif
+
+            ObserveWorldEpoch(frame.Epoch);
+            ObserveServerTime((long)frame.ServerTimeMs);
+            remoteWorld?.OnWorldFrame(frame);
+            return Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// 服务端请求补发本地上传帧
+        /// </summary>
+        public Task<ClientFrameBundle> RequestClientFrames(ClientFrameRangeRequest request)
+            => Task.FromResult(sendBuffer.BuildBundle(request));
+
+        internal void ObserveWorldEpoch(int epoch) => sendBuffer.SetEpoch(epoch);
+
+        internal void ObserveServerTime(long serverTimeMs)
+        {
+            if (serverTimeMs <= lastServerFrameTimeMs) return;
+
+            lastServerFrameTimeMs = serverTimeMs;
+            timeSystem.OnSnapshot(serverTimeMs);
+        }
+
+        void IOnLocalHeroInitDone.OnHeroInitDone(Hero hero)
+        {
+            sendBuffer.ResetLocalHeroState();
+        }
+
+
+        #region Hooks
         private void InitHooks()
         {
-            deathGate = new CombatDeathGate();
-            ghostCombat = new GhostCombatResolver(this);
-            prediction = new LocalCombatPrediction(this);
-            localCapture = new LocalGhostCapture(this);
-            localCapture.Init();
-
             Hook__Save.save += Hook__Save_save;
             Hook__File.getBytes += Hook__File_getBytes;
 
@@ -195,6 +423,49 @@ namespace DeadCellsMultiplayerX.Client.Guest
             Hook_OldMobSkill.update += Hook_OldMobSkill_update;
             Hook_OldSkill.interrupt += Hook_OldSkill_interrupt;
             Hook_OldSkill.isReady += Hook_OldSkill_isReady;
+            Hook__LevelTransition.__constructor__ += Hook__LevelTransition__constructor__;
+        }
+        private void Hook__LevelTransition__constructor__(
+           Hook__LevelTransition.orig___constructor__ orig, LevelTransition arg1,
+           dc.String mainId, dc.level.LevelMap map, int? linkId,
+           CPoint heroPosAfterBossRuneReload, Ref<bool> noLoadingData)
+        {
+            string levelid = mainId?.ToString() ?? string.Empty;
+            if (levelid == "PrisonStart" || string.IsNullOrEmpty(levelid))
+            {
+                orig(arg1, mainId, map, linkId, heroPosAfterBossRuneReload, noLoadingData);
+                return;
+            }
+
+            GuestClient? current = ClientMain.Instance.CurrentGuestClient;
+
+            if (current == null)
+            {
+                orig(arg1, mainId, map, linkId, heroPosAfterBossRuneReload, noLoadingData);
+                return;
+            }
+
+            Hero hero = dc.pr.Game.Class.ME.hero;
+
+            if (current.IsServerDrivenTransition)
+            {
+                if (hero != null && !hero.destroyed)
+                {
+                    hero.set_targetable(true);
+                    hero.unlockControls();
+                }
+
+                orig(arg1, mainId, map, linkId, heroPosAfterBossRuneReload, noLoadingData);
+                return;
+            }
+
+            _ = current.SelectNextLevel(levelid);
+
+            if (hero != null && !hero.destroyed)
+            {
+                hero.set_targetable(false);
+                hero.lockControlsF(999999);
+            }
         }
 
         private void Hook_Level_attachMobs(Hook_Level.orig_attachMobs orig, Level self)
@@ -275,7 +546,7 @@ namespace DeadCellsMultiplayerX.Client.Guest
             if (self is not OldMobSkill)
                 orig(self);
         }
-        #region Hooks
+
         private bool Hook_OldSkill_isReady(Hook_OldSkill.orig_isReady orig, OldSkill self)
         {
             return true;
@@ -492,6 +763,8 @@ namespace DeadCellsMultiplayerX.Client.Guest
         {
             orig(self);
             self.infection.destroy();
+            self.gameSignals.heroInitDone.add(new HlAction<Hero>((hero) => EventSystem.BroadcastEvent<IOnLocalHeroInitDone, Hero>(hero)),
+            null, null, null);
 #if DEBUG
             dc.ui.Console.Class.ME.flags.set("area".AsHaxeString(), 1);
 #endif
@@ -580,7 +853,7 @@ namespace DeadCellsMultiplayerX.Client.Guest
         }
 
         #endregion
-
+        #region Dispose
         protected override void MyDispose()
         {
             base.MyDispose();
@@ -626,226 +899,6 @@ namespace DeadCellsMultiplayerX.Client.Guest
             }
             hooks.Clear();
         }
-
-        /// <summary>
-        /// 载入新 level 并初始化
-        /// </summary>
-        /// <param name="saveData"></param>
-        /// <returns></returns>
-        public async Task EnterNewLevel(byte[] saveData)
-        {
-            this.saveData = saveData;
-
-            Logger.Information("Entering new level...");
-
-            Main.Class.ME.options.disableLoreRooms = true;
-
-            Main.Class.ME.cleanUser();
-            Main.Class.ME.launchGame(new LaunchMode.LoadSave(), null, null);
-
-            while (true)
-            {
-                await Task.Delay(1);
-                DisposeToken.ThrowIfCancellationRequested();
-
-                var g = dc.pr.Game.Class.ME;
-                if (g?.curLevel == null || g.subLevels == null)
-                {
-                    continue;
-                }
-                if (!Main.Class.ME.isLoading)
-                {
-                    break;
-                }
-            }
-
-            Logger.Information("Clearing entities...");
-
-            var gm = dc.pr.Game.Class.ME;
-
-            foreach (Level level in gm.subLevels)
-            {
-                List<Entity> entities = [];
-                foreach (Entity v in level.entities)
-                {
-                    if (v is Hero || v is Interactive)
-                    {
-                        continue;
-                    }
-                    if (v is Mob)
-                    {
-                        entities.Add(v);
-                    }
-
-                }
-                foreach (var v in entities)
-                {
-                    v.destroy();
-                }
-            }
-            // #if true
-            //             Debug.Assert(client.gameSessionInfo != null);
-            //             var options = new JsonSerializerOptions { WriteIndented = true };
-            //             Logger.Information("sever mobs  {info}\n", JsonSerializer.Serialize(client.gameSessionInfo, options));
-            // #endif
-
-
-            replicator?.Dispose();
-            replicator = new(this);
-            //replicator.Start();
-
-            InitWorld();
-
-            Debug.Assert(rpc != null);
-        }
-
-
-        void IOnFrameUpdate.OnFrameUpdate(double dt)
-        {
-            // 同步 TimeStamp
-            TickTimeSystem();
-
-            // 世界帧 NACK 调度/超时
-            remoteWorld?.Tick(SyncedTimeMs);
-        }
-
-        /// <summary>
-        /// 服务端调用,用于通知当前客户切换关卡
-        /// </summary>
-        /// <param name="levelid"></param>
-        /// <returns></returns>
-        public Task EnterNextLevel(string levelid)
-        {
-            serverDrivenTransition = true;
-            try
-            {
-                LevelTransition.Class.@goto.Invoke(levelid.AsHaxeString());
-            }
-            finally
-            {
-                serverDrivenTransition = false;
-            }
-            return Task.CompletedTask;
-        }
-
-        void IOnLocalHeroPostUpdate.OnPostUpdate(Hero hero)
-        {
-            if (IsDisposed || uploadBroken) return;
-
-            var game = dc.pr.Game.Class.ME;
-            if (hero != game?.hero) return;
-            if (hero.destroyed) return;
-
-            // 每帧都采集最新状态;发送受背压控制,未发送的帧会被下一帧覆盖
-            if (!sendBuffer.Capture(hero, Client.Guid, SyncedTimeMs)) return;
-
-            if (uploadTask != null && !uploadTask.IsCompleted) return;
-
-            var frame = sendBuffer.BuildFrameAndRecord();
-            if (frame == null) return;
-
-#if DEBUG
-            if (WorldFrameDebug.ConsumeSkipClientUpload()) return;
-#endif
-
-            try
-            {
-                uploadTask = server.UploadClientWorldFrame(frame);
-                _ = uploadTask.ContinueWith(OnUploadFaulted, TaskContinuationOptions.OnlyOnFaulted);
-            }
-            catch (Exception ex)
-            {
-                HandleUploadFailure(ex);
-            }
-        }
-
-        private void OnUploadFaulted(Task task)
-            => HandleUploadFailure(task.Exception?.GetBaseException());
-
-        private void HandleUploadFailure(Exception? ex)
-        {
-            if (IsDisposed) return;
-
-            // 连接已经断开时,等待 Rpc_Disconnected 清理
-            if (ex is ConnectionLostException or OperationCanceledException)
-            {
-                uploadBroken = true;
-                return;
-            }
-
-            long now = Environment.TickCount64;
-            if (now - lastUploadErrorLogMs < 1000) return;
-
-            lastUploadErrorLogMs = now;
-            Logger.Warning("UploadClientWorldFrame failed: {Message}", ex?.Message ?? "unknown");
-        }
-
-        private void TickTimeSystem()
-        {
-            if (timeSystem.Ready || server == null) return;
-
-            long now = ClientTimeSystem.NowMs();
-            if (now - lastNtpRequestMs < NtpIntervalMs) return;
-            if (ntpTask != null && !ntpTask.IsCompleted) return;
-
-            lastNtpRequestMs = now;
-            ntpTask = SampleNtpAsync();
-        }
-
-        private async Task SampleNtpAsync()
-        {
-            try
-            {
-                long t0 = ClientTimeSystem.NowMs();
-                long serverTime = await Server.GetTimeStamp();
-                long t1 = ClientTimeSystem.NowMs();
-
-                timeSystem.AddSample(t0, t1, serverTime);
-            }
-            catch (Exception) when (IsDisposed) { }
-            catch (Exception ex)
-            {
-                Logger.Error(ex, "NTP sample failed");
-            }
-        }
-
-        /// <summary>
-        /// 服务端每 tick 推送完整世界帧
-        /// </summary>
-        public Task SyncWorldFrame(WorldFrame frame)
-        {
-            if (frame == null) return Task.CompletedTask;
-
-#if DEBUG
-            if (WorldFrameDebug.ConsumeDropServerFrame())
-                return Task.CompletedTask;
-#endif
-
-            ObserveWorldEpoch(frame.Epoch);
-            ObserveServerTime((long)frame.ServerTimeMs);
-            remoteWorld?.OnWorldFrame(frame);
-            return Task.CompletedTask;
-        }
-
-        /// <summary>
-        /// 服务端请求补发本地上传帧
-        /// </summary>
-        public Task<ClientFrameBundle> RequestClientFrames(ClientFrameRangeRequest request)
-            => Task.FromResult(sendBuffer.BuildBundle(request));
-
-        internal void ObserveWorldEpoch(int epoch) => sendBuffer.SetEpoch(epoch);
-
-        internal void ObserveServerTime(long serverTimeMs)
-        {
-            if (serverTimeMs <= lastServerFrameTimeMs) return;
-
-            lastServerFrameTimeMs = serverTimeMs;
-            timeSystem.OnSnapshot(serverTimeMs);
-        }
-
-        void IOnLocalHeroInitDone.OnHeroInitDone(Hero hero)
-        {
-            sendBuffer.ResetLocalHeroState();
-        }
+        #endregion
     }
 }

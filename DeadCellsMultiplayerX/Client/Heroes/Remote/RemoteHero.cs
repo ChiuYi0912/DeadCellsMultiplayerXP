@@ -19,6 +19,7 @@ using Serilog;
 using DeadCellsMultiplayerX.Client.Core;
 using DeadCellsMultiplayerX.Client.Guest;
 using DeadCellsMultiplayerX.Client.Replication;
+using System.Text.Json;
 
 namespace DeadCellsMultiplayerX.Client.Heroes.Remote
 {
@@ -198,7 +199,7 @@ namespace DeadCellsMultiplayerX.Client.Heroes.Remote
                     {
                         loggedLevelWait = true;
                         Log.Information(
-                            "RemoteHero {Guid} waiting for level {TargetLevelId}#{TargetSub}: sample={SampleLevel}#{SampleSub}",
+                            "RemoteHero {Guid} : waiting for level Target={TargetLevelId}#{TargetSub}:  sample={SampleLevel}#{SampleSub}",
                             Guid, TargetLevelId, TargetSubLevelIndex,
                             prev.LevelId, prev.SubLevelIndex);
                     }
@@ -210,15 +211,7 @@ namespace DeadCellsMultiplayerX.Client.Heroes.Remote
                 if (!loggedFirstTick)
                 {
                     loggedFirstTick = true;
-                    Log.Information(
-                        "RemoteHero {Guid} first tick: prev={PrevLevel}#{PrevSub} next={NextLevel}#{NextSub} " +
-                        "prevPos=({PrevX},{PrevY}) nextPos=({NextX},{NextY}) alpha={Alpha}",
-                        Guid,
-                        prev.LevelId, prev.SubLevelIndex,
-                        next.LevelId, next.SubLevelIndex,
-                        prev.Pos.CX + prev.Pos.XR, prev.Pos.CY + prev.Pos.XY,
-                        next.Pos.CX + next.Pos.XR, next.Pos.CY + next.Pos.XY,
-                        alpha);
+                    Log.Information("RemoteHero {Guid} first tick: {Level}#{SubLevelid}", Guid, next.LevelId, next.SubLevelIndex);
                 }
 
                 //此方法控制实体平滑移动

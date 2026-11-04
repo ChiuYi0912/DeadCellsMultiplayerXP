@@ -103,9 +103,6 @@ namespace DeadCellsMultiplayerX.Common.MobAI.Modifiers
             if (mob.__uid != 0)
                 activeByUid[mob.__uid] = entry;
 
-            Logger.Debug(
-                "Mob modifier attached: mob={Mob} type={MobType} netId={NetId} modifier={Modifier}",
-                mob.GetType().Name, mobType.Name, context.NetId, modifier.GetType().Name);
             return true;
         }
 

@@ -139,7 +139,6 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts
                     Hero.set_targetable(false);
 
                 Hero._team.removeMember(Hero);
-                Hero._team = null;
             }
 
             if (Hero._level != null && !Hero.destroyed)
