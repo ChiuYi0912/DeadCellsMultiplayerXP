@@ -1,3 +1,4 @@
+using DeadCellsMultiplayerX.Common.Data.Entities;
 using MessagePack;
 
 namespace DeadCellsMultiplayerX.Common.MobAI.Events
@@ -89,6 +90,11 @@ namespace DeadCellsMultiplayerX.Common.MobAI.Events
         /// 事件发生时所在子关卡
         /// </summary>
         [Key(8)] public int SubLevelIndex { get; set; } = -1;
+
+        /// <summary>
+        /// 事件所属实体类型
+        /// </summary>
+        [Key(9)] public EntityKind EntityKind { get; set; } = EntityKind.Mob;
 
         /// <summary>
         /// 预留的自定义负载

@@ -4,7 +4,7 @@ using DeadCellsMultiplayerX.Common.Data.Snapshot;
 using DeadCellsMultiplayerX.Server.Connection;
 using DeadCellsMultiplayerX.Server.World.Ghosts;
 using DeadCellsMultiplayerX.Server.World.Replication.Areas;
-using DeadCellsMultiplayerX.Server.World.Replication.Mobs;
+using DeadCellsMultiplayerX.Server.World.Replication.Entities;
 using Serilog;
 using DeadCellsMultiplayerX.Server.Core;
 
@@ -36,9 +36,9 @@ namespace DeadCellsMultiplayerX.Server.World.Replication.Frames
         private readonly ClientWorldFrameCollector collector;
 
         /// <summary>
-        /// 怪物状态发布器
+        /// 通用实体状态发布器
         /// </summary>
-        private readonly ServerMobPublisher mobPublisher;
+        private readonly ServerEntityPublisher entityPublisher;
 
         /// <summary>
         /// 本帧待广播的英雄动作
@@ -65,12 +65,12 @@ namespace DeadCellsMultiplayerX.Server.World.Replication.Frames
         /// </summary>
         public ServerWorldBroadcaster(
             ClientWorldFrameCollector collector,
-            ServerMobPublisher mobPublisher,
+            ServerEntityPublisher entityPublisher,
             ServerGhostManager ghosts,
             ServerLevelAreaAffectRegistry areaAffects)
         {
             this.collector = collector;
-            this.mobPublisher = mobPublisher;
+            this.entityPublisher = entityPublisher;
             this.ghosts = ghosts;
             this.areaAffects = areaAffects;
         }
@@ -165,7 +165,7 @@ namespace DeadCellsMultiplayerX.Server.World.Replication.Frames
         /// </summary>
         public WorldResync BuildResync(long serverTimeMs)
         {
-            var mobs = mobPublisher.BuildResync(serverTimeMs);
+            var entities = entityPublisher.BuildResync(serverTimeMs);
 
             return new WorldResync
             {
@@ -174,8 +174,8 @@ namespace DeadCellsMultiplayerX.Server.World.Replication.Frames
                 ServerTimeMs = serverTimeMs,
                 Heroes = collector.GetActiveHeroDynamics().ToList(),
                 Spawns = collector.GetAllSpawns(),
-                Mobs = mobs.Mobs,
-                MobSpawns = mobs.Spawned,
+                Entities = entities.Entities,
+                EntitySpawns = entities.Spawned,
                 AreaAffects = areaAffects.Collect(serverTimeMs),
             };
         }
@@ -202,7 +202,7 @@ namespace DeadCellsMultiplayerX.Server.World.Replication.Frames
 
             ghosts.SyncTalismans();
 
-            var mobs = mobPublisher.Collect(serverTimeMs);
+            var entities = entityPublisher.Collect(serverTimeMs);
 
             var frame = new WorldFrame
             {
@@ -212,12 +212,12 @@ namespace DeadCellsMultiplayerX.Server.World.Replication.Frames
                 Heroes = collector.GetActiveHeroDynamics().ToList(),
                 Spawned = collector.DrainSpawnChanges(),
                 Despawned = collector.DrainRemoved(),
-                Mobs = mobs.Mobs,
-                SpawnedMobs = mobs.Spawned,
-                DespawnedMobs = mobs.Despawned,
+                Entities = entities.Entities,
+                SpawnedEntities = entities.Spawned,
+                DespawnedEntities = entities.Despawned,
                 Actions = ghosts.DrainActions(),
                 AreaAffects = areaAffects.Collect(serverTimeMs),
-                MobEvents = ghosts.DrainMobEvents().ToList(),
+                EntityEvents = ghosts.DrainMobEvents().ToList(),
             };
 
             if (BroadcastFrames == 1)

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using dc.en;
 using dc.tool.atk;
+using DeadCellsMultiplayerX.Common.Data.Entities;
 using DeadCellsMultiplayerX.Common.Data.Ghosts;
 using DeadCellsMultiplayerX.Common.Data.Snapshot;
 using DeadCellsMultiplayerX.Client.Core;
@@ -12,7 +13,7 @@ namespace DeadCellsMultiplayerX.Client.Combat
 {
     /// <summary>
     /// 其他玩家 ghost 武器命中的结算
-    /// 服务端事件已经确认，使用同一帧 MobDynamic 的生命和死亡
+    /// 服务端事件已经确认，使用同一帧 EntityDynamic 的生命和死亡
     /// </summary>
     internal sealed class GhostCombatResolver
     {
@@ -92,24 +93,27 @@ namespace DeadCellsMultiplayerX.Client.Combat
             {
                 FrameTimeMs = (long)Math.Round(frame.ServerTimeMs);
 
-                if (frame.Mobs != null)
+                if (frame.Entities != null)
                 {
-                    foreach (var mob in frame.Mobs)
+                    foreach (var entity in frame.Entities)
                     {
-                        if (mob != null)
-                            Mobs[mob.NetId] = mob;
+                        if (entity != null && entity.Kind == EntityKind.Mob)
+                            Mobs[entity.NetId] = entity;
                     }
                 }
 
-                if (frame.DespawnedMobs != null)
+                if (frame.DespawnedEntities != null)
                 {
-                    foreach (var netId in frame.DespawnedMobs)
-                        Despawned.Add(netId);
+                    foreach (var despawn in frame.DespawnedEntities)
+                    {
+                        if (despawn != null)
+                            Despawned.Add(despawn.NetId);
+                    }
                 }
             }
 
             public long FrameTimeMs { get; }
-            public Dictionary<uint, MobDynamic> Mobs { get; } = [];
+            public Dictionary<uint, EntityDynamic> Mobs { get; } = [];
             public HashSet<uint> Despawned { get; } = [];
         }
 

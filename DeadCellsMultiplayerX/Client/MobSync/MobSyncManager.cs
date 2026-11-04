@@ -1,147 +1,196 @@
 using System;
 using System.Collections.Generic;
+using dc;
 using dc.en;
-using DeadCellsMultiplayerX.Client.Snapshot;
-using DeadCellsMultiplayerX.Common.Data.Snapshot;
-using DeadCellsMultiplayerX.Common.Core.Tools;
-using Serilog;
+using dc.pr;
 using DeadCellsMultiplayerX.Client.Core;
 using DeadCellsMultiplayerX.Client.Guest;
 using DeadCellsMultiplayerX.Client.Replication;
+using DeadCellsMultiplayerX.Client.Replication.Entities;
+using DeadCellsMultiplayerX.Client.Snapshot;
+using DeadCellsMultiplayerX.Common.Data.Entities;
+using DeadCellsMultiplayerX.Common.Data.Snapshot;
+using DeadCellsMultiplayerX.Common.Serializers;
+using DeadCellsMultiplayerX.Utils;
+using Serilog;
+using LevelMob = dc.level.Mob;
+using Math = System.Math;
 
 namespace DeadCellsMultiplayerX.Client.MobSync
 {
     /// <summary>
-    /// 客户端怪物同步装置
-    /// 消费世界帧中的怪物数据并驱动真实 Mob 表现
+    /// Mob 类型的客户端处理器
     /// </summary>
-    internal sealed class MobSyncManager
+    internal sealed class MobSyncManager : IClientEntityKindHandler
     {
         private static readonly ILogger Logger = Log.ForContext("SourceContext", "MobSyncManager");
+
+        private const long StepDriveIntervalMs = 50;
 
         private readonly GuestClientSession session;
         private readonly RemoteWorld remoteWorld;
         private readonly WorldFrameManager frames;
+        private readonly ClientEntityStore store;
         private readonly ClientMobReceiver receiver;
         private readonly MobAffectStateManager affectState;
 
-        /// <summary>
-        /// 记录mobid
-        /// </summary>
-        private readonly HashSet<uint> frameNetIds = [];
+        private readonly HashSet<string> authoritativeLevels = [];
         private readonly Dictionary<uint, long> lastStepMs = [];
 
-        private int lastEpoch = -1;
         private bool loggedFirstMob;
-        private const long StepDriveIntervalMs = 50;
 
         public MobSyncManager(
             GuestClientSession session,
             RemoteWorld remoteWorld,
-            WorldFrameManager frames)
+            WorldFrameManager frames,
+            ClientEntityStore store)
         {
             this.session = session;
             this.remoteWorld = remoteWorld;
             this.frames = frames;
-            receiver = new ClientMobReceiver(session, remoteWorld);
+            this.store = store;
+            receiver = new ClientMobReceiver(store);
             affectState = new MobAffectStateManager();
         }
 
         public ClientMobReceiver Receiver => receiver;
 
+        public EntityKind Kind => EntityKind.Mob;
+
         public bool IsRemoteMob(Mob mob) => receiver.IsRemoteMob(mob);
 
         public bool IsDeathSuppressed(Mob mob) => receiver.IsDeathSuppressed(mob);
 
-        /// <summary>
-        /// 应用一个连续世界帧中的怪物数据
-        /// </summary>
-        public void ApplyFrame(WorldFrame frame)
+        /// <inheritdoc />
+        public bool TryCreate(
+            EntitySpawn spawn, ClientEntityContext ctx, out object native)
         {
-            if (frame == null) return;
+            native = null!;
 
-            // epoch 变化时清空旧怪物与缓存
-            if (frame.Epoch != lastEpoch)
+            if (spawn == null
+                || spawn.EntityData == null
+                || spawn.EntityData.Length == 0)
+                return false;
+
+            var level = LevelUtils.ResolveLevel(
+                session.Game, spawn.LevelId, spawn.SubLevelIndex);
+            if (level == null) return false;
+
+            string levelKey = LevelKeys.Make(spawn.LevelId, spawn.SubLevelIndex);
+            bool needsCleanup = !authoritativeLevels.Contains(levelKey);
+
+            if (needsCleanup)
+                ClearLocalLevelMobs(level);
+
+            LevelMob? descriptor =
+                DCMXSerializers.MessagePack.Deserialize<LevelMob>(spawn.EntityData);
+
+            if (descriptor == null) return false;
+
+            Mob? mob = level.attachMob(descriptor);
+            if (mob == null) return false;
+
+            //mob.hasRepelling = false;
+            mob.hasGravity = false;
+            mob.gravity = 0;
+            mob.collisionMode = new CollisionMode.None();
+            mob.frict = 0;
+
+            if (needsCleanup)
+                authoritativeLevels.Add(levelKey);
+
+            Logger.Verbose(
+                "Mob spawned on client: netId={NetId} level={LevelId}#{SubLevelIndex}",
+                spawn.NetId, spawn.LevelId, spawn.SubLevelIndex);
+
+            native = mob;
+            return true;
+        }
+
+        /// <inheritdoc />
+        public void OnCreated(
+            EntitySpawn spawn, object native, ClientEntityContext ctx)
+        {
+            if (native is Mob mob)
+                remoteWorld.MobModifiers.TryAttach(mob, session.SyncedTimeMs);
+        }
+
+        /// <inheritdoc />
+        public void Despawn(
+            uint netId, object? native,
+            EntityDespawnReason reason, ClientEntityContext ctx)
+        {
+            session.Prediction.ConfirmDespawn(netId);
+
+            if (native is Mob mob)
             {
-                lastEpoch = frame.Epoch;
-                session.Prediction.Clear();
-                receiver.Clear();
-                affectState.Reset();
-                lastStepMs.Clear();
+                remoteWorld.MobModifiers.Detach(mob);
+
+                // 服务端确认死亡
+                if (!receiver.IsDeathSuppressed(mob))
+                    session.ForceNativeDeath(mob);
             }
 
-            // 必须在 receiver.Remove 之前确认，避免预测死亡的 mob 已被移除
+            affectState.Remove(netId);
+            lastStepMs.Remove(netId);
+            session.Prediction.OnRemoved(netId);
+        }
+
+        /// <inheritdoc />
+        public void BeforeSpawns(WorldFrame frame, ClientEntityContext ctx)
+        {
+            // 必须在移除之前确认，避免预测死亡的 mob 已被移除
             session.Prediction.ConfirmFrame(frame);
+        }
 
-            receiver.RetryPending();
+        /// <inheritdoc />
+        public void AfterSpawns(WorldFrame frame, ClientEntityContext ctx)
+        {
+            if (frame.Entities == null) return;
 
-            if (frame.SpawnedMobs != null)
-            {
-                foreach (var spawn in frame.SpawnedMobs)
-                    receiver.OnSpawned(spawn);
-            }
-
-            // 服务端帧已给出 Life<=0 但还没进 DespawnedMobs,补充死亡
+            // 服务端帧已给出 Life<=0 但还没进 DespawnedEntities，补充死亡
             ForceFrameDeadMobs(frame);
 
-            // 本地预测致死后服务端仍存活,使用 NetId 重建
+            // 本地预测致死后服务端仍存活，使用 NetId 重建
             RepairDestroyedMobs(frame);
 
-            if (frame.DespawnedMobs != null)
+            // 有动态状态但没有本地实体也没有待生成数据时请求重同步
+            foreach (var dynamic in frame.Entities)
             {
-                foreach (var netId in frame.DespawnedMobs)
-                {
-                    session.Prediction.ConfirmDespawn(netId);
-                    receiver.Remove(netId);
-                    affectState.Remove(netId);
-                }
-            }
-
-            // 以服务端当前帧的集合为准清理本地多余怪物
-            frameNetIds.Clear();
-            if (frame.Mobs != null)
-            {
-                foreach (var mob in frame.Mobs)
-                {
-                    if (mob == null) continue;
-                    frameNetIds.Add(mob.NetId);
-
-                    // 有动态状态但没有本地实体也没有待生成数据时请求重同步
-                    if (!receiver.HasOrPending(mob.NetId))
-                        frames.RequestResync("mob spawn missing");
-                }
-            }
-
-            var localMobs = new List<Mob>(receiver.All);
-            foreach (var mob in localMobs)
-            {
-                if (mob == null || mob.destroyed) continue;
-                if (!receiver.TryGetNetId(mob, out var netId)) continue;
-                if (!frameNetIds.Contains(netId))
-                {
-                    session.Prediction.ConfirmDespawn(netId);
-                    receiver.Remove(netId);
-                    affectState.Remove(netId);
-                }
-            }
-
-            if (!loggedFirstMob && frame.Mobs != null && frame.Mobs.Count > 0)
-            {
-                loggedFirstMob = true;
-                Logger.Information(
-                    "First mob frame: epoch={Epoch} seq={Sequence} mobs={Mobs}",
-                    frame.Epoch, frame.Sequence, frame.Mobs.Count);
+                if (dynamic == null || dynamic.Kind != EntityKind.Mob) continue;
+                if (!store.HasOrPending(dynamic.NetId))
+                    frames.RequestResync("mob spawn missing");
             }
         }
 
-        /// <summary>
-        /// 同步mobs循环
-        /// </summary>
-        /// <param name="nowMs"></param>
-        public void Tick(long nowMs)
+        /// <inheritdoc />
+        public void AfterFrame(WorldFrame frame, ClientEntityContext ctx)
+        {
+            TickMobEvents(frame);
+
+            if (!loggedFirstMob && frame.Entities != null)
+            {
+                int count = 0;
+                foreach (var dynamic in frame.Entities)
+                {
+                    if (dynamic != null && dynamic.Kind == EntityKind.Mob)
+                        count++;
+                }
+
+                if (count > 0)
+                {
+                    loggedFirstMob = true;
+                    Logger.Information(
+                        "First mob frame: epoch={Epoch} seq={Sequence} mobs={Mobs}",
+                        frame.Epoch, frame.Sequence, count);
+                }
+            }
+        }
+
+        /// <inheritdoc />
+        public void Tick(ClientEntityContext ctx, long nowMs)
         {
             session.Prediction.Tick(nowMs);
-            receiver.RetryPending();
 
             double nowSec = session.SyncedTimeMs / 1000.0;
 
@@ -150,7 +199,7 @@ namespace DeadCellsMultiplayerX.Client.MobSync
                 if (mob == null || mob.destroyed) continue;
                 if (!receiver.TryGetNetId(mob, out var netId)) continue;
 
-                if (!frames.TryGetMobBracket(
+                if (!frames.TryGetEntityBracket(
                         netId, nowSec,
                         out var prev, out var next,
                         out double alpha, out double renderTimeSec))
@@ -188,8 +237,8 @@ namespace DeadCellsMultiplayerX.Client.MobSync
                 if (!remoteWorld.MobModifiers.DispatchClientUpdate(mob, nowMs))
                     RemoteMobAnimator.Apply(mob, prev.Anim, next.Anim, renderTimeSec);
 
-                // 同步affect
-                affectState.ApplySnapshot(netId, mob, next.Affects ?? prev.Affects, nowSec);
+                affectState.ApplySnapshot(
+                    netId, mob, next.Affects ?? prev.Affects, nowSec);
 
                 int serverLife = (int)Math.Round(
                     prev.Life + (next.Life - prev.Life) * alpha);
@@ -203,6 +252,28 @@ namespace DeadCellsMultiplayerX.Client.MobSync
             }
         }
 
+        /// <inheritdoc />
+        public void OnEpochReset(ClientEntityContext ctx)
+        {
+            session.Prediction.Clear();
+
+            // 先销毁原生实体，store 随后清空映射
+            foreach (var mob in receiver.All)
+            {
+                if (mob == null) continue;
+
+                remoteWorld.MobModifiers.Detach(mob);
+
+                if (!mob.destroyed)
+                    mob.destroy();
+            }
+
+            affectState.Reset();
+            lastStepMs.Clear();
+            authoritativeLevels.Clear();
+            receiver.ClearSuppressed();
+        }
+
         /// <summary>
         /// 快照跨格时补调原版 onStep
         /// </summary>
@@ -213,20 +284,21 @@ namespace DeadCellsMultiplayerX.Client.MobSync
                 return;
 
             lastStepMs[netId] = nowMs;
-
             mob.onStep();
         }
 
         /// <summary>
-        /// 执行由服务端发送的mob死亡指令
+        /// 执行由服务端发送的 mob 死亡指令
         /// </summary>
         private void ForceFrameDeadMobs(WorldFrame frame)
         {
-            if (frame.Mobs == null) return;
-
-            foreach (var dynamic in frame.Mobs)
+            foreach (var dynamic in frame.Entities)
             {
-                if (dynamic == null || dynamic.Life > 0) continue;
+                if (dynamic == null
+                    || dynamic.Kind != EntityKind.Mob
+                    || dynamic.Life > 0)
+                    continue;
+
                 if (receiver.Get(dynamic.NetId) is not { destroyed: false } mob)
                     continue;
 
@@ -236,36 +308,37 @@ namespace DeadCellsMultiplayerX.Client.MobSync
         }
 
         /// <summary>
-        /// 预测错误时,需要客户端重建对应 mob
+        /// 预测错误时重建对应 mob
         /// </summary>
         private void RepairDestroyedMobs(WorldFrame frame)
         {
-            if (frame.Mobs == null) return;
-
-            foreach (var dynamic in frame.Mobs)
+            foreach (var dynamic in frame.Entities)
             {
-                if (dynamic == null || dynamic.Life <= 0) continue;
+                if (dynamic == null
+                    || dynamic.Kind != EntityKind.Mob
+                    || dynamic.Life <= 0)
+                    continue;
 
                 // 本地预测致死还未确认前，服务端旧帧仍可能显示存活
                 if (session.Prediction.HasPendingDeathPrediction(dynamic.NetId))
                     continue;
 
-                if (!receiver.IsMissingOrDestroyed(dynamic.NetId)) continue;
+                if (!store.IsMissingOrDestroyed(dynamic.NetId)) continue;
 
-                if (receiver.TryRecreate(dynamic.NetId, out var mob)
-                    && mob != null)
+                if (store.TryRecreate(dynamic.NetId)
+                    && store.Get(dynamic.NetId) is Mob mob)
                 {
                     ApplyDynamicNow(dynamic, mob);
                     continue;
                 }
 
-                // 重建失败但旧实体已销毁,清掉旧映射，触发后续 resync 恢复
-                if (receiver.Get(dynamic.NetId) is { destroyed: true })
-                    receiver.Remove(dynamic.NetId);
+                // 重建失败但旧实体已销毁，清掉旧映射，触发后续 resync 恢复
+                if (store.Get(dynamic.NetId) is Entity { destroyed: true })
+                    store.Remove(dynamic.NetId, EntityDespawnReason.Removed);
             }
         }
 
-        private void ApplyDynamicNow(MobDynamic dynamic, Mob mob)
+        private void ApplyDynamicNow(EntityDynamic dynamic, Mob mob)
         {
             double x = dynamic.Pos.CX + dynamic.Pos.XR;
             double y = dynamic.Pos.CY + dynamic.Pos.XY;
@@ -289,6 +362,7 @@ namespace DeadCellsMultiplayerX.Client.MobSync
             {
                 RemoteMobAnimator.Apply(mob, dynamic.Anim, dynamic.Anim, nowSec);
             }
+
             affectState.ApplySnapshot(
                 dynamic.NetId, mob, dynamic.Affects, nowSec);
 
@@ -296,19 +370,21 @@ namespace DeadCellsMultiplayerX.Client.MobSync
         }
 
         /// <summary>
-        /// 统一分发服务端路由出来的 mob 事件。本阶段只记录，不扣血。
+        /// 分发服务端路由出来的 mob 事件。
         /// </summary>
-        public void TickMobEvents(WorldFrame frame)
+        private void TickMobEvents(WorldFrame frame)
         {
-            if (frame?.MobEvents == null || frame.MobEvents.Count == 0)
+            if (frame?.EntityEvents == null || frame.EntityEvents.Count == 0)
                 return;
 
-            foreach (var evt in frame.MobEvents)
+            foreach (var evt in frame.EntityEvents)
             {
-                if (evt == null || evt.Epoch != frame.Epoch)
+                if (evt == null
+                    || evt.Epoch != frame.Epoch
+                    || evt.EntityKind != EntityKind.Mob)
                     continue;
 
-                var mob = Receiver.Get(evt.MobNetId);
+                var mob = receiver.Get(evt.MobNetId);
                 if (mob == null || mob.destroyed)
                     continue;
 
@@ -317,12 +393,39 @@ namespace DeadCellsMultiplayerX.Client.MobSync
             }
         }
 
+        /// <summary>
+        /// 清掉指定关卡客户端本地加载的怪物
+        /// </summary>
+        private void ClearLocalLevelMobs(Level level)
+        {
+            var entities = level.entities;
+            if (entities == null) return;
+
+            var toDestroy = new List<Mob>();
+            for (int i = 0; i < entities.length; i++)
+            {
+                if (entities.getDyn(i) is Mob mob
+                    && !receiver.IsRemoteMob(mob)
+                    && !mob.destroyed)
+                {
+                    toDestroy.Add(mob);
+                }
+            }
+
+            // 清理本地怪物时同样抑制本地死亡掉落
+            foreach (var mob in toDestroy)
+                receiver.SuppressDeath(mob);
+
+            foreach (var mob in toDestroy)
+                mob.destroy();
+
+            foreach (var mob in toDestroy)
+                receiver.UnsuppressDeath(mob);
+        }
+
         public void Clear()
         {
-            session.Prediction.Clear();
-            receiver.Clear();
-            affectState.Reset();
-            lastStepMs.Clear();
+            OnEpochReset(store.Context);
         }
     }
 }

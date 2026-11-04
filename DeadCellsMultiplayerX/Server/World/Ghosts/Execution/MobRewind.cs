@@ -5,7 +5,7 @@ using dc.pr;
 using dc.tool;
 using DeadCellsMultiplayerX.Common.Data.Snapshot;
 using DeadCellsMultiplayerX.Common.Serializers;
-using DeadCellsMultiplayerX.Server.World.Replication.Mobs;
+using DeadCellsMultiplayerX.Server.World.Replication.Entities;
 using Serilog;
 using DeadCellsMultiplayerX.Server.Core;
 
@@ -21,12 +21,12 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts.Execution
 
         private static readonly ILogger Logger = Log.ForContext("SourceContext", "MobRewind");
 
-        private readonly ServerMobRegistry registry;
-        private readonly ServerMobHistory history;
+        private readonly ServerEntityRegistry registry;
+        private readonly ServerEntityHistory history;
 
         public MobRewind(
-            ServerMobRegistry registry,
-            ServerMobHistory history)
+            ServerEntityRegistry registry,
+            ServerEntityHistory history)
         {
             this.registry = registry;
             this.history = history;
@@ -128,7 +128,7 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts.Execution
             result.Add(mob);
         }
 
-        private static void Apply(Mob mob, MobPose pose)
+        private static void Apply(Mob mob, EntityPose pose)
         {
             int cx = (int)Math.Floor(pose.X);
             int cy = (int)Math.Floor(pose.Y);

@@ -12,9 +12,8 @@ using GameZombie = dc.en.mob.Zombie;
 namespace DeadCellsMultiplayerX.Server.MobAI.Modifiers.Zombie
 {
     /// <summary>
-    /// Zombie 服务端修改器占位实现。
+    /// Zombie 服务端修改器占位实现
     /// 当前只验证注册、依赖注入、InitHook 和 hook 分发；
-    /// 不拦截原版 AI，也不改变移动/命中。
     /// </summary>
     internal sealed class ZombieServerModifier : MobModifierBase<GameZombie>
     {
@@ -40,7 +39,7 @@ namespace DeadCellsMultiplayerX.Server.MobAI.Modifiers.Zombie
 
         private void SandSkills(MobHookContext context, OldSkill skill, GhostCombatant target, int? data)
         {
-            if (session.MobRegistry.TryGetNetId(
+            if (session.Entities.TryGetNetId(
                     context.Mob, out uint netId))
             {
                 session.Ghosts.MobAttacks.SubmitSkill(

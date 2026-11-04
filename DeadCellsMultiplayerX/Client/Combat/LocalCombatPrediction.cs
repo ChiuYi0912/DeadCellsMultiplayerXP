@@ -9,6 +9,7 @@ using Serilog;
 using DeadCellsMultiplayerX.Client.Core;
 using DeadCellsMultiplayerX.Client.Guest;
 using DeadCellsMultiplayerX.Client.Replication;
+using DeadCellsMultiplayerX.Client.MobSync;
 
 namespace DeadCellsMultiplayerX.Client.Combat
 {
@@ -406,10 +407,10 @@ namespace DeadCellsMultiplayerX.Client.Combat
                 uint netId = entry.Key;
                 var predicted = entry.Value;
 
-                MobDynamic? current = frame.Mobs?
-                    .FirstOrDefault(m => m != null && m.NetId == netId);
+                EntityDynamic? current =
+                    MobFrameQueries.FindMob(frame, netId);
 
-                bool serverDead = frame.DespawnedMobs?.Contains(netId) == true
+                bool serverDead = MobFrameQueries.ContainsDespawn(frame, netId)
                     || current == null
                     || current.Life <= 0;
 

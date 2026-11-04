@@ -391,7 +391,7 @@ namespace DeadCellsMultiplayerX.Server.Core
                 orig(self);
             }
 
-            session?.MobRegistry.MarkDead(self);
+            session?.Entities.MarkDead(self);
             EventSystem.BroadcastEvent<IOnMobOnDie, dc.en.Mob>(self);
         }
 
@@ -482,7 +482,7 @@ namespace DeadCellsMultiplayerX.Server.Core
         {
             var mob = orig(k, level, cx, cy, dmgTier, lifeTier);
 
-            session?.MobRegistry.Register(mob, null, level);
+            session?.Entities.Register(mob, null, level);
             if (session != null)
                 session.Ghosts.MobModifiers.TryAttach(
                     mob, session.CurrentTimeStamp);
@@ -496,7 +496,7 @@ namespace DeadCellsMultiplayerX.Server.Core
         {
             var mob = orig(self, m);
 
-            session?.MobRegistry.Register(mob, m, self);
+            session?.Entities.Register(mob, m, self);
             if (session != null)
                 session.Ghosts.MobModifiers.TryAttach(
                     mob, session.CurrentTimeStamp);
@@ -518,7 +518,7 @@ namespace DeadCellsMultiplayerX.Server.Core
             if (self is Mob mob)
             {
                 session?.Ghosts.MobModifiers.Detach(mob);
-                session?.MobRegistry.Unregister(mob);
+                session?.Entities.Unregister(mob);
             }
 
             orig(self);

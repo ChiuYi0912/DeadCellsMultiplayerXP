@@ -4,7 +4,7 @@ using dc.en;
 using dc.pr;
 using dc.tool.atk;
 using DeadCellsMultiplayerX.Server.World.Ghosts.Team;
-using DeadCellsMultiplayerX.Server.World.Replication.Mobs;
+using DeadCellsMultiplayerX.Server.World.Replication.Entities;
 using Serilog;
 using DeadCellsMultiplayerX.Server.Core;
 
@@ -23,7 +23,7 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts.Aggro
         private static readonly ILogger Logger = Log.ForContext("SourceContext", "ServerAggroManager");
 
         private readonly ServerTeamManager teams;
-        private readonly ServerMobRegistry mobs;
+        private readonly ServerEntityRegistry mobs;
         private readonly Func<Game?> gameProvider;
 
         private long nextThinkMs;
@@ -34,7 +34,7 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts.Aggro
         /// </summary>
         public ServerAggroManager(
             ServerTeamManager teams,
-            ServerMobRegistry mobs,
+            ServerEntityRegistry mobs,
             Func<Game?> gameProvider)
         {
             this.teams = teams;
@@ -158,7 +158,10 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts.Aggro
                 return;
 
             foreach (var entry in mobs.Entries)
-                ValidateCurrentTarget(entry.Mob, game);
+            {
+                if (entry.Native is Mob mob)
+                    ValidateCurrentTarget(mob, game);
+            }
         }
 
         /// <summary>

@@ -1,35 +1,30 @@
 using System;
 using System.Collections.Generic;
 using DeadCellsMultiplayerX.Common.Data.Snapshot;
-using DeadCellsMultiplayerX.Server.Core;
 
-namespace DeadCellsMultiplayerX.Server.World.Replication.Mobs
+namespace DeadCellsMultiplayerX.Server.World.Replication.Entities
 {
     /// <summary>
-    /// 历史 mob 位置
+    /// 历史实体位置
     /// </summary>
-    internal readonly record struct MobPose(
+    internal readonly record struct EntityPose(
         double X,
         double Y,
         int Dir,
         double Dx,
-        double Dy
-    );
+        double Dy);
 
     /// <summary>
-    /// 服务端 mob 位置历史
+    /// 服务端实体位置历史
     /// 每个 20Hz 发布帧记录一次，用于武器命中回退
     /// </summary>
-    internal sealed class ServerMobHistory
+    internal sealed class ServerEntityHistory
     {
         private const int MaxFrames = 128;
 
         private readonly List<HistoryFrame> frames = [];
 
-        /// <summary>
-        /// 查询指定时间点的 mob 位置
-        /// </summary>
-        public bool TryGetPose(uint netId, long timeMs, out MobPose pose)
+        public bool TryGetPose(uint netId, long timeMs, out EntityPose pose)
         {
             pose = default;
 
@@ -85,7 +80,7 @@ namespace DeadCellsMultiplayerX.Server.World.Replication.Mobs
 
             alpha = Math.Clamp(alpha, 0.0, 1.0);
 
-            pose = new MobPose(
+            pose = new EntityPose(
                 previousPose.X + (nextPose.X - previousPose.X) * alpha,
                 previousPose.Y + (nextPose.Y - previousPose.Y) * alpha,
                 alpha < 0.5 ? previousPose.Dir : nextPose.Dir,
@@ -95,25 +90,22 @@ namespace DeadCellsMultiplayerX.Server.World.Replication.Mobs
             return true;
         }
 
-        /// <summary>
-        /// 记录一个发布帧的 mob 位置
-        /// </summary>
-        public void Record(long serverTimeMs, IReadOnlyList<MobDynamic> mobs)
+        public void Record(long serverTimeMs, IReadOnlyList<EntityDynamic> entities)
         {
             var frame = new HistoryFrame { TimeMs = serverTimeMs };
 
-            if (mobs != null)
+            if (entities != null)
             {
-                foreach (var mob in mobs)
+                foreach (var entity in entities)
                 {
-                    if (mob?.Pos == null) continue;
+                    if (entity?.Pos == null) continue;
 
-                    frame.Poses[mob.NetId] = new MobPose(
-                        mob.Pos.CX + mob.Pos.XR,
-                        mob.Pos.CY + mob.Pos.XY,
-                        mob.Pos.DIR,
-                        mob.Pos.DX,
-                        mob.Pos.DY);
+                    frame.Poses[entity.NetId] = new EntityPose(
+                        entity.Pos.CX + entity.Pos.XR,
+                        entity.Pos.CY + entity.Pos.XY,
+                        entity.Pos.DIR,
+                        entity.Pos.DX,
+                        entity.Pos.DY);
                 }
             }
 
@@ -126,9 +118,7 @@ namespace DeadCellsMultiplayerX.Server.World.Replication.Mobs
         private sealed class HistoryFrame
         {
             public long TimeMs;
-            public readonly Dictionary<uint, MobPose> Poses = [];
+            public readonly Dictionary<uint, EntityPose> Poses = [];
         }
     }
-
-
 }

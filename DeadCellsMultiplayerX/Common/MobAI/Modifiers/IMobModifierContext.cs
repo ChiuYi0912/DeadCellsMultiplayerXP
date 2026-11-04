@@ -15,7 +15,7 @@ namespace DeadCellsMultiplayerX.Common.MobAI.Modifiers
         Mob Mob { get; }
 
         /// <summary>
-        /// 服务端分配的 NetId；客户端从 MobSpawn 映射得到
+        /// 服务端分配的 NetId；客户端从 EntitySpawn 映射得到
         /// </summary>
         uint NetId { get; }
 

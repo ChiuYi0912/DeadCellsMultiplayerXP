@@ -50,14 +50,14 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts
                 () => Game.Class.ME);
             aggro = new ServerAggroManager(
                 teams,
-                session.MobRegistry,
+                session.Entities,
                 () => Game.Class.ME);
             pipeline = ActionPipeline.CreateDefault(
                 world,
                 spawns,
                 session.ClientFrames,
-                session.MobRegistry,
-                session.MobPublisher.History,
+                session.Entities,
+                session.EntityPublisher.History,
                 () => session.CurrentTimeStamp,
                 () => Game.Class.ME);
 

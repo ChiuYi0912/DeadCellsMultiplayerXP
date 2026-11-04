@@ -55,7 +55,7 @@ namespace DeadCellsMultiplayerX.Server.MobAI.Modifiers
         public bool TryAttach(Mob mob, long tick)
         {
             if (mob == null
-                || !session.MobRegistry.TryGetNetId(mob, out uint netId))
+                || !session.Entities.TryGetNetId(mob, out uint netId))
                 return false;
 
             var context = new ServerMobModifierContext(
@@ -117,7 +117,7 @@ namespace DeadCellsMultiplayerX.Server.MobAI.Modifiers
         private void CollectSkillPrepare(
             Mob mob, OldSkill skill, Entity target, int? data, long tick)
         {
-            if (!session.MobRegistry.TryGetNetId(mob, out uint netId))
+            if (!session.Entities.TryGetNetId(mob, out uint netId))
                 return;
 
             string targetGuid = string.Empty;
