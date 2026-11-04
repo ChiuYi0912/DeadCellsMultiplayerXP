@@ -28,6 +28,7 @@ using DeadCellsMultiplayerX.Client.Extensions;
 using dc.hl.types;
 using HaxeProxy.Runtime;
 using Hashlink.Proxy.Objects;
+using dc.en.inter;
 
 namespace DeadCellsMultiplayerX.Client.Guest
 {
@@ -183,6 +184,7 @@ namespace DeadCellsMultiplayerX.Client.Guest
             Hook_Mob.canUpdate += Hook_Mob_canUpdate;
             Hook_Mob.fixedUpdate += Hook_Mob_fixedUpdate;
             Hook_Mob.moveBlocked += Hook_Mob_moveBlocked;
+            Hook_Level.attachMobs += Hook_Level_attachMobs;
             Hook_Game.init += Hook_Game_init;
             Hook_Power.update += Hook_Power_update;
             Hook__AttackUtils.applyHitResult += Hook_AttackUtils_applyHitResult;
@@ -193,6 +195,79 @@ namespace DeadCellsMultiplayerX.Client.Guest
             Hook_OldMobSkill.update += Hook_OldMobSkill_update;
             Hook_OldSkill.interrupt += Hook_OldSkill_interrupt;
             Hook_OldSkill.isReady += Hook_OldSkill_isReady;
+        }
+
+        private void Hook_Level_attachMobs(Hook_Level.orig_attachMobs orig, Level self)
+        {
+            var map = self.map;
+            var rooms = map.rooms;
+            var colls = map.collisions;
+            var spots = map.fastSpots;
+            int wid = map.wid;
+            int hei = map.hei;
+            int collLen = colls.length;
+            int spotLen = spots.length;
+
+            int nbTotal = self.nbTotalMobs;
+
+            for (int ri = 0; ri < rooms.length; ri++)
+            {
+                var room = (dc.level.Room)rooms.getDyn(ri);
+                var mobs = room.mobs;
+                int mobCount = mobs.length;
+
+                for (int mi = 0; mi < mobCount; mi++)
+                {
+                    var mob = (dc.level.Mob)mobs.getDyn(mi);
+                    int cx = mob.cx;
+                    int cy = mob.cy;
+
+                    if ((uint)cx >= (uint)wid || (uint)cy >= (uint)hei)
+                        continue;
+
+                    int idx = cx + cy * wid;
+                    int coll = idx < collLen
+                             ? colls.getDyn(idx)
+                             : 0;
+                    if ((coll & 1) != 0)
+                        continue;
+
+                    var bp = Data.Class.mob.byId.get(mob.kind);
+
+
+                    if ((bp.genTags & (1 << 4)) == 0)
+                    {
+                        if (idx >= spotLen)
+                            continue;
+                        var sf = (dc.level.SpotFlags)spots.getDyn(idx);
+                        if (sf == null || (sf.high & (1 << 11)) == 0)
+                            continue;
+                    }
+
+                    if (mob.inShrine)
+                    {
+                        new EliteShrine(self, cx, cy, mob).init();
+                    }
+                    else if (mob.inStone)
+                    {
+                        if (self.atManager != null)
+                            new ATStatue(self, cx, cy, mob).init();
+                        else
+                            new MobStatue(self, cx, cy, mob).init();
+                    }
+                    else if (mob.inEgg)
+                    {
+                        new WallEgg(self, cx, cy, mob).init();
+                    }
+
+                    if (mob.kind.ToString() != "BlackBoilerRoom")
+                    {
+                        nbTotal++;
+                    }
+                }
+            }
+
+            self.nbTotalMobs = nbTotal;
         }
 
         private void Hook_OldSkill_interrupt(Hook_OldSkill.orig_interrupt orig, OldSkill self)
@@ -522,13 +597,23 @@ namespace DeadCellsMultiplayerX.Client.Guest
             replicator?.Dispose();
             rpc?.Dispose();
 
+            Hook_Game.onDispose -= Hook_Game_onDispose;
+            Hook_Mob.aiLocked -= Hook_Mob_aiLocked;
             Hook_Mob.onDie -= Hook_Mob_onDie;
+            Hook_Mob.canUpdate -= Hook_Mob_canUpdate;
+            Hook_Mob.fixedUpdate -= Hook_Mob_fixedUpdate;
+            Hook_Mob.moveBlocked -= Hook_Mob_moveBlocked;
+            Hook_Level.attachMobs -= Hook_Level_attachMobs;
+            Hook_Game.init -= Hook_Game_init;
             Hook_Power.update -= Hook_Power_update;
             Hook__AttackUtils.applyHitResult -= Hook_AttackUtils_applyHitResult;
             Hook__AttackUtils.postHitResultUpdate -= Hook_AttackUtils_postHitResultUpdate;
             Hook__AttackUtils.createFromHeroAndHit -= Hook_AttackUtils_createFromHeroAndHit;
             Hook_LevelAreaAffect.init -= Hook_LevelAreaAffect_init;
             Hook_LevelAreaAffect.applyAnotherAffect -= Hook_LevelAreaAffect_applyAnotherAffect;
+            Hook_OldMobSkill.update -= Hook_OldMobSkill_update;
+            Hook_OldSkill.interrupt -= Hook_OldSkill_interrupt;
+            Hook_OldSkill.isReady -= Hook_OldSkill_isReady;
             localCapture?.Dispose();
             localCapture = null;
 
