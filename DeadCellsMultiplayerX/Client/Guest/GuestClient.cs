@@ -3,7 +3,7 @@ using dc.en;
 using dc.tool;
 using DeadCellsMultiplayerX.Client.Core.Event;
 using DeadCellsMultiplayerX.Client.Replication;
-using DeadCellsMultiplayerX.Client.Heroes.RemoteHero;
+using DeadCellsMultiplayerX.Client.Heroes.Remote;
 using DeadCellsMultiplayerX.Client.Host;
 using DeadCellsMultiplayerX.Client.Networks;
 using DeadCellsMultiplayerX.Common.Data;

@@ -21,7 +21,7 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts.World
         public int Epoch { get; private set; } = -1;
 
         /// <summary>
-        /// 实际持有 GhostHero 的数量
+        /// 实际持有 ServerGhostHero 的数量
         /// </summary>
         public int Count => actors.Values.Count(actor => actor.Ghost != null);
 
@@ -63,7 +63,7 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts.World
         }
 
         /// <summary>
-        /// 清空 GhostHero 与事件
+        /// 清空 ServerGhostHero 与事件
         /// </summary>
         public void Reset()
         {

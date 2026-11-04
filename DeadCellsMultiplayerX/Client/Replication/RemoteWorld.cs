@@ -1,12 +1,13 @@
 using System.Collections.Generic;
 using dc.en;
 using DeadCellsMultiplayerX.Client.Combat;
-using DeadCellsMultiplayerX.Client.Heroes.LocalHero;
-using DeadCellsMultiplayerX.Client.Heroes.Ghost;
-using DeadCellsMultiplayerX.Client.MobAI.Events;
-using DeadCellsMultiplayerX.Client.MobAI.Modifiers;
-using DeadCellsMultiplayerX.Client.Mobs;
-using DeadCellsMultiplayerX.Client.Heroes.RemoteHero;
+using DeadCellsMultiplayerX.Client.Heroes.Local;
+using DeadCellsMultiplayerX.Client.Heroes.GhostReplay;
+using DeadCellsMultiplayerX.Client.MobBehavior.Events;
+using DeadCellsMultiplayerX.Client.MobBehavior.Modifiers;
+using DeadCellsMultiplayerX.Client.MobSync;
+using DeadCellsMultiplayerX.Client.Replication.Entities;
+using DeadCellsMultiplayerX.Client.Heroes.Remote;
 using DeadCellsMultiplayerX.Client.Effects;
 using DeadCellsMultiplayerX.Client.Snapshot;
 using DeadCellsMultiplayerX.Common.Core;
@@ -37,7 +38,17 @@ namespace DeadCellsMultiplayerX.Client.Replication
         private readonly RemoteHeroManager heroes;
 
         /// <summary>
-        /// 怪物同步装置，负责服务端怪物的生成、状态同步与销毁
+        /// 通用实体存储
+        /// </summary>
+        private readonly ClientEntityStore entityStore;
+
+        /// <summary>
+        /// 通用实体帧管线
+        /// </summary>
+        private readonly ClientEntitySyncManager entities;
+
+        /// <summary>
+        /// Mob 同步装置，负责服务端怪物的生成、状态同步与销毁
         /// </summary>
         private readonly MobSyncManager mobs;
 
@@ -47,7 +58,7 @@ namespace DeadCellsMultiplayerX.Client.Replication
         private readonly LocalHeroState localHero;
 
         /// <summary>
-        /// 远端玩家 GhostHero 生命周期与动作重放
+        /// 远端玩家 ClientGhostHero 生命周期与动作重放
         /// </summary>
         private readonly RemoteGhostManager ghosts;
 
@@ -76,10 +87,13 @@ namespace DeadCellsMultiplayerX.Client.Replication
             this.session = session;
             this.localGuid = localGuid;
             frames = new WorldFrameManager(session, localGuid);
-            mobs = new MobSyncManager(session, this, frames);
-            heroes = new RemoteHeroManager(session, this);
+            entityStore = new ClientEntityStore(session, this);
+            mobs = new MobSyncManager(session, this, frames, entityStore);
+            entityStore.RegisterHandler(mobs);
+            entities = new ClientEntitySyncManager(entityStore);
             localHero = new LocalHeroState(session, this);
-            ghosts = new RemoteGhostManager(session, this);
+            heroes = new RemoteHeroManager(session, this);
+            ghosts = new RemoteGhostManager(session, this, localGuid);
             areaAffects = new LevelAreaAffectStateManager(session);
 
             mobEvents = new ClientMobEventBus();
@@ -94,6 +108,8 @@ namespace DeadCellsMultiplayerX.Client.Replication
         public RemoteHeroManager Heros => heroes;
         public RemoteGhostManager Ghosts => ghosts;
         public MobSyncManager Mobs => mobs;
+        public ClientEntityStore EntityStore => entityStore;
+        public ClientEntitySyncManager Entities => entities;
         public LevelAreaAffectStateManager AreaAffects => areaAffects;
         public ClientMobModifierRegistry MobModifiers => mobModifiers;
         public ClientMobEventBus MobEvents => mobEvents;
@@ -116,8 +132,9 @@ namespace DeadCellsMultiplayerX.Client.Replication
         /// <param name="nowMs">当前时间戳，单位为毫秒。</param>
         public void Tick(long nowMs)
         {
+            ghosts.Tick(nowMs);
             frames.Tick(nowMs);
-            mobs.Tick(nowMs);
+            entities.Tick(nowMs);
         }
 
         /// <summary>
@@ -133,11 +150,11 @@ namespace DeadCellsMultiplayerX.Client.Replication
         /// <param name="frame">已应用的世界帧</param>
         private void OnFrameApplied(WorldFrame frame)
         {
+            ghosts.BeginFrame(frame);
             heroes.ApplyFrame(frame, frames);
             areaAffects.ApplyFrame(frame);
             ghosts.ApplyFrame(frame);
-            mobs.ApplyFrame(frame);
-            session.GhostHits.ApplyFrame(frame);
+            entities.ApplyFrame(frame);
         }
 
         protected override void MyDispose()
@@ -145,7 +162,7 @@ namespace DeadCellsMultiplayerX.Client.Replication
             frames.FrameApplied -= OnFrameApplied;
             mobModifiers.Clear();
             mobEvents.Clear();
-            mobs.Clear();
+            entities.Clear();
             areaAffects.Reset();
             ghosts.Dispose();
             heroes.Dispose();

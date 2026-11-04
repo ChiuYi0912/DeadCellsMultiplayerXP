@@ -7,7 +7,10 @@ using DeadCellsMultiplayerX.Server.Connection;
 using DeadCellsMultiplayerX.Server.Events;
 using DeadCellsMultiplayerX.Server.World;
 using DeadCellsMultiplayerX.Server.World.Ghosts;
-using DeadCellsMultiplayerX.Server.World.Hubs;
+using DeadCellsMultiplayerX.Server.World.Replication.Areas;
+using DeadCellsMultiplayerX.Server.World.Replication.Entities;
+using DeadCellsMultiplayerX.Server.World.Replication.Entities.Mobs;
+using DeadCellsMultiplayerX.Server.World.Replication.Frames;
 using DeadCellsMultiplayerX.Utils;
 using Microsoft.VisualStudio.Threading;
 using ModCore.Events.Interfaces.Game;
@@ -31,9 +34,10 @@ namespace DeadCellsMultiplayerX.Server.Core
         private ServerMainThread? mainThread;
         private readonly ServerTimeSystem timeSystem = new();
         private readonly ClientWorldFrameCollector clientFrames = new();
-        private readonly ServerMobRegistry mobRegistry = new();
+        private readonly ServerEntityRegistry entities = new();
+        private readonly ServerEntityHandlerRegistry entityHandlers = new();
         private readonly ServerLevelAreaAffectRegistry areaAffects = new();
-        private readonly ServerMobPublisher mobPublisher;
+        private readonly ServerEntityPublisher entityPublisher;
         private readonly ServerWorldBroadcaster broadcaster;
         private readonly ServerGhostManager ghosts;
 
@@ -42,18 +46,20 @@ namespace DeadCellsMultiplayerX.Server.Core
 
         public long CurrentTimeStamp => timeSystem.Now;
         public ClientWorldFrameCollector ClientFrames => clientFrames;
-        public ServerMobRegistry MobRegistry => mobRegistry;
+        public ServerEntityRegistry Entities => entities;
+        public ServerEntityHandlerRegistry EntityHandlers => entityHandlers;
         public ServerLevelAreaAffectRegistry AreaAffects => areaAffects;
-        public ServerMobPublisher MobPublisher => mobPublisher;
+        public ServerEntityPublisher EntityPublisher => entityPublisher;
         public ServerWorldBroadcaster Broadcaster => broadcaster;
         public ServerGhostManager Ghosts => ghosts;
 
         public ServerSession()
         {
-            mobPublisher = new ServerMobPublisher(mobRegistry);
+            entityHandlers.Register(new ServerMobEntityHandler(entities));
+            entityPublisher = new ServerEntityPublisher(entities, entityHandlers);
             ghosts = new ServerGhostManager(this);
             broadcaster = new ServerWorldBroadcaster(
-                clientFrames, mobPublisher, ghosts, areaAffects);
+                clientFrames, entityPublisher, ghosts, areaAffects);
         }
 
         /// <summary>
@@ -192,31 +198,6 @@ namespace DeadCellsMultiplayerX.Server.Core
             ghosts.RemoveGuest(guid);
         }
 
-        /// <summary>
-        /// 可靠地把 mob 命中 Ghost 的事件送到 owner
-        /// </summary>
-        public void SendGhostHit(GhostHitEvent hit)
-        {
-            if (hit == null || string.IsNullOrEmpty(hit.Guid))
-                return;
-
-            if (!TryGetGuest(hit.Guid, out var guest) || guest.IsDisposed)
-            {
-                Logger.Warning(
-                    "Ghost hit owner unavailable: guid={Guid} damage={Damage}",
-                    hit.Guid, hit.Damage);
-                return;
-            }
-
-            Logger.Information(
-                "Ghost hit sent: guid={Guid} damage={Damage}",
-                hit.Guid, hit.Damage);
-
-            _ = guest.guest.ApplyGhostHit(hit).ContinueWith(
-                t => Logger.Warning(t.Exception, "ApplyGhostHit failed"),
-                TaskContinuationOptions.OnlyOnFaulted);
-        }
-
         void IOnFrameUpdate.OnFrameUpdate(double dt)
         {
             timeSystem.Tick();
@@ -245,7 +226,7 @@ namespace DeadCellsMultiplayerX.Server.Core
         {
             broadcaster.Clear();
             clientFrames.Clear();
-            mobRegistry.BeginEpoch();
+            entities.ResetWorld();
             areaAffects.Clear();
             ghosts.Clear();
             base.MyDispose();

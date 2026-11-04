@@ -14,7 +14,9 @@ using dc.pr;
 using dc.tool;
 using dc.tool.atk;
 using dc.tool.skill;
+using DeadCellsMultiplayerX.Common.MobAI.Events;
 using DeadCellsMultiplayerX.Server.Events;
+using DeadCellsMultiplayerX.Utils;
 using Serilog;
 using Hashlink;
 using Hashlink.Marshaling;
@@ -160,7 +162,7 @@ namespace DeadCellsMultiplayerX.Server.Core
             bool? handled = session.Ghosts.MobModifiers.DispatchAiLocked(
                 self, session.CurrentTimeStamp);
 
-            if (handled == null)
+            if (handled == null || handled == false)
                 return orig(self);
 
             Cooldown cd = self.cd;
@@ -292,8 +294,10 @@ namespace DeadCellsMultiplayerX.Server.Core
                 && session != null
                 && self?.owner is Mob mob)
             {
+                var target = mob.aTarget;
+
                 session.Ghosts.MobModifiers.DispatchSkillPrepare(
-                    mob, self, session.CurrentTimeStamp);
+                    mob, self, target, data, session.CurrentTimeStamp);
             }
 
             return prepared;
@@ -322,29 +326,6 @@ namespace DeadCellsMultiplayerX.Server.Core
             AttackData atk,
             Entity target)
         {
-            // 自定义修改器可以先接管命中结算（例如完全自定义的 Zombie 命中）
-            var attackerMob = atk?.source as Mob ?? atk?.carrier as Mob;
-            if (attackerMob != null
-                && atk != null
-                && target != null
-                && session != null
-                && session.Ghosts.MobModifiers.DispatchAttackResult(
-                    attackerMob, atk, target,
-                    session.CurrentTimeStamp))
-                return;
-
-            // mob 命中 Ghost：服务端只判定命中，生命由 owner 客户端结算
-            if (target is Hero targetHero
-                && session?.Ghosts.TryGetCombatant(
-                    targetHero, out var ghost) == true)
-            {
-                var hit = session.Ghosts.RecordIncomingHit(ghost!, atk!);
-                if (hit != null)
-                    session.SendGhostHit(hit);
-
-                return;
-            }
-
 #if DEBUG
             var gameHero = dc.pr.Game.Class.ME?.hero;
             if (atk?.source is Hero hero
@@ -410,7 +391,7 @@ namespace DeadCellsMultiplayerX.Server.Core
                 orig(self);
             }
 
-            session?.MobRegistry.MarkDead(self);
+            session?.Entities.MarkDead(self);
             EventSystem.BroadcastEvent<IOnMobOnDie, dc.en.Mob>(self);
         }
 
@@ -501,7 +482,7 @@ namespace DeadCellsMultiplayerX.Server.Core
         {
             var mob = orig(k, level, cx, cy, dmgTier, lifeTier);
 
-            session?.MobRegistry.Register(mob, null, level);
+            session?.Entities.Register(mob, null, level);
             if (session != null)
                 session.Ghosts.MobModifiers.TryAttach(
                     mob, session.CurrentTimeStamp);
@@ -515,7 +496,7 @@ namespace DeadCellsMultiplayerX.Server.Core
         {
             var mob = orig(self, m);
 
-            session?.MobRegistry.Register(mob, m, self);
+            session?.Entities.Register(mob, m, self);
             if (session != null)
                 session.Ghosts.MobModifiers.TryAttach(
                     mob, session.CurrentTimeStamp);
@@ -537,7 +518,7 @@ namespace DeadCellsMultiplayerX.Server.Core
             if (self is Mob mob)
             {
                 session?.Ghosts.MobModifiers.Detach(mob);
-                session?.MobRegistry.Unregister(mob);
+                session?.Entities.Unregister(mob);
             }
 
             orig(self);

@@ -2,12 +2,14 @@ using dc;
 using dc.en;
 using dc.tool.atk;
 using dc.tool.skill;
+using DeadCellsMultiplayerX.Common.MobAI.Events;
 using DeadCellsMultiplayerX.Common.MobAI.Modifiers;
 using DeadCellsMultiplayerX.Server.Core;
 using DeadCellsMultiplayerX.Server.MobAI.Events;
 using DeadCellsMultiplayerX.Server.MobAI.Modifiers.Zombie;
 using DeadCellsMultiplayerX.Server.World.Ghosts;
 using DeadCellsMultiplayerX.Server.World.Ghosts.Team;
+using DeadCellsMultiplayerX.Utils;
 using GameZombie = dc.en.mob.Zombie;
 
 namespace DeadCellsMultiplayerX.Server.MobAI.Modifiers
@@ -53,7 +55,7 @@ namespace DeadCellsMultiplayerX.Server.MobAI.Modifiers
         public bool TryAttach(Mob mob, long tick)
         {
             if (mob == null
-                || !session.MobRegistry.TryGetNetId(mob, out uint netId))
+                || !session.Entities.TryGetNetId(mob, out uint netId))
                 return false;
 
             var context = new ServerMobModifierContext(
@@ -89,11 +91,56 @@ namespace DeadCellsMultiplayerX.Server.MobAI.Modifiers
         public void DispatchPostUpdate(Mob mob, long tick)
             => inner.DispatchPostUpdate(mob, tick);
 
-        public void DispatchSkillPrepare(Mob mob, OldSkill skill, long tick)
-            => inner.DispatchSkillPrepare(mob, skill, tick);
+        /// <summary>
+        /// 技能准备：注册过修改器的 mob 交给修改器处理；
+        /// 其余 mob 统一收集并转发给客户端播放
+        /// </summary>
+        public void DispatchSkillPrepare(Mob mob, OldSkill skill, Entity target, int? data, long tick)
+        {
+            if (mob == null || mob.destroyed || skill == null || skill.destroyed) return;
 
-        public void DispatchSkillExecute(Mob mob, OldSkill skill, long tick)
-            => inner.DispatchSkillExecute(mob, skill, tick);
+            if (inner.TryGet(mob, out _))
+            {
+                if (!ghosts.TryGetCombatant(target, out var combatant))
+                    return;
+
+                inner.DispatchSkillPrepare(mob, skill, combatant, data, tick);
+                return;
+            }
+
+            CollectSkillPrepare(mob, skill, target, data, tick);
+        }
+
+        /// <summary>
+        /// 未注册修改器的 mob 统一收集技能准备事件
+        /// </summary>
+        private void CollectSkillPrepare(
+            Mob mob, OldSkill skill, Entity target, int? data, long tick)
+        {
+            if (!session.Entities.TryGetNetId(mob, out uint netId))
+                return;
+
+            string targetGuid = string.Empty;
+            if (ghosts.TryGetCombatant(target, out var combatant))
+                targetGuid = combatant.Guid;
+
+            var level = mob._level;
+
+            ghosts.MobAttacks.SubmitSkill(new MobModifierEvent
+            {
+                Epoch = session.Broadcaster.Epoch,
+                MobNetId = netId,
+                Kind = MobModifierEventKind.ActionStarted,
+                SkillId = skill.id.ToString(),
+                TargetGuid = targetGuid,
+                SkillRatio = data,
+                ServerTimeMs = tick,
+                LevelId = level?.map?.id?.ToString() ?? string.Empty,
+                SubLevelIndex = level?.GetSubLevelIndex() ?? -1,
+            });
+        }
+
+        public void DispatchSkillExecute(Mob mob, OldSkill skill, long tick) => inner.DispatchSkillExecute(mob, skill, tick);
 
         public void DispatchMobDied(Mob mob, long tick)
             => inner.DispatchMobDied(mob, tick);

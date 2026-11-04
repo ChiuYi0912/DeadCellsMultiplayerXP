@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using DeadCellsMultiplayerX.Common.Data.Ghosts;
+using DeadCellsMultiplayerX.Common.MobAI.Events;
 using MessagePack;
 using DeadCellsMultiplayerX.Common.Core;
 
@@ -7,7 +8,6 @@ namespace DeadCellsMultiplayerX.Common.Data.Snapshot
 {
     /// <summary>
     /// 服务端每 tick 广播的完整世界帧
-    /// 怪物在此扩展
     /// </summary>
     [MessagePackObject]
     public class WorldFrame
@@ -43,19 +43,19 @@ namespace DeadCellsMultiplayerX.Common.Data.Snapshot
         [Key(5)] public List<string> Despawned { get; set; } = [];
 
         /// <summary>
-        /// 全量怪物动态状态
+        /// 全量实体动态状态
         /// </summary>
-        [Key(6)] public List<MobDynamic> Mobs { get; set; } = [];
+        [Key(6)] public List<EntityDynamic> Entities { get; set; } = [];
 
         /// <summary>
-        /// 新生成怪物的实体数据
+        /// 新生成实体的静态数据
         /// </summary>
-        [Key(7)] public List<MobSpawn> SpawnedMobs { get; set; } = [];
+        [Key(7)] public List<EntitySpawn> SpawnedEntities { get; set; } = [];
 
         /// <summary>
-        /// 本帧移除的怪物 NetId
+        /// 本帧移除的实体
         /// </summary>
-        [Key(8)] public List<uint> DespawnedMobs { get; set; } = [];
+        [Key(8)] public List<EntityDespawn> DespawnedEntities { get; set; } = [];
 
         /// <summary>
         /// 本帧服务端确认的英雄动作（主动技能/武器）
@@ -68,8 +68,8 @@ namespace DeadCellsMultiplayerX.Common.Data.Snapshot
         [Key(10)] public List<LevelAreaAffectState> AreaAffects { get; set; } = [];
 
         /// <summary>
-        /// 本帧服务端判定的 mob 命中 Ghost 事件
+        /// 本帧统一路由的实体事件
         /// </summary>
-        [Key(11)] public List<GhostHitEvent> GhostHits { get; set; } = [];
+        [Key(11)] public List<MobModifierEvent> EntityEvents { get; set; } = [];
     }
 }

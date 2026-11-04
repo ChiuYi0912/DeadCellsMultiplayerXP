@@ -333,8 +333,10 @@ namespace DeadCellsMultiplayerX.Client.Snapshot
                 Heroes = resync.Heroes ?? [],
                 Spawned = resync.Spawns ?? [],
                 Despawned = [],
-                Mobs = resync.Mobs ?? [],
-                SpawnedMobs = resync.MobSpawns ?? [],
+                Entities = resync.Entities ?? [],
+                SpawnedEntities = resync.EntitySpawns ?? [],
+                DespawnedEntities = [],
+                EntityEvents = [],
                 AreaAffects = resync.AreaAffects ?? [],
             };
 
@@ -484,11 +486,11 @@ namespace DeadCellsMultiplayerX.Client.Snapshot
         /// 取渲染时刻前后两个世界帧中的怪物状态
         /// 只有一侧存在时前后都用该状态
         /// </summary>
-        public bool TryGetMobBracket(
+        public bool TryGetEntityBracket(
             uint netId,
             double nowSec,
-            out MobDynamic previous,
-            out MobDynamic next,
+            out EntityDynamic previous,
+            out EntityDynamic next,
             out double alpha,
             out double renderTimeSec)
         {
@@ -500,8 +502,8 @@ namespace DeadCellsMultiplayerX.Client.Snapshot
             if (!timeline.TryGetInterpolation(nowSec, out var prevFrame, out var nextFrame, out alpha))
                 return false;
 
-            var prev = FindMob(prevFrame, netId);
-            var nextState = FindMob(nextFrame, netId);
+            var prev = FindEntity(prevFrame, netId);
+            var nextState = FindEntity(nextFrame, netId);
 
             if (prev == null && nextState == null)
                 return false;
@@ -765,14 +767,14 @@ namespace DeadCellsMultiplayerX.Client.Snapshot
         }
 
         /// <summary>
-        /// 在世界帧中查找怪物状态
+        /// 在世界帧中查找实体状态
         /// </summary>
-        private static MobDynamic? FindMob(WorldFrame frame, uint netId)
+        private static EntityDynamic? FindEntity(WorldFrame frame, uint netId)
         {
-            if (frame?.Mobs == null) return null;
-            foreach (var mob in frame.Mobs)
-                if (mob != null && mob.NetId == netId)
-                    return mob;
+            if (frame?.Entities == null) return null;
+            foreach (var entity in frame.Entities)
+                if (entity != null && entity.NetId == netId)
+                    return entity;
             return null;
         }
     }

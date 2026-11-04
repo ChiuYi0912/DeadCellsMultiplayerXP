@@ -1,72 +1,46 @@
 using System.Collections.Generic;
-using DeadCellsMultiplayerX.Common.MobAI.Contracts;
 using DeadCellsMultiplayerX.Common.MobAI.Events;
 using DeadCellsMultiplayerX.Server.MobAI.Events;
-using DeadCellsMultiplayerX.Server.MobAI.Execution;
-using Serilog;
 
 namespace DeadCellsMultiplayerX.Server.MobAI.Combat
 {
     /// <summary>
-    /// 攻击释放路由骨架
-    /// 当前只负责收集计划并产生事件；具体技能执行留给未来的 IMobExecutor
+    /// 技能事件路由
     /// </summary>
     internal sealed class ServerMobAttackRouter : IServerMobAttackRouter
     {
-        private static readonly ILogger Logger = Log.ForContext("SourceContext", "ServerMobAttackRouter");
-
-        private readonly IMobExecutor? executor;
         private readonly IServerMobEventBus? events;
-        private readonly Queue<MobActionPlan> pending = new();
+        private readonly Queue<MobModifierEvent> pendingSkills = new();
+        private long nextActionId;
 
         public ServerMobAttackRouter(
-            IMobExecutor? executor = null,
             IServerMobEventBus? events = null)
         {
-            this.executor = executor;
             this.events = events;
         }
 
         /// <inheritdoc />
-        public void Submit(MobActionPlan plan)
+        public void SubmitSkill(MobModifierEvent evt)
         {
-            if (plan == null || plan.ActionId <= 0 || plan.MobNetId == 0)
+            if (evt == null || evt.MobNetId == 0)
                 return;
 
-            pending.Enqueue(plan);
+            pendingSkills.Enqueue(evt);
         }
 
         /// <inheritdoc />
         public IReadOnlyList<MobModifierEvent> Tick(long serverTimeMs)
         {
-            if (pending.Count == 0)
+            if (pendingSkills.Count == 0)
                 return [];
 
             var result = new List<MobModifierEvent>();
 
-            while (pending.TryDequeue(out var plan))
+            while (pendingSkills.TryDequeue(out var evt))
             {
-                bool started = executor?.TryStart(plan) ?? true;
-                if (!started)
-                {
-                    Logger.Debug(
-                        "Mob attack rejected by executor: mob={NetId} action={ActionId} skill={Skill}",
-                        plan.MobNetId, plan.ActionId, plan.SkillId);
-                    continue;
-                }
-
-                var evt = new MobModifierEvent
-                {
-                    Epoch = plan.Epoch,
-                    ActionId = plan.ActionId,
-                    MobNetId = plan.MobNetId,
-                    Kind = MobModifierEventKind.ActionStarted,
-                    SkillId = plan.SkillId,
-                    TargetGuid = plan.TargetGuid,
-                    ServerTimeMs = serverTimeMs,
-                    LevelId = plan.LevelId,
-                    SubLevelIndex = plan.SubLevelIndex,
-                };
+                evt.ActionId = ++nextActionId;
+                if (evt.ServerTimeMs <= 0)
+                    evt.ServerTimeMs = serverTimeMs;
 
                 result.Add(evt);
                 events?.Publish(evt);
@@ -76,6 +50,10 @@ namespace DeadCellsMultiplayerX.Server.MobAI.Combat
         }
 
         /// <inheritdoc />
-        public void Clear() => pending.Clear();
+        public void Clear()
+        {
+            pendingSkills.Clear();
+            nextActionId = 0;
+        }
     }
 }

@@ -6,29 +6,29 @@ using dc.tool;
 using dc.tool.atk;
 using DeadCellsMultiplayerX.Client.Core.Event;
 using DeadCellsMultiplayerX.Client.Combat;
-using DeadCellsMultiplayerX.Client.Heroes.LocalHero;
-using DeadCellsMultiplayerX.Client.Heroes.Ghost;
+using DeadCellsMultiplayerX.Client.Heroes.Local;
 using DeadCellsMultiplayerX.Client.Replication;
-using DeadCellsMultiplayerX.Client.Heroes.RemoteHero;
-using DeadCellsMultiplayerX.Client.Mobs;
-using DeadCellsMultiplayerX.Client.Effects;
+using DeadCellsMultiplayerX.Client.Heroes.Remote;
 using DeadCellsMultiplayerX.Client.Snapshot;
-using DeadCellsMultiplayerX.Client.Host;
-using DeadCellsMultiplayerX.Common.Data;
 using DeadCellsMultiplayerX.Common.Data.Snapshot;
 using DeadCellsMultiplayerX.Common.Ghosts;
 using DeadCellsMultiplayerX.Server.Core;
 using DeadCellsMultiplayerX.Utils;
 using Hashlink.Proxy.Clousre;
 using ModCore;
-using ModCore.Events;
 using ModCore.Events.Interfaces.Game;
-using ModCore.Events.Interfaces.Game.Hero;
 using ModCore.Modules;
 using ModCore.Utilities;
 using StreamJsonRpc;
 using System.Diagnostics;
 using DeadCellsMultiplayerX.Client.Core;
+using DeadCellsMultiplayerX.Client.MobBehavior;
+using dc.tool.skill;
+using DeadCellsMultiplayerX.Client.Extensions;
+using dc.hl.types;
+using HaxeProxy.Runtime;
+using Hashlink.Proxy.Objects;
+using dc.en.inter;
 
 namespace DeadCellsMultiplayerX.Client.Guest
 {
@@ -73,7 +73,6 @@ namespace DeadCellsMultiplayerX.Client.Guest
         private LocalCombatPrediction? prediction;
         private GhostCombatResolver? ghostCombat;
         private CombatDeathGate? deathGate;
-        private GhostHitReceiver? ghostHits;
 
         /// <summary>
         /// 本地武器命中预测
@@ -89,11 +88,6 @@ namespace DeadCellsMultiplayerX.Client.Guest
         /// 允许客户端 mob 执行死亡的闸门
         /// </summary>
         internal CombatDeathGate DeathGate => deathGate ?? throw new InvalidOperationException();
-
-        /// <summary>
-        /// 服务端 mob 命中 Ghost 的客户端结算器
-        /// </summary>
-        internal GhostHitReceiver GhostHits => ghostHits ?? throw new InvalidOperationException();
 
         public volatile bool serverDrivenTransition = false;
         private readonly ClientWorldSendBuffer sendBuffer = new();
@@ -162,7 +156,6 @@ namespace DeadCellsMultiplayerX.Client.Guest
         {
             prediction?.Clear();
             deathGate?.Clear();
-            ghostHits?.Clear();
             remoteWorld?.Dispose();
             remoteWorld = new RemoteWorld(this, client.Guid);
             sendBuffer.ResetLocalHeroState();
@@ -173,7 +166,6 @@ namespace DeadCellsMultiplayerX.Client.Guest
             deathGate = new CombatDeathGate();
             ghostCombat = new GhostCombatResolver(this);
             prediction = new LocalCombatPrediction(this);
-            ghostHits = new GhostHitReceiver(this);
             localCapture = new LocalGhostCapture(this);
             localCapture.Init();
 
@@ -189,6 +181,10 @@ namespace DeadCellsMultiplayerX.Client.Guest
             Hook_Game.onDispose += Hook_Game_onDispose;
             Hook_Mob.aiLocked += Hook_Mob_aiLocked;
             Hook_Mob.onDie += Hook_Mob_onDie;
+            Hook_Mob.canUpdate += Hook_Mob_canUpdate;
+            Hook_Mob.fixedUpdate += Hook_Mob_fixedUpdate;
+            Hook_Mob.moveBlocked += Hook_Mob_moveBlocked;
+            Hook_Level.attachMobs += Hook_Level_attachMobs;
             Hook_Game.init += Hook_Game_init;
             Hook_Power.update += Hook_Power_update;
             Hook__AttackUtils.applyHitResult += Hook_AttackUtils_applyHitResult;
@@ -196,6 +192,117 @@ namespace DeadCellsMultiplayerX.Client.Guest
             Hook__AttackUtils.createFromHeroAndHit += Hook_AttackUtils_createFromHeroAndHit;
             Hook_LevelAreaAffect.init += Hook_LevelAreaAffect_init;
             Hook_LevelAreaAffect.applyAnotherAffect += Hook_LevelAreaAffect_applyAnotherAffect;
+            Hook_OldMobSkill.update += Hook_OldMobSkill_update;
+            Hook_OldSkill.interrupt += Hook_OldSkill_interrupt;
+            Hook_OldSkill.isReady += Hook_OldSkill_isReady;
+        }
+
+        private void Hook_Level_attachMobs(Hook_Level.orig_attachMobs orig, Level self)
+        {
+            var map = self.map;
+            var rooms = map.rooms;
+            var colls = map.collisions;
+            var spots = map.fastSpots;
+            int wid = map.wid;
+            int hei = map.hei;
+            int collLen = colls.length;
+            int spotLen = spots.length;
+
+            int nbTotal = self.nbTotalMobs;
+
+            for (int ri = 0; ri < rooms.length; ri++)
+            {
+                var room = (dc.level.Room)rooms.getDyn(ri);
+                var mobs = room.mobs;
+                int mobCount = mobs.length;
+
+                for (int mi = 0; mi < mobCount; mi++)
+                {
+                    var mob = (dc.level.Mob)mobs.getDyn(mi);
+                    int cx = mob.cx;
+                    int cy = mob.cy;
+
+                    if ((uint)cx >= (uint)wid || (uint)cy >= (uint)hei)
+                        continue;
+
+                    int idx = cx + cy * wid;
+                    int coll = idx < collLen
+                             ? colls.getDyn(idx)
+                             : 0;
+                    if ((coll & 1) != 0)
+                        continue;
+
+                    var bp = Data.Class.mob.byId.get(mob.kind);
+
+
+                    if ((bp.genTags & (1 << 4)) == 0)
+                    {
+                        if (idx >= spotLen)
+                            continue;
+                        var sf = (dc.level.SpotFlags)spots.getDyn(idx);
+                        if (sf == null || (sf.high & (1 << 11)) == 0)
+                            continue;
+                    }
+
+                    if (mob.inShrine)
+                    {
+                        new EliteShrine(self, cx, cy, mob).init();
+                    }
+                    else if (mob.inStone)
+                    {
+                        if (self.atManager != null)
+                            new ATStatue(self, cx, cy, mob).init();
+                        else
+                            new MobStatue(self, cx, cy, mob).init();
+                    }
+                    else if (mob.inEgg)
+                    {
+                        new WallEgg(self, cx, cy, mob).init();
+                    }
+
+                    if (mob.kind.ToString() != "BlackBoilerRoom")
+                    {
+                        nbTotal++;
+                    }
+                }
+            }
+
+            self.nbTotalMobs = nbTotal;
+        }
+
+        private void Hook_OldSkill_interrupt(Hook_OldSkill.orig_interrupt orig, OldSkill self)
+        {
+            if (self is not OldMobSkill)
+                orig(self);
+        }
+        #region Hooks
+        private bool Hook_OldSkill_isReady(Hook_OldSkill.orig_isReady orig, OldSkill self)
+        {
+            return true;
+        }
+
+        private void Hook_OldMobSkill_update(Hook_OldMobSkill.orig_update orig, OldMobSkill self)
+        {
+            self.MobSkillUpdate();
+        }
+
+        private bool Hook_Mob_moveBlocked(Hook_Mob.orig_moveBlocked orig, Mob self)
+        {
+            return false;
+        }
+
+        private void Hook_Mob_fixedUpdate(Hook_Mob.orig_fixedUpdate orig, Mob self)
+        {
+            orig(self);
+            //ClientMobself.ClientfixedUpdate(self);
+
+            remoteWorld?.MobModifiers.OnMobFixedUpdate(
+             self, SyncedTimeMs);
+        }
+
+        private bool Hook_Mob_canUpdate(Hook_Mob.orig_canUpdate orig, Mob self)
+        {
+            return true;
         }
 
         /// <summary>
@@ -271,43 +378,33 @@ namespace DeadCellsMultiplayerX.Client.Guest
             AttackData atk,
             Entity target)
         {
-            if (target is not Mob mob || remoteWorld?.IsRemoteMob(mob) != true)
+            // 远端 Mob 只播放受击表现，本地不再直接扣血/致死。
+            if (target is Mob mob && remoteWorld?.IsRemoteMob(mob) == true)
             {
-                orig(atk, target);
+                if (replayVisualDepth == 0
+                    && atk != null
+                    && atk.isSuccess())
+                {
+                    PlayHitVisual(atk, mob);
+                }
+
                 return;
             }
 
-            if (replayVisualDepth != 0
-                || atk == null
-                || !atk.isSuccess())
-            {
-                return;
-            }
+            // if (target is Hero hero
+            //     && !ReferenceEquals(hero, Game?.hero))
+            //     return;
 
-            var receiver = remoteWorld.Mobs.Receiver;
+            // var attacker = atk?.source as Mob ?? atk?.carrier as Mob;
+            // if (target is Hero localHero
+            //     && ReferenceEquals(localHero, Game?.hero)
+            //     && attacker != null
+            //     && remoteWorld?.IsRemoteMob(attacker) == true)
+            // {
+            //     return;
+            // }
 
-            if (receiver.TryGetNetId(mob, out uint netId)
-                && Prediction.IsPredictedDead(netId))
-            {
-                return;
-            }
-
-            GhostReplayGuard.MarkVisualHit(mob);
-
-            // ghost 的服务端事件已经到达，使用同帧状态结算
-            if (GhostCombat.TryHandleHit(atk, mob))
-                return;
-
-            // 本地 客户 致死走真实 orig，非致死走轻量预测
-            if (Prediction.TryHandleLocalHit(
-                    atk, mob,
-                    () => orig(atk, target),
-                    () => PlayHitVisual(atk, mob)))
-            {
-                return;
-            }
-
-            PlayHitVisual(atk, mob);
+            orig(atk, target);
         }
 
         /// <summary>
@@ -356,8 +453,8 @@ namespace DeadCellsMultiplayerX.Client.Guest
             AttackData atk,
             Entity target)
         {
-            if (target is Mob mob && remoteWorld?.IsRemoteMob(mob) == true)
-                return;
+            // if (target is Mob mob && remoteWorld?.IsRemoteMob(mob) == true)
+            //     return;
 
             orig(atk, target);
         }
@@ -395,6 +492,9 @@ namespace DeadCellsMultiplayerX.Client.Guest
         {
             orig(self);
             self.infection.destroy();
+#if DEBUG
+            dc.ui.Console.Class.ME.flags.set("area".AsHaxeString(), 1);
+#endif
         }
 
         private bool Hook_Mob_aiLocked(Hook_Mob.orig_aiLocked orig, Mob self)
@@ -479,31 +579,41 @@ namespace DeadCellsMultiplayerX.Client.Guest
             Dispose();
         }
 
+        #endregion
+
         protected override void MyDispose()
         {
             base.MyDispose();
 
             prediction?.Clear();
             deathGate?.Clear();
-            ghostHits?.Clear();
 
             remoteWorld?.Dispose();
             remoteWorld = null;
             prediction = null;
-            ghostHits = null;
             sendBuffer.Clear();
 
             serverStream?.Dispose();
             replicator?.Dispose();
             rpc?.Dispose();
 
+            Hook_Game.onDispose -= Hook_Game_onDispose;
+            Hook_Mob.aiLocked -= Hook_Mob_aiLocked;
             Hook_Mob.onDie -= Hook_Mob_onDie;
+            Hook_Mob.canUpdate -= Hook_Mob_canUpdate;
+            Hook_Mob.fixedUpdate -= Hook_Mob_fixedUpdate;
+            Hook_Mob.moveBlocked -= Hook_Mob_moveBlocked;
+            Hook_Level.attachMobs -= Hook_Level_attachMobs;
+            Hook_Game.init -= Hook_Game_init;
             Hook_Power.update -= Hook_Power_update;
             Hook__AttackUtils.applyHitResult -= Hook_AttackUtils_applyHitResult;
             Hook__AttackUtils.postHitResultUpdate -= Hook_AttackUtils_postHitResultUpdate;
             Hook__AttackUtils.createFromHeroAndHit -= Hook_AttackUtils_createFromHeroAndHit;
             Hook_LevelAreaAffect.init -= Hook_LevelAreaAffect_init;
             Hook_LevelAreaAffect.applyAnotherAffect -= Hook_LevelAreaAffect_applyAnotherAffect;
+            Hook_OldMobSkill.update -= Hook_OldMobSkill_update;
+            Hook_OldSkill.interrupt -= Hook_OldSkill_interrupt;
+            Hook_OldSkill.isReady -= Hook_OldSkill_isReady;
             localCapture?.Dispose();
             localCapture = null;
 
@@ -722,17 +832,6 @@ namespace DeadCellsMultiplayerX.Client.Guest
         /// </summary>
         public Task<ClientFrameBundle> RequestClientFrames(ClientFrameRangeRequest request)
             => Task.FromResult(sendBuffer.BuildBundle(request));
-
-        /// <summary>
-        /// 服务端确认的 mob 命中 Ghost
-        /// </summary>
-        public Task ApplyGhostHit(GhostHitEvent hit)
-        {
-            Debug.Assert(ghostHits != null);
-
-            ghostHits.Apply(hit);
-            return Task.CompletedTask;
-        }
 
         internal void ObserveWorldEpoch(int epoch) => sendBuffer.SetEpoch(epoch);
 

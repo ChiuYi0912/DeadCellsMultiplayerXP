@@ -68,9 +68,9 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts.Pipeline
         public Actor? Actor { get; set; }
 
         /// <summary>
-        /// 当前 GhostHero
+        /// 当前 ServerGhostHero
         /// </summary>
-        public GhostHero? Ghost => Actor?.Ghost;
+        public ServerGhostHero? Ghost => Actor?.Ghost;
 
         /// <summary>
         /// 技能释放进度

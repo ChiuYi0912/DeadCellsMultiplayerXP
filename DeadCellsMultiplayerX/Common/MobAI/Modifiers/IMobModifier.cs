@@ -8,7 +8,7 @@ namespace DeadCellsMultiplayerX.Common.MobAI.Modifiers
     /// 注册器在 mob 创建时执行一次 <see cref="InitHook"/>，
     /// 然后调用 <see cref="Attach"/>。
     /// </summary>
-    public interface IMobModifier
+    internal interface IMobModifier
     {
         /// <summary>
         /// 该修改器支持的 mob CLR 类型，例如 typeof(dc.en.mob.Zombie)
@@ -36,7 +36,7 @@ namespace DeadCellsMultiplayerX.Common.MobAI.Modifiers
     /// 带具体 mob 子类约束的修改器接口
     /// 注册器仍然以非泛型 <see cref="IMobModifier"/> 保存实例
     /// </summary>
-    public interface IMobModifier<in TMob> : IMobModifier
+    internal interface IMobModifier<in TMob> : IMobModifier
         where TMob : Mob
     {
         /// <summary>

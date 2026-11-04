@@ -61,14 +61,14 @@ namespace DeadCellsMultiplayerX.Common.Data.Snapshot
         [Key(4)] public List<HeroSpawn> Spawns { get; set; } = [];
 
         /// <summary>
-        /// 全量怪物动态状态
+        /// 全量实体动态状态
         /// </summary>
-        [Key(5)] public List<MobDynamic> Mobs { get; set; } = [];
+        [Key(5)] public List<EntityDynamic> Entities { get; set; } = [];
 
         /// <summary>
-        /// 全量怪物生成数据
+        /// 全量实体生成数据
         /// </summary>
-        [Key(6)] public List<MobSpawn> MobSpawns { get; set; } = [];
+        [Key(6)] public List<EntitySpawn> EntitySpawns { get; set; } = [];
 
         /// <summary>
         /// 全量动态关卡区域

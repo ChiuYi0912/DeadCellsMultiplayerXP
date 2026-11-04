@@ -11,7 +11,7 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts.Team
         /// <summary>
         /// 为一个客户端 Ghost 建立可战斗视图
         /// </summary>
-        public GhostCombatant(string guid, GhostHero ghost, Level level)
+        public GhostCombatant(string guid, ServerGhostHero ghost, Level level)
         {
             Guid = guid;
             Ghost = ghost;
@@ -26,7 +26,7 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts.Team
         /// <summary>
         /// Ghost 生命周期壳
         /// </summary>
-        public GhostHero Ghost { get; }
+        public ServerGhostHero Ghost { get; }
 
         /// <summary>
         /// 当前所在关卡

@@ -15,7 +15,7 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts.Execution
         public HeroActionKind Kind => HeroActionKind.ActiveSkill;
 
         public bool TryExecute(
-            GhostHero ghost,
+            ServerGhostHero ghost,
             HeroAction request,
             double ratio)
         {
@@ -51,7 +51,7 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts.Execution
         public HeroActionKind Kind => HeroActionKind.Weapon;
 
         public bool TryExecute(
-            GhostHero ghost,
+            ServerGhostHero ghost,
             HeroAction request,
             double ratio)
         {
@@ -80,7 +80,7 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts.Execution
         public HeroActionKind Kind => HeroActionKind.Talisman;
 
         public bool TryExecute(
-            GhostHero ghost,
+            ServerGhostHero ghost,
             HeroAction request,
             double ratio)
         {

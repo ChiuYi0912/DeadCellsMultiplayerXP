@@ -16,7 +16,7 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts.Execution
         HeroActionKind Kind { get; }
 
         bool TryExecute(
-            GhostHero ghost,
+            ServerGhostHero ghost,
             HeroAction request,
             double ratio);
     }
@@ -54,7 +54,7 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts.Execution
         /// 执行一次已通过准入的动作
         /// </summary>
         public bool TryExecute(
-            GhostHero ghost,
+            ServerGhostHero ghost,
             HeroAction request,
             double ratio)
         {

@@ -4,7 +4,7 @@ using DeadCellsMultiplayerX.Server.Core;
 using DeadCellsMultiplayerX.Server.MobAI.Events;
 using DeadCellsMultiplayerX.Server.World.Ghosts;
 using DeadCellsMultiplayerX.Server.World.Ghosts.Team;
-using DeadCellsMultiplayerX.Server.World.Hubs;
+using DeadCellsMultiplayerX.Server.World.Replication.Entities;
 
 namespace DeadCellsMultiplayerX.Server.MobAI.Modifiers
 {
@@ -49,9 +49,9 @@ namespace DeadCellsMultiplayerX.Server.MobAI.Modifiers
         public ServerSession Session { get; }
 
         /// <summary>
-        /// 服务端 mob 注册表。
+        /// 服务端通用实体注册表。
         /// </summary>
-        public ServerMobRegistry MobRegistry => Session.MobRegistry;
+        public ServerEntityRegistry Entities => Session.Entities;
 
         /// <summary>
         /// Ghost 队伍管理器。
@@ -69,13 +69,13 @@ namespace DeadCellsMultiplayerX.Server.MobAI.Modifiers
         public IServerMobEventBus Events { get; }
 
         /// <inheritdoc />
-        public T? GetService<T>() where T : class
+        public T GetService<T>() where T : class
         {
             if (typeof(T) == typeof(ServerSession))
                 return (T)(object)Session;
 
-            if (typeof(T) == typeof(ServerMobRegistry))
-                return (T)(object)MobRegistry;
+            if (typeof(T) == typeof(ServerEntityRegistry))
+                return (T)(object)Entities;
 
             if (typeof(T) == typeof(ServerTeamManager))
                 return (T)(object)Teams;
@@ -86,7 +86,7 @@ namespace DeadCellsMultiplayerX.Server.MobAI.Modifiers
             if (typeof(T) == typeof(IServerMobEventBus))
                 return (T)(object)Events;
 
-            return null;
+            return null!;
         }
     }
 }
