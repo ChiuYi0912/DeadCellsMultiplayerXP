@@ -34,7 +34,7 @@ namespace DeadCellsMultiplayerX.Client.Guest
         public async Task Init(string name)
         {
 
-            rpc = remote.Stream.CreateJsonRpc();
+            rpc = remote.Stream.CreateJsonRpc("guest-lobby");
 
             hostInterfact = rpc.Attach<IHostClientRPC>();
 

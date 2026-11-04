@@ -53,7 +53,7 @@ namespace DeadCellsMultiplayerX.Server.Connection
             Session = session;
             Logger = Log.ForContext("SourceContext", "Server-Guest-" + guestInfo.Guid);
 
-            rpc = connection.CreateJsonRpc();
+            rpc = connection.CreateJsonRpc("server-guest");
 
             rpc.AddLocalRpcTarget(this);
 

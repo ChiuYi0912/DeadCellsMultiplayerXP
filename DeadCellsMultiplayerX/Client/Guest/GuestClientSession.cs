@@ -107,7 +107,7 @@ namespace DeadCellsMultiplayerX.Client.Guest
         {
             InitHooks();
 
-            rpc = serverStream.CreateJsonRpc();
+            rpc = serverStream.CreateJsonRpc("guest-server");
             rpc.AddLocalRpcTarget(this);
 
             server = rpc.Attach<IServerRPC>();

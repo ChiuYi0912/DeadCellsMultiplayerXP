@@ -45,7 +45,7 @@ namespace DeadCellsMultiplayerX.Client.Host
 
             host.LobbyInfo.Guests.Add(guestInfo.Guid, guestInfo);
 
-            rpc = connection.Stream.CreateJsonRpc();
+            rpc = connection.Stream.CreateJsonRpc("host-guest");
 
             rpc.AddLocalRpcTarget(this);
             rpc.Disconnected += Rpc_Disconnected;

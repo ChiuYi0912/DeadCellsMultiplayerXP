@@ -24,7 +24,8 @@ namespace DeadCellsMultiplayerX.Utils
             return result.AcceptChannel(0).AsStream();
         }
 
-        public static JsonRpc CreateJsonRpc(this Stream stream)
+        public static JsonRpc CreateJsonRpc(
+            this Stream stream, string role = "unknown")
         {
             var rpcChannel = stream.CreateMultiplexingStream(out var mxstream);
             var formatter = new NerdbankMessagePackFormatter
@@ -33,11 +34,14 @@ namespace DeadCellsMultiplayerX.Utils
                 TypeShapeProvider = TypeShapeProvider_DeadCellsMultiplayerX.Default,
             };
             var handler = new LengthHeaderMessageHandler(rpcChannel, rpcChannel, formatter);
+
+            var traceSource = new TraceSource("JSON-RPC", SourceLevels.Error);
+            traceSource.Listeners.Add(NetLogSession.CreateJsonRpcFailureListener(role));
+
             var rpc = new JsonRpc(handler)
             {
-                TraceSource = new TraceSource("JSON-RPC", SourceLevels.Warning)
+                TraceSource = traceSource,
             };
-            rpc.TraceSource.Listeners.Add(new ConsoleTraceListener(true));
             return rpc;
         }
 
