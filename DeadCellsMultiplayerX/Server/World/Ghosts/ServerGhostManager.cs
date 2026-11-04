@@ -93,7 +93,7 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts
         public IServerMobAttackRouter MobAttacks => mobAttacks;
 
         /// <summary>
-        /// 实际持有 GhostHero 的数量
+        /// 实际持有 ServerGhostHero 的数量
         /// </summary>
         public int Count => world.Count;
 
@@ -130,7 +130,7 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts
         }
 
         /// <summary>
-        /// 清理 GhostHero 与待广播事件
+        /// 清理 ServerGhostHero 与待广播事件
         /// </summary>
         public void Clear()
         {
@@ -157,7 +157,7 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts
             => pipeline.Handle(senderGuid, action);
 
         /// <summary>
-        /// 用客户端最新 spawn 同步所有 GhostHero 的项链
+        /// 用客户端最新 spawn 同步所有 ServerGhostHero 的项链
         /// </summary>
         public void SyncTalismans() => spawns.SyncAll(world.Actors);
 

@@ -5,7 +5,7 @@ using DeadCellsMultiplayerX.Server.Core;
 namespace DeadCellsMultiplayerX.Server.World.Ghosts.World
 {
     /// <summary>
-    /// 用客户端最新 spawn 中的项链同步 GhostHero
+    /// 用客户端最新 spawn 中的项链同步 ServerGhostHero
     /// </summary>
     internal sealed class SpawnSynchronizer
     {
@@ -35,7 +35,7 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts.World
         }
 
         /// <summary>
-        /// 同步当前世界中所有 GhostHero
+        /// 同步当前世界中所有 ServerGhostHero
         /// </summary>
         public void SyncAll(IEnumerable<Actor> actors)
         {

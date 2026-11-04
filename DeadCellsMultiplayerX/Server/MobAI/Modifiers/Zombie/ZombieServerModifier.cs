@@ -63,16 +63,11 @@ namespace DeadCellsMultiplayerX.Server.MobAI.Modifiers.Zombie
         /// <inheritdoc />
         public override void Attach(GameZombie mob, IMobModifierContext context)
         {
-            Logger.Debug(
-                "Zombie modifier attached: netId={NetId} time={Time} ghostTargets={Targets}",
-                context.NetId, session.CurrentTimeStamp,
-                teams.Combatants.Count);
         }
 
         /// <inheritdoc />
         public override void Detach(GameZombie mob)
         {
-            Logger.Debug("Zombie modifier detached: mob={Mob}", mob.GetType().Name);
         }
     }
 }

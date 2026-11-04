@@ -26,7 +26,7 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts.World
         /// <summary>
         /// 当前服务端代表实体,创建失败时为空
         /// </summary>
-        public GhostHero? Ghost { get; private set; }
+        public ServerGhostHero? Ghost { get; private set; }
 
         /// <summary>
         /// ActionId 去重状态
@@ -34,33 +34,27 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts.World
         public Admission Admission { get; } = new();
 
         /// <summary>
-        /// 复用同关卡 GhostHero，关卡变化时原地迁移
+        /// 同关卡复用；任何关卡变化都销毁旧实例并重建。
         /// </summary>
-        /// <returns>是否创建了新的 GhostHero</returns>
+        /// <returns>是否创建了新的 ServerGhostHero</returns>
         public bool EnsureGhost(
             Game game,
             Level level,
             int cx = 0,
             int cy = 0)
         {
+            if (Ghost != null && Ghost.MatchesLevel(level))
+                return false;
+
             if (Ghost != null)
             {
-                if (Ghost.MatchesLevel(level))
-                    return false;
-
-                if (Ghost.IsAlive)
-                {
-                    Ghost.Relocate(level, cx, cy);
-                    return false;
-                }
-
                 Ghost.Dispose();
                 Ghost = null;
             }
 
             appliedSpawnVersion = null;
-            Ghost = GhostHero.Create(
-                game, level, OwnerGuid, true, cx, cy);
+            Ghost = ServerGhostHero.CreateServer(
+                game, level, OwnerGuid, cx, cy);
             return Ghost != null;
         }
 
@@ -97,7 +91,7 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts.World
             => actionId > lastActionId;
 
         /// <summary>
-        /// GhostHero 创建成功后写入 ActionId 水位
+        /// ServerGhostHero 创建成功后写入 ActionId 水位
         /// </summary>
         public void Commit(long actionId)
         {

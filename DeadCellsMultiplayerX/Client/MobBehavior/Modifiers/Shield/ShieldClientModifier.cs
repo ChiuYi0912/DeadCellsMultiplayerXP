@@ -36,15 +36,13 @@ namespace DeadCellsMultiplayerX.Client.MobBehavior.Modifiers.Shield
         /// <inheritdoc />
         public override void Attach(GameShield mob, IMobModifierContext context)
         {
-            Logger.Debug(
-                "Shield client modifier attached: netId={NetId} time={Time} local={Local}",
-                context.NetId, session.SyncedTimeMs, world.LocalGuid);
+    
         }
 
         /// <inheritdoc />
         public override void Detach(GameShield mob)
         {
-            Logger.Debug("Shield client modifier detached: mob={Mob}", mob.GetType().Name);
+          
         }
 
         private void OnClientEvent(MobHookContext context, MobModifierEvent evt)
@@ -90,6 +88,7 @@ namespace DeadCellsMultiplayerX.Client.MobBehavior.Modifiers.Shield
                 && ghost.Hero != null
                 && !ghost.Hero.destroyed)
             {
+                ghost.SetPlaceholderVitals();
                 return ghost.Hero;
             }
 

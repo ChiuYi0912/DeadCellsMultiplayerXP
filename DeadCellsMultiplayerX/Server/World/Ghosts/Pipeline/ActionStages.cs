@@ -115,7 +115,7 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts.Pipeline
     }
 
     /// <summary>
-    /// 绑定 GhostHero
+    /// 绑定 ServerGhostHero
     /// </summary>
     internal sealed class BindingStage : IActionStage
     {

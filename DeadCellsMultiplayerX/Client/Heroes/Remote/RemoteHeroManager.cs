@@ -86,8 +86,13 @@ namespace DeadCellsMultiplayerX.Client.Heroes.Remote
                 foreach (var spawn in frame.Spawned)
                 {
                     if (spawn == null || spawn.GUID == localGuid) continue;
-                    if (heroes.TryGetValue(spawn.GUID, out var existing))
+
+                    if (heroes.TryGetValue(spawn.GUID, out var existing)
+                        && !existing.destroyed
+                        && IsLocalLevel(existing))
+                    {
                         existing.ApplySpawn(spawn);
+                    }
 
                     PushGhostTalisman(spawn);
                 }
@@ -215,7 +220,7 @@ namespace DeadCellsMultiplayerX.Client.Heroes.Remote
         }
 
         /// <summary>
-        /// 把客户端静态数据中的项链应用到对应GhostHero
+        /// 把客户端静态数据中的项链应用到对应ClientGhostHero
         /// </summary>
         private void PushGhostTalisman(HeroSpawn spawn)
         {
@@ -317,7 +322,17 @@ namespace DeadCellsMultiplayerX.Client.Heroes.Remote
 
         void IOnLocalHeroInitDone.OnHeroInitDone(Hero hero)
         {
-            RefreshLevel();
+            if (!ReferenceEquals(hero, session.Game?.hero))
+                return;
+
+            // 关卡初始化.统一销毁旧关卡的所有 RemoteHero 与 Ghost
+            // 下一帧从世界帧重新创建
+            foreach (var h in heroes.Values)
+                h?.destroy();
+
+            heroes.Clear();
+            missingSpawnLogged.Clear();
+            remoteWorld.Ghosts.Clear();
         }
     }
 }

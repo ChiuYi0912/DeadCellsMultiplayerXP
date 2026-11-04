@@ -58,7 +58,7 @@ namespace DeadCellsMultiplayerX.Client.Replication
         private readonly LocalHeroState localHero;
 
         /// <summary>
-        /// 远端玩家 GhostHero 生命周期与动作重放
+        /// 远端玩家 ClientGhostHero 生命周期与动作重放
         /// </summary>
         private readonly RemoteGhostManager ghosts;
 
@@ -91,8 +91,8 @@ namespace DeadCellsMultiplayerX.Client.Replication
             mobs = new MobSyncManager(session, this, frames, entityStore);
             entityStore.RegisterHandler(mobs);
             entities = new ClientEntitySyncManager(entityStore);
-            heroes = new RemoteHeroManager(session, this);
             localHero = new LocalHeroState(session, this);
+            heroes = new RemoteHeroManager(session, this);
             ghosts = new RemoteGhostManager(session, this, localGuid);
             areaAffects = new LevelAreaAffectStateManager(session);
 
@@ -150,6 +150,7 @@ namespace DeadCellsMultiplayerX.Client.Replication
         /// <param name="frame">已应用的世界帧</param>
         private void OnFrameApplied(WorldFrame frame)
         {
+            ghosts.BeginFrame(frame);
             heroes.ApplyFrame(frame, frames);
             areaAffects.ApplyFrame(frame);
             ghosts.ApplyFrame(frame);

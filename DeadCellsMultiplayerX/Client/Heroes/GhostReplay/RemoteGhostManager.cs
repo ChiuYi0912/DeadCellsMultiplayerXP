@@ -15,7 +15,7 @@ namespace DeadCellsMultiplayerX.Client.Heroes.GhostReplay
 {
     /// <summary>
     /// 客户端远端 Ghost 管理
-    /// 负责 GhostHero 生命周期与 WorldFrame 动作重放
+    /// 负责 ClientGhostHero 生命周期与 WorldFrame 动作重放
     /// </summary>
     internal sealed class RemoteGhostManager
     {
@@ -30,7 +30,7 @@ namespace DeadCellsMultiplayerX.Client.Heroes.GhostReplay
         /// <summary>
         /// 本地每个客户端对应的技能释放hero
         /// </summary>
-        private readonly Dictionary<string, GhostHero> ghosts = [];
+        private readonly Dictionary<string, ClientGhostHero> ghosts = [];
 
         /// <summary>
         /// 已释放的事件
@@ -50,13 +50,13 @@ namespace DeadCellsMultiplayerX.Client.Heroes.GhostReplay
 
 
         /// <summary>
-        /// 确保指定玩家在关卡中有 GhostHero
+        /// 确保指定玩家在关卡中有 ClientGhostHero
         /// 仅由 RemoteHeroManager 在创建 RemoteHero 时调用
         /// </summary>
         /// <param name="guid">客户id</param>
         /// <param name="level">对应关卡</param>
         /// <returns></returns>
-        public GhostHero? Ensure(string guid, Level level)
+        public ClientGhostHero? Ensure(string guid, Level level)
         {
             if (string.IsNullOrEmpty(guid) || level == null) return null;
 
@@ -68,14 +68,14 @@ namespace DeadCellsMultiplayerX.Client.Heroes.GhostReplay
                 ghosts.Remove(guid);
             }
 
-            ghost = GhostHero.Create(session.Game, level, guid);
+            ghost = ClientGhostHero.CreateClient(session.Game, level, guid);
             if (ghost == null) return null;
 
             ghosts[guid] = ghost;
             return ghost;
         }
 
-        public bool TryGet(string guid, out GhostHero ghost)
+        public bool TryGet(string guid, out ClientGhostHero ghost)
             => ghosts.TryGetValue(guid, out ghost!);
 
         public void Remove(string guid)
@@ -126,16 +126,29 @@ namespace DeadCellsMultiplayerX.Client.Heroes.GhostReplay
         /// 应用事件结果
         /// </summary>
         /// <param name="frame">世界帧</param>
+        /// <summary>
+        /// 在帧应用前处理 epoch：先于 RemoteHeroManager 清理旧 Ghost。
+        /// </summary>
+        public void BeginFrame(WorldFrame frame)
+        {
+            if (frame == null) return;
+
+            if (frame.Epoch == lastEpoch) return;
+
+            Clear();
+            appliedActions.Clear();
+            lastEpoch = frame.Epoch;
+        }
+
         public void ApplyFrame(WorldFrame frame)
         {
             if (frame == null) return;
 
-            if (frame.Epoch != lastEpoch)
-            {
-                Clear();
+            BeginFrame(frame);
+
+            // 长时间运行后清理去重集合；旧事件本身有 2s 年龄过滤
+            if (appliedActions.Count > 8192)
                 appliedActions.Clear();
-                lastEpoch = frame.Epoch;
-            }
 
             if (frame.Actions == null || frame.Actions.Count == 0) return;
 
@@ -157,7 +170,7 @@ namespace DeadCellsMultiplayerX.Client.Heroes.GhostReplay
                 if (evt.LevelId != levelId || evt.SubLevelIndex != subLevelIndex) continue;
                 if (evt.Slot is < 0 or > 1) continue;
 
-                // GhostHero 生命周期由 RemoteHeroManager 管理 这里只重放已存在的实例
+                // ClientGhostHero 生命周期由 RemoteHeroManager 管理 这里只重放已存在的实例
                 if (!TryGet(evt.CasterGuid, out var ghost)) continue;
 
                 if (!ghost.MatchesLevel(level))

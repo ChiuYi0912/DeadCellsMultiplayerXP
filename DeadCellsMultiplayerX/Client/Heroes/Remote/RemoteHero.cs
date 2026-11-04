@@ -145,16 +145,22 @@ namespace DeadCellsMultiplayerX.Client.Heroes.Remote
         /// </remarks>
         public void ApplySpawn(HeroSpawn spawn)
         {
+            if (destroyed) return;
+
             // 校验初始化所需的数据是否完整
             if (string.IsNullOrEmpty(spawn.ColorMapModel)
                 || string.IsNullOrEmpty(spawn.ColorMapSkin)
                 || spawn.MainSprite == null) return;
 
-            //初始化贴图
-            SpriteLib sprlib = Assets.Class.lib.get(spawn.MainSprite.AtlasName.AsHaxeString());
+            SpriteLib? sprlib = Assets.Class.lib.get(
+                spawn.MainSprite.AtlasName.AsHaxeString());
+            if (sprlib == null) return;
+
             dc.String group = spawn.MainSprite.GroupName.AsHaxeString();
             dc.h3d.mat.Texture normalMap = sprlib.getNormalMapFromGroup(group);
             initSprite(sprlib, group, null, null, null, true, null, normalMap);
+
+            if (spr == null) return;
 
             //设置枢轴
             spr.pivot.copyFrom(

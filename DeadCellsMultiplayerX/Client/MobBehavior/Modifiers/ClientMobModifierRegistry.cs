@@ -118,7 +118,7 @@ namespace DeadCellsMultiplayerX.Client.MobBehavior.Modifiers
 
             mob.setAttackTarget(hero);
             mob.setNemesisTarget(hero);
-
+            
             hero.maxLife = 9999;
             hero.life = 9999;
 
@@ -145,6 +145,7 @@ namespace DeadCellsMultiplayerX.Client.MobBehavior.Modifiers
                 && ghost.Hero != null
                 && !ghost.Hero.destroyed)
             {
+                ghost.SetPlaceholderVitals();
                 return ghost.Hero;
             }
 

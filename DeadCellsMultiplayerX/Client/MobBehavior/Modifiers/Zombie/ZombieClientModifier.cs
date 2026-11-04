@@ -42,15 +42,13 @@ namespace DeadCellsMultiplayerX.Client.MobBehavior.Modifiers.Zombie
         /// <inheritdoc />
         public override void Attach(GameZombie mob, IMobModifierContext context)
         {
-            Logger.Debug(
-                "Zombie client modifier attached: netId={NetId} time={Time} local={Local}",
-                context.NetId, session.SyncedTimeMs, world.LocalGuid);
+
         }
 
         /// <inheritdoc />
         public override void Detach(GameZombie mob)
         {
-            Logger.Debug("Zombie client modifier detached: mob={Mob}", mob.GetType().Name);
+            
         }
 
         public void OnEvent(MobHookContext context, MobModifierEvent evt)
@@ -62,6 +60,7 @@ namespace DeadCellsMultiplayerX.Client.MobBehavior.Modifiers.Zombie
             var ghostmanager = context.ModifierContext.GetService<RemoteGhostManager>();
             if (ghostmanager.TryGet(evt.TargetGuid, out var ghost))
             {
+                ghost.SetPlaceholderVitals();
                 hero = ghost.Hero;
             }
 
@@ -69,9 +68,6 @@ namespace DeadCellsMultiplayerX.Client.MobBehavior.Modifiers.Zombie
             context.Mob.setNemesisTarget(hero);
 
             var skills = context.Mob.oldSkills;
-
-            hero.maxLife = 9999;
-            hero.life = 9999;
 
             foreach (var item in skills)
             {

@@ -196,7 +196,7 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts.Team
         /// 取得 guid 对应的战斗视图；切关卡重建 Ghost 时替换旧实体
         /// </summary>
         private GhostCombatant GetOrCreate(
-            string guid, GhostHero ghost, Level level)
+            string guid, ServerGhostHero ghost, Level level)
         {
             if (byGuid.TryGetValue(guid, out var existing))
             {
