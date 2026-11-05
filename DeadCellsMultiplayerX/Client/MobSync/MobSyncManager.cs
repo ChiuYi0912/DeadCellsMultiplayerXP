@@ -111,8 +111,14 @@ namespace DeadCellsMultiplayerX.Client.MobSync
         public void OnCreated(
             EntitySpawn spawn, object native, ClientEntityContext ctx)
         {
-            if (native is Mob mob)
-                remoteWorld.MobModifiers.TryAttach(mob, session.SyncedTimeMs);
+            if (native is not Mob mob)
+                return;
+
+            if (!remoteWorld.MobModifiers.TryAttach(mob, session.SyncedTimeMs))
+                return;
+
+            remoteWorld.MobModifiers.DispatchInitSkills(
+                mob, mob.oldSkills, mob.skills, session.SyncedTimeMs);
         }
 
         /// <inheritdoc />

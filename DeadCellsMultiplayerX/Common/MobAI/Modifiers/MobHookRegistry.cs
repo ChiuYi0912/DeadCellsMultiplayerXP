@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using dc;
 using dc.en;
+using dc.hl.types;
 using dc.tool.atk;
 using dc.tool.skill;
 using DeadCellsMultiplayerX.Common.MobAI.Events;
@@ -24,6 +25,7 @@ namespace DeadCellsMultiplayerX.Common.MobAI.Modifiers
         private readonly List<MobHandler> postUpdate = [];
         private readonly List<MobBehaviourHandler> behaviourAi = [];
         private readonly List<MobBehaviourHandler> fixedUpdateHandled = [];
+        private readonly List<MobInitSkillsHandler> initSkills = [];
         private readonly List<MobSkillPrepareHandler> skillPrepare = [];
         private readonly List<MobSkillExecuteHandle> skillExecute = [];
         private readonly List<MobHandler> mobDied = [];
@@ -31,6 +33,7 @@ namespace DeadCellsMultiplayerX.Common.MobAI.Modifiers
         private readonly List<MobBehaviourHandler> aiLocked = [];
         private readonly List<MobBehaviourHandler> clientUpdate = [];
         private readonly List<MobEventHandler> clientEvent = [];
+        private readonly List<MobBehaviourHandler> clientEventHandled = [];
 
         public void OnServerTick(MobHandler handler)
             => Add(serverTick, handler);
@@ -49,6 +52,9 @@ namespace DeadCellsMultiplayerX.Common.MobAI.Modifiers
 
         public void OnFixedUpdateHandled(MobBehaviourHandler handler)
             => Add(fixedUpdateHandled, handler);
+
+        public void OnInitSkills(MobInitSkillsHandler handler)
+            => Add(initSkills, handler);
 
         public void OnSkillPrepare(MobSkillPrepareHandler handler)
             => Add(skillPrepare, handler);
@@ -71,6 +77,9 @@ namespace DeadCellsMultiplayerX.Common.MobAI.Modifiers
         public void OnClientEvent(MobEventHandler handler)
             => Add(clientEvent, handler);
 
+        public void OnClientEventHandled(MobBehaviourHandler handler)
+            => Add(clientEventHandled, handler);
+
         internal void DispatchServerTick(MobHookContext context)
             => Invoke(serverTick, context, "OnServerTick");
 
@@ -88,6 +97,10 @@ namespace DeadCellsMultiplayerX.Common.MobAI.Modifiers
 
         internal bool DispatchFixedUpdateHandled(MobHookContext context)
             => InvokeAny(fixedUpdateHandled, context, "OnFixedUpdateHandled");
+
+        internal void DispatchInitSkills(
+            MobHookContext context, ArrayObj oldSkills, ArrayObj skills)
+            => Invoke(initSkills, context, oldSkills, skills, "OnInitSkills");
 
         internal void DispatchSkillPrepare(MobHookContext context, OldSkill skill, GhostCombatant target, int? data)
             => Invoke(skillPrepare, context, skill, target, data, "OnSkillPrepare");
@@ -115,6 +128,9 @@ namespace DeadCellsMultiplayerX.Common.MobAI.Modifiers
         internal void DispatchClientEvent(MobHookContext context, MobModifierEvent evt)
             => Invoke(clientEvent, context, evt, "OnClientEvent");
 
+        internal bool DispatchClientEventHandled(MobHookContext context)
+            => InvokeAny(clientEventHandled, context, "OnClientEventHandled");
+
         private static void Add<T>(List<T> list, T handler) where T : Delegate
         {
             if (handler != null)
@@ -127,6 +143,28 @@ namespace DeadCellsMultiplayerX.Common.MobAI.Modifiers
             foreach (var handler in handlers)
             {
                 handler(context);
+            }
+        }
+
+        private static void Invoke(
+            List<MobInitSkillsHandler> handlers,
+            MobHookContext context,
+            ArrayObj oldSkills,
+            ArrayObj skills,
+            string hook)
+        {
+            foreach (var handler in handlers)
+            {
+                try
+                {
+                    handler(context, oldSkills, skills);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warning(ex,
+                        "Mob hook failed: hook={Hook} mob={Mob} netId={NetId}",
+                        hook, context.Mob.GetType().Name, context.NetId);
+                }
             }
         }
 

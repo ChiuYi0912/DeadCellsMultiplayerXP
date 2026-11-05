@@ -33,10 +33,9 @@ namespace DeadCellsMultiplayerX.Client.MobBehavior.Modifiers.Zombie
         /// <inheritdoc />
         public override void InitHook(IMobHookRegistry hooks)
         {
-            hooks.OnAiLocked(_ => true);
-            hooks.OnClientUpdate(_ => false);
             hooks.OnFixedUpdate(update);
             hooks.OnClientEvent(OnEvent);
+            hooks.OnClientEventHandled(_ => true);
         }
 
         /// <inheritdoc />

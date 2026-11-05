@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using dc;
 using dc.en;
+using dc.hl.types;
 using dc.tool.atk;
 using dc.tool.skill;
 using DeadCellsMultiplayerX.Common.MobAI.Events;
@@ -194,6 +195,17 @@ namespace DeadCellsMultiplayerX.Common.MobAI.Modifiers
         }
 
         /// <summary>
+        /// mob 初始化技能通知
+        /// </summary>
+        public void DispatchInitSkills(
+            Mob mob, ArrayObj oldSkills, ArrayObj skills, long tick)
+        {
+            if (TryGetEntry(mob, out var entry))
+                entry.Hooks.DispatchInitSkills(
+                    CreateContext(entry, tick), oldSkills, skills);
+        }
+
+        /// <summary>
         /// 技能准备通知
         /// </summary>
         public void DispatchSkillPrepare(Mob mob, OldSkill skill, GhostCombatant target, int? data, long tick)
@@ -267,6 +279,15 @@ namespace DeadCellsMultiplayerX.Common.MobAI.Modifiers
                 entry.Hooks.DispatchClientEvent(
                     CreateContext(entry, tick), evt);
         }
+
+        /// <summary>
+        /// 客户端技能事件接管判定
+        /// true 表示修改器自行处理，false 时由注册器统一释放
+        /// </summary>
+        public bool DispatchClientEventHandled(Mob mob, long tick)
+            => TryGetEntry(mob, out var entry)
+                && entry.Hooks.DispatchClientEventHandled(
+                    CreateContext(entry, tick));
 
         /// <summary>
         /// 服务端独立 Tick；只调用已绑定修改器

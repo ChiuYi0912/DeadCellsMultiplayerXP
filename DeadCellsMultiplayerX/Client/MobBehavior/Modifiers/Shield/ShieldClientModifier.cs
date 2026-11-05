@@ -5,9 +5,9 @@ using DeadCellsMultiplayerX.Client.Replication;
 using DeadCellsMultiplayerX.Common.MobAI.Events;
 using DeadCellsMultiplayerX.Common.MobAI.Modifiers;
 using ModCore.Utilities;
-using HaxeProxy.Runtime;
 using Serilog;
 using GameShield = dc.en.mob.Shield;
+using dc.hl.types;
 
 namespace DeadCellsMultiplayerX.Client.MobBehavior.Modifiers.Shield
 {
@@ -29,70 +29,22 @@ namespace DeadCellsMultiplayerX.Client.MobBehavior.Modifiers.Shield
         /// <inheritdoc />
         public override void InitHook(IMobHookRegistry hooks)
         {
-            hooks.OnClientUpdate(_ => false);
-            hooks.OnClientEvent(OnClientEvent);
+            hooks.OnInitSkills(OnInitSkills);
         }
 
-        /// <inheritdoc />
-        public override void Attach(GameShield mob, IMobModifierContext context)
+        private void OnInitSkills(
+            MobHookContext context, ArrayObj oldSkills, ArrayObj skills)
         {
-    
-        }
 
-        /// <inheritdoc />
-        public override void Detach(GameShield mob)
-        {
-          
-        }
-
-        private void OnClientEvent(MobHookContext context, MobModifierEvent evt)
-        {
-            if (context == null || evt == null)
-                return;
-
-            if (evt.Kind != MobModifierEventKind.ActionStarted
-                || string.IsNullOrEmpty(evt.SkillId))
-                return;
-
-            var mob = context.Mob;
-            if (mob == null || mob.destroyed)
-                return;
-
-            var hero = ResolveTargetHero(evt.TargetGuid);
-            if (hero == null || hero.destroyed)
-                return;
-
-            mob.setAttackTarget(hero);
-            mob.setNemesisTarget(hero);
-
-            var skills = mob.oldSkills;
-            if (skills == null)
-                return;
+            foreach (var item in oldSkills)
+            {
+                Logger.Information("oldSkill : {id}", item.id);
+            }
 
             foreach (var item in skills)
             {
-                if (item is not OldMobSkill mobSkill)
-                    continue;
-
-                if (mobSkill.id.ToString() != evt.SkillId)
-                    continue;
-
-                mobSkill.prepareOnOwnerTarget(true, null);
+                Logger.Information("newSkill : {id}", item.id);
             }
-        }
-
-        private Hero? ResolveTargetHero(string guid)
-        {
-            if (!string.IsNullOrEmpty(guid)
-                && world.Ghosts.TryGet(guid, out var ghost)
-                && ghost.Hero != null
-                && !ghost.Hero.destroyed)
-            {
-                ghost.SetPlaceholderVitals();
-                return ghost.Hero;
-            }
-
-            return session.Game?.hero;
         }
     }
 }

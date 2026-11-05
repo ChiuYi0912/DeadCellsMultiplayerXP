@@ -118,10 +118,10 @@ namespace DeadCellsMultiplayerX.Client.MobBehavior.Modifiers
 
             mob.setAttackTarget(hero);
             mob.setNemesisTarget(hero);
-            
+
             hero.maxLife = 9999;
             hero.life = 9999;
-
+            
             var skills = mob.oldSkills;
             if (skills == null)
                 return;
@@ -151,6 +151,14 @@ namespace DeadCellsMultiplayerX.Client.MobBehavior.Modifiers
 
             return session.Game?.hero;
         }
+
+        /// <summary>
+        /// mob 初始化技能后分发
+        /// </summary>
+        public void DispatchInitSkills(
+            Mob mob, dc.hl.types.ArrayObj oldSkills,
+            dc.hl.types.ArrayObj skills, long tick)
+            => inner.DispatchInitSkills(mob, oldSkills, skills, tick);
 
         public void OnMobFixedUpdate(Mob mob, long tick)
             => inner.DispatchFixedUpdate(mob, tick);

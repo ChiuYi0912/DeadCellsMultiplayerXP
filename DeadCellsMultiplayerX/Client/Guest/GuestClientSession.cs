@@ -412,6 +412,7 @@ namespace DeadCellsMultiplayerX.Client.Guest
             Hook_Mob.canUpdate += Hook_Mob_canUpdate;
             Hook_Mob.fixedUpdate += Hook_Mob_fixedUpdate;
             Hook_Mob.moveBlocked += Hook_Mob_moveBlocked;
+            Hook_Mob.initSkills += Hook_Mob_initSkills;
             Hook_Level.attachMobs += Hook_Level_attachMobs;
             Hook_Game.init += Hook_Game_init;
             Hook_Power.update += Hook_Power_update;
@@ -425,6 +426,16 @@ namespace DeadCellsMultiplayerX.Client.Guest
             Hook_OldSkill.isReady += Hook_OldSkill_isReady;
             Hook__LevelTransition.__constructor__ += Hook__LevelTransition__constructor__;
         }
+
+        private void Hook_Mob_initSkills(Hook_Mob.orig_initSkills orig, Mob self)
+        {
+            orig(self);
+
+            remoteWorld?.MobModifiers.DispatchInitSkills(
+                self, self.oldSkills, self.skills, SyncedTimeMs);
+        }
+
+
         private void Hook__LevelTransition__constructor__(
            Hook__LevelTransition.orig___constructor__ orig, LevelTransition arg1,
            dc.String mainId, dc.level.LevelMap map, int? linkId,
@@ -876,6 +887,7 @@ namespace DeadCellsMultiplayerX.Client.Guest
             Hook_Mob.canUpdate -= Hook_Mob_canUpdate;
             Hook_Mob.fixedUpdate -= Hook_Mob_fixedUpdate;
             Hook_Mob.moveBlocked -= Hook_Mob_moveBlocked;
+            Hook_Mob.initSkills -= Hook_Mob_initSkills;
             Hook_Level.attachMobs -= Hook_Level_attachMobs;
             Hook_Game.init -= Hook_Game_init;
             Hook_Power.update -= Hook_Power_update;

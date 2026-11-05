@@ -1,5 +1,6 @@
 using dc;
 using dc.en;
+using dc.hl.types;
 using dc.tool.atk;
 using dc.tool.skill;
 using DeadCellsMultiplayerX.Common.MobAI.Events;
@@ -32,6 +33,12 @@ namespace DeadCellsMultiplayerX.Common.MobAI.Modifiers
     /// Mob 自定义事件 hook
     /// </summary>
     internal delegate void MobEventHandler(MobHookContext context, MobModifierEvent evt);
+
+    /// <summary>
+    /// Mob 初始化技能 hook
+    /// </summary>
+    internal delegate void MobInitSkillsHandler(
+        MobHookContext context, ArrayObj oldSkills, ArrayObj skills);
 
     /// <summary>
     /// 可拦截 hook；返回 true 表示调用方跳过原版逻辑
@@ -75,6 +82,11 @@ namespace DeadCellsMultiplayerX.Common.MobAI.Modifiers
         void OnFixedUpdateHandled(MobBehaviourHandler handler);
 
         /// <summary>
+        /// mob 初始化技能之后通知
+        /// </summary>
+        void OnInitSkills(MobInitSkillsHandler handler);
+
+        /// <summary>
         /// 技能准备通知
         /// </summary>
         void OnSkillPrepare(MobSkillPrepareHandler handler);
@@ -108,5 +120,11 @@ namespace DeadCellsMultiplayerX.Common.MobAI.Modifiers
         /// 客户端自定义事件
         /// </summary>
         void OnClientEvent(MobEventHandler handler);
+
+        /// <summary>
+        /// 客户端技能事件接管判定；返回 true 表示修改器自行处理，
+        /// 未注册或返回 false 时由注册器走统一释放
+        /// </summary>
+        void OnClientEventHandled(MobBehaviourHandler handler);
     }
 }
