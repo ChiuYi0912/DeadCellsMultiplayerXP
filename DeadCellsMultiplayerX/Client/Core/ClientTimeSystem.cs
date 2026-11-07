@@ -25,6 +25,12 @@ namespace DeadCellsMultiplayerX.Client.Core
         //公开状态
         public bool Ready => ready;
 
+        //最近一批采样中的最优 RTT
+        public long RttMs { get; private set; } = -1;
+
+        //本地时间相对服务端时间的偏移
+        public long OffsetMs => offsetMs + driftCorrection;
+
         //当前估算的服务端时间
         public long SyncedTime => NowMs() + offsetMs + driftCorrection;
 
@@ -59,6 +65,7 @@ namespace DeadCellsMultiplayerX.Client.Core
                 offsetMs = best.offset;
                 driftCorrection = 0;
                 ready = true;
+                RttMs = best.rtt;
 
                 samples.Clear();
             }

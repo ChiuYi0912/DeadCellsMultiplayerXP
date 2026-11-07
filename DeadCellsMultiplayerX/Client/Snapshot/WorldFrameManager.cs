@@ -121,6 +121,16 @@ namespace DeadCellsMultiplayerX.Client.Snapshot
         /// </summary>
         private bool loggedFirstFrame;
 
+        /// <summary>
+        /// 帧率统计窗口起点（本地毫秒）
+        /// </summary>
+        private long rateWindowStartMs = -1;
+
+        /// <summary>
+        /// 当前统计窗口内应用的帧数
+        /// </summary>
+        private int rateFrames;
+
 
         public WorldFrameManager(GuestClientSession session, string localGuid)
         {
@@ -185,6 +195,21 @@ namespace DeadCellsMultiplayerX.Client.Snapshot
         /// 是否已建立渲染基线
         /// </summary>
         public bool HasBaseline => hasBaseline;
+
+        /// <summary>
+        /// 最近一次应用世界帧的本地时间毫秒
+        /// </summary>
+        public long LastFrameAppliedAtMs { get; private set; } = -1;
+
+        /// <summary>
+        /// 最近一秒实际应用的帧率
+        /// </summary>
+        public double AppliedFramesPerSecond { get; private set; }
+
+        /// <summary>
+        /// 渲染时间线中缓存的帧数
+        /// </summary>
+        public int BufferedFrames => timeline.Count;
 
         /// <summary>
         /// 连续帧写入时间线后触发
@@ -578,6 +603,10 @@ namespace DeadCellsMultiplayerX.Client.Snapshot
             nackTask = null;
             resyncTask = null;
             loggedFirstFrame = false;
+            LastFrameAppliedAtMs = -1;
+            AppliedFramesPerSecond = 0;
+            rateWindowStartMs = -1;
+            rateFrames = 0;
         }
 
         /// <summary>
@@ -698,6 +727,32 @@ namespace DeadCellsMultiplayerX.Client.Snapshot
             // 校验静态数据后通知实体做存在性对账
             ValidateSpawns(frame);
             FrameApplied?.Invoke(frame);
+
+            NoteFrameApplied();
+        }
+
+        /// <summary>
+        /// 记录帧到达时间并维护一秒窗口内的实际帧率
+        /// </summary>
+        private void NoteFrameApplied()
+        {
+            long now = Environment.TickCount64;
+            LastFrameAppliedAtMs = now;
+
+            if (rateWindowStartMs < 0)
+            {
+                rateWindowStartMs = now;
+                rateFrames = 0;
+            }
+
+            rateFrames++;
+            long elapsed = now - rateWindowStartMs;
+            if (elapsed < 1000)
+                return;
+
+            AppliedFramesPerSecond = rateFrames * 1000.0 / elapsed;
+            rateWindowStartMs = now;
+            rateFrames = 0;
         }
 
         /// <summary>

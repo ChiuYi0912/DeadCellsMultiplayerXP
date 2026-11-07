@@ -8,6 +8,7 @@ using DeadCellsMultiplayerX.Client.Guest;
 using DeadCellsMultiplayerX.Client.Replication;
 using DeadCellsMultiplayerX.Client.Replication.Entities;
 using DeadCellsMultiplayerX.Client.Snapshot;
+using DeadCellsMultiplayerX.Client.UI.DebugTools;
 using DeadCellsMultiplayerX.Common.Data.Entities;
 using DeadCellsMultiplayerX.Common.Data.Snapshot;
 using DeadCellsMultiplayerX.Common.Serializers;

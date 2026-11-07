@@ -31,6 +31,11 @@ namespace DeadCellsMultiplayerX.Client.Combat
         private readonly Dictionary<long, PredictionBatch> batchesByToken = [];
         private readonly Dictionary<uint, ConfirmedLife> confirmedLife = [];
         private long nextToken;
+        
+        /// <summary>
+        /// 当前存在未确认预测的 mob 数量
+        /// </summary>
+        public int PendingMobCount => pendingByMob.Count;
 
         public LocalCombatPrediction(GuestClientSession session)
         {

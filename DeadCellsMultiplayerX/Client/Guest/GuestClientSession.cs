@@ -31,6 +31,11 @@ using Hashlink.Proxy.Objects;
 using dc.en.inter;
 using ModCore.Events;
 using System.Text.Json;
+using DeadCellsMultiplayerX.Client.UI;
+using Nerdbank.MessagePack;
+using PolyType;
+using PolyType.SourceGenerator;
+using DeadCellsMultiplayerX.Client.UI.DebugTools;
 
 namespace DeadCellsMultiplayerX.Client.Guest
 {
@@ -62,7 +67,22 @@ namespace DeadCellsMultiplayerX.Client.Guest
         /// 与服务端同步的时间轴
         /// </summary>
         public long SyncedTimeMs => timeSystem.SyncedTime;
+
+        /// <summary>
+        /// 最近一批 NTP 采样的最优 RTT（毫秒），未完成采样时为 -1
+        /// </summary>
+        public long ServerRttMs => timeSystem.RttMs;
+
+        /// <summary>
+        /// 本地时钟相对服务端时钟的偏移（毫秒）
+        /// </summary>
+        public long ServerClockOffsetMs => timeSystem.OffsetMs;
         #endregion
+
+        /// <summary>
+        /// 上传通道是否已判定为断开
+        /// </summary>
+        public bool UploadBroken => uploadBroken;
 
         public IServerRPC Server => server ?? throw new InvalidOperationException();
 
@@ -105,6 +125,18 @@ namespace DeadCellsMultiplayerX.Client.Guest
         private long lastUploadErrorLogMs;
         private bool uploadBroken;
 
+        /// <summary>
+        /// 仅用于统计世界帧序列化大小
+        /// </summary>
+        private static readonly MessagePackSerializer FrameSizeSerializer = new();
+
+        private int lastWorldFrameBytes;
+
+        /// <summary>
+        /// 最近一帧世界帧的 MessagePack 负载字节数
+        /// </summary>
+        public int LastWorldFrameBytes => lastWorldFrameBytes;
+
         public override async Task Init()
         {
             deathGate = new CombatDeathGate();
@@ -114,6 +146,10 @@ namespace DeadCellsMultiplayerX.Client.Guest
             localCapture.Init();
 
             InitHooks();
+
+#if DEBUG
+            DebugHUD.EnsureCreated();
+#endif
 
             rpc = serverStream.CreateJsonRpc("guest-server");
             rpc.AddLocalRpcTarget(this);
@@ -364,12 +400,27 @@ namespace DeadCellsMultiplayerX.Client.Guest
 #if DEBUG
             if (WorldFrameDebug.ConsumeDropServerFrame())
                 return Task.CompletedTask;
+            if (DebugFlags.Get("netstat-Measure"))
+                MeasureWorldFrame(frame);
 #endif
 
             ObserveWorldEpoch(frame.Epoch);
             ObserveServerTime((long)frame.ServerTimeMs);
             remoteWorld?.OnWorldFrame(frame);
             return Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// 统计世界帧的 MessagePack 负载大小
+        /// </summary>
+        private void MeasureWorldFrame(WorldFrame frame)
+        {
+            var shape = TypeShapeProvider_DeadCellsMultiplayerX.Default
+                .GetTypeShapeOrThrow<WorldFrame>();
+
+            lastWorldFrameBytes = FrameSizeSerializer
+                .Serialize(frame, shape)
+                .Length;
         }
 
         /// <summary>
@@ -426,6 +477,7 @@ namespace DeadCellsMultiplayerX.Client.Guest
             Hook_OldSkill.isReady += Hook_OldSkill_isReady;
             Hook__LevelTransition.__constructor__ += Hook__LevelTransition__constructor__;
         }
+
 
         private void Hook_Mob_initSkills(Hook_Mob.orig_initSkills orig, Mob self)
         {
@@ -773,11 +825,14 @@ namespace DeadCellsMultiplayerX.Client.Guest
         private void Hook_Game_init(Hook_Game.orig_init orig, dc.pr.Game self)
         {
             orig(self);
+            Logger.Information("Guest session Game.init");
             self.infection.destroy();
             self.gameSignals.heroInitDone.add(new HlAction<Hero>((hero) => EventSystem.BroadcastEvent<IOnLocalHeroInitDone, Hero>(hero)),
             null, null, null);
 #if DEBUG
             dc.ui.Console.Class.ME.flags.set("area".AsHaxeString(), 1);
+            DebugFlags.Set("netstat", true);
+            DebugHUD.EnsureNative();
 #endif
         }
 
