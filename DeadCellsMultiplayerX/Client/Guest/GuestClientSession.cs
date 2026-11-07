@@ -832,6 +832,7 @@ namespace DeadCellsMultiplayerX.Client.Guest
 #if DEBUG
             dc.ui.Console.Class.ME.flags.set("area".AsHaxeString(), 1);
             DebugFlags.Set("netstat", true);
+            DebugFlags.Set("entityLabels", true);
             DebugHUD.EnsureNative();
 #endif
         }

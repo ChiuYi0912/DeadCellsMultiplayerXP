@@ -14,6 +14,7 @@ using DeadCellsMultiplayerX.Common.Core;
 using DeadCellsMultiplayerX.Common.Data.Snapshot;
 using DeadCellsMultiplayerX.Client.Core;
 using DeadCellsMultiplayerX.Client.Guest;
+using DeadCellsMultiplayerX.Client.UI.DebugTools;
 
 namespace DeadCellsMultiplayerX.Client.Replication
 {
@@ -91,6 +92,7 @@ namespace DeadCellsMultiplayerX.Client.Replication
             mobs = new MobSyncManager(session, this, frames, entityStore);
             entityStore.RegisterHandler(mobs);
             entities = new ClientEntitySyncManager(entityStore);
+            entities.DebugLabels.Register(new MobDebugTextProvider(session));
             localHero = new LocalHeroState(session, this);
             heroes = new RemoteHeroManager(session, this);
             ghosts = new RemoteGhostManager(session, this, localGuid);

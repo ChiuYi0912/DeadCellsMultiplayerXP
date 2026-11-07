@@ -28,6 +28,16 @@ namespace DeadCellsMultiplayerX.Client.Replication.Entities
 
         public IReadOnlyList<IClientEntityKindHandler> Handlers => handlers;
 
+        /// <summary>
+        /// 原生实体创建完成
+        /// </summary>
+        public event Action<ClientEntityRecord>? RecordCreated;
+
+        /// <summary>
+        /// 实体记录被移除
+        /// </summary>
+        public event Action<ClientEntityRecord>? RecordRemoved;
+
         public IEnumerable<ClientEntityRecord> Records => byId.Values;
 
         public void RegisterHandler(IClientEntityKindHandler handler)
@@ -124,6 +134,7 @@ namespace DeadCellsMultiplayerX.Client.Replication.Entities
             record.Native = native;
             byNative[native] = record.NetId;
             handler.OnCreated(record.Spawn, native, Context);
+            RecordCreated?.Invoke(record);
             return true;
         }
 
@@ -147,6 +158,7 @@ namespace DeadCellsMultiplayerX.Client.Replication.Entities
                         EntityDespawnReason.Removed, Context);
                 }
 
+                RecordRemoved?.Invoke(record);
                 byNative.Remove(record.Native);
                 record.Native = null;
             }
@@ -164,6 +176,8 @@ namespace DeadCellsMultiplayerX.Client.Replication.Entities
 
             if (byKind.TryGetValue(record.Kind, out var handler))
                 handler.Despawn(netId, record.Native, reason, Context);
+
+            RecordRemoved?.Invoke(record);
         }
 
         /// <summary>

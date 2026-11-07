@@ -1,4 +1,5 @@
 using DeadCellsMultiplayerX.Common.Data.Snapshot;
+using DeadCellsMultiplayerX.Client.UI.DebugTools;
 
 namespace DeadCellsMultiplayerX.Client.Replication.Entities
 {
@@ -8,14 +9,22 @@ namespace DeadCellsMultiplayerX.Client.Replication.Entities
     internal sealed class ClientEntitySyncManager
     {
         private readonly ClientEntityStore store;
+        private readonly EntityDebugLabelManager debugLabels;
+
         private int lastEpoch = -1;
 
         public ClientEntitySyncManager(ClientEntityStore store)
         {
             this.store = store;
+
+            debugLabels = new EntityDebugLabelManager();
+            store.RecordCreated += debugLabels.OnCreated;
+            store.RecordRemoved += debugLabels.OnRemoved;
         }
 
         public ClientEntityStore Store => store;
+
+        public EntityDebugLabelManager DebugLabels => debugLabels;
 
         public void ApplyFrame(WorldFrame frame)
         {
@@ -27,6 +36,7 @@ namespace DeadCellsMultiplayerX.Client.Replication.Entities
                 foreach (var handler in store.Handlers)
                     handler.OnEpochReset(store.Context);
 
+                debugLabels.Reset();
                 store.Clear();
             }
 
@@ -55,6 +65,12 @@ namespace DeadCellsMultiplayerX.Client.Replication.Entities
 
             foreach (var handler in store.Handlers)
                 handler.AfterFrame(frame, store.Context);
+
+            if (frame.EntityEvents != null)
+            {
+                foreach (var evt in frame.EntityEvents)
+                    debugLabels.OnEntityEvent(evt);
+            }
         }
 
         public void Tick(long nowMs)
@@ -63,6 +79,8 @@ namespace DeadCellsMultiplayerX.Client.Replication.Entities
 
             foreach (var handler in store.Handlers)
                 handler.Tick(store.Context, nowMs);
+
+            debugLabels.Tick(store.Context, nowMs);
         }
 
         public void Clear()
@@ -70,6 +88,7 @@ namespace DeadCellsMultiplayerX.Client.Replication.Entities
             foreach (var handler in store.Handlers)
                 handler.OnEpochReset(store.Context);
 
+            debugLabels.Reset();
             store.Clear();
             lastEpoch = -1;
         }

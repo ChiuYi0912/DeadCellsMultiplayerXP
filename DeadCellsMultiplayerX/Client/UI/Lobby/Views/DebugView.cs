@@ -44,6 +44,7 @@ namespace DeadCellsMultiplayerX.Client.UI.Lobby.Views
             AddDivider(content);
 
             AddDebugToggle(content, "显示网络统计", () => ToggleFlag("netstat"));
+            AddDebugToggle(content, "显示实体调试标签", () => ToggleFlag("entityLabels"));
             AddDebugBtn(content, "本地2人测试", () => DebugLauncher.StartTest(1));
             AddDebugBtn(content, "本地3人测试", () => DebugLauncher.StartTest(2));
             AddDebugBtn(content, "本地4人测试", () => DebugLauncher.StartTest(3));

@@ -30,21 +30,13 @@ namespace DeadCellsMultiplayerX.Client.MobBehavior.Modifiers.Shield
         public override void InitHook(IMobHookRegistry hooks)
         {
             hooks.OnInitSkills(OnInitSkills);
+            hooks.OnClientEventHandled(_ => false);
         }
 
         private void OnInitSkills(
             MobHookContext context, ArrayObj oldSkills, ArrayObj skills)
         {
 
-            foreach (var item in oldSkills)
-            {
-                Logger.Information("oldSkill : {id}", item.id);
-            }
-
-            foreach (var item in skills)
-            {
-                Logger.Information("newSkill : {id}", item.id);
-            }
         }
     }
 }
