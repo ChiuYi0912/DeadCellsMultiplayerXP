@@ -93,7 +93,13 @@ namespace DeadCellsMultiplayerX.Client.MobBehavior.Modifiers
         {
             if (inner.TryGet(mob, out _))
             {
+                bool handled = inner.DispatchClientEventHandled(mob, tick);
+
                 inner.DispatchClientEvent(mob, evt, tick);
+
+                if (!handled)
+                    ReleaseSkillEvent(mob, evt, tick);
+
                 return;
             }
 
@@ -119,9 +125,11 @@ namespace DeadCellsMultiplayerX.Client.MobBehavior.Modifiers
             mob.setAttackTarget(hero);
             mob.setNemesisTarget(hero);
 
+#if DEBUG
             hero.maxLife = 9999;
             hero.life = 9999;
-            
+#endif
+
             var skills = mob.oldSkills;
             if (skills == null)
                 return;
