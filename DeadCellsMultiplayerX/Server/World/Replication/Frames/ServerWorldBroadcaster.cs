@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using DeadCellsMultiplayerX.Common.Data.Snapshot;
+using DeadCellsMultiplayerX.Common.EntityEvents;
 using DeadCellsMultiplayerX.Server.Connection;
 using DeadCellsMultiplayerX.Server.World.Ghosts;
 using DeadCellsMultiplayerX.Server.World.Replication.Areas;
@@ -51,6 +52,11 @@ namespace DeadCellsMultiplayerX.Server.World.Replication.Frames
         private readonly ServerLevelAreaAffectRegistry areaAffects;
 
         /// <summary>
+        /// 各类实体的事件来源
+        /// </summary>
+        private readonly List<IServerEntityEventSource> eventSources = [];
+
+        /// <summary>
         /// 广播历史帧
         /// </summary>
         private readonly List<WorldFrame> history = [];
@@ -73,6 +79,17 @@ namespace DeadCellsMultiplayerX.Server.World.Replication.Frames
             this.entityPublisher = entityPublisher;
             this.ghosts = ghosts;
             this.areaAffects = areaAffects;
+
+            RegisterEventSource(ghosts);
+        }
+
+        /// <summary>
+        /// 注册一个实体事件来源；后续实体类型各自注册
+        /// </summary>
+        public void RegisterEventSource(IServerEntityEventSource source)
+        {
+            if (source != null && !eventSources.Contains(source))
+                eventSources.Add(source);
         }
 
         /// <summary>
@@ -193,6 +210,21 @@ namespace DeadCellsMultiplayerX.Server.World.Replication.Frames
         }
 
         /// <summary>
+        /// 从所有实体事件来源收集本帧事件
+        /// </summary>
+        private List<EntityEvent> DrainEntityEvents()
+        {
+            if (eventSources.Count == 0)
+                return [];
+
+            var result = new List<EntityEvent>();
+            foreach (var source in eventSources)
+                result.AddRange(source.DrainEntityEvents());
+
+            return result;
+        }
+
+        /// <summary>
         /// 组装并广播一帧世界状态
         /// </summary>
         private void Emit(long serverTimeMs, IReadOnlyList<SGuestConnection> guests)
@@ -217,7 +249,7 @@ namespace DeadCellsMultiplayerX.Server.World.Replication.Frames
                 DespawnedEntities = entities.Despawned,
                 Actions = ghosts.DrainActions(),
                 AreaAffects = areaAffects.Collect(serverTimeMs),
-                EntityEvents = ghosts.DrainMobEvents().ToList(),
+                EntityEvents = DrainEntityEvents(),
             };
 
             if (BroadcastFrames == 1)

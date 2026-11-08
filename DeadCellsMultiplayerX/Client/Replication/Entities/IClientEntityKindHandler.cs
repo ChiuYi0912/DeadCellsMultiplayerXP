@@ -1,5 +1,6 @@
 using DeadCellsMultiplayerX.Common.Data.Entities;
 using DeadCellsMultiplayerX.Common.Data.Snapshot;
+using DeadCellsMultiplayerX.Common.EntityEvents;
 
 namespace DeadCellsMultiplayerX.Client.Replication.Entities
 {
@@ -48,6 +49,11 @@ namespace DeadCellsMultiplayerX.Client.Replication.Entities
         /// 每帧状态推进
         /// </summary>
         void Tick(ClientEntityContext ctx, long nowMs) { }
+
+        /// <summary>
+        /// 该实体类型的事件 由通用实体帧管线按 EntityKind 分发
+        /// </summary>
+        void OnEntityEvent(EntityEvent evt, ClientEntityContext ctx) { }
 
         /// <summary>
         /// epoch 变化时的清理

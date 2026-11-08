@@ -4,7 +4,7 @@ using HaxeProxy.Runtime;
 using ModCore.Utilities;
 using DeadCellsMultiplayerX.Client.Replication.Entities;
 using DeadCellsMultiplayerX.Common.Data.Entities;
-using DeadCellsMultiplayerX.Common.MobAI.Events;
+using DeadCellsMultiplayerX.Common.EntityEvents;
 
 namespace DeadCellsMultiplayerX.Client.UI.DebugTools
 {
@@ -62,7 +62,7 @@ namespace DeadCellsMultiplayerX.Client.UI.DebugTools
         /// <summary>
         /// 实体事件按类型分发
         /// </summary>
-        public void OnEntityEvent(MobModifierEvent evt)
+        public void OnEntityEvent(EntityEvent evt)
         {
             if (evt == null)
                 return;

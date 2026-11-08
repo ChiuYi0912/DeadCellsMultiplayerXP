@@ -11,6 +11,8 @@ using DeadCellsMultiplayerX.Client.Snapshot;
 using DeadCellsMultiplayerX.Client.UI.DebugTools;
 using DeadCellsMultiplayerX.Common.Data.Entities;
 using DeadCellsMultiplayerX.Common.Data.Snapshot;
+using DeadCellsMultiplayerX.Common.EntityEvents;
+using DeadCellsMultiplayerX.Common.MobAI.Events;
 using DeadCellsMultiplayerX.Common.Serializers;
 using DeadCellsMultiplayerX.Utils;
 using Serilog;
@@ -26,8 +28,6 @@ namespace DeadCellsMultiplayerX.Client.MobSync
     {
         private static readonly ILogger Logger = Log.ForContext("SourceContext", "MobSyncManager");
 
-        private const long StepDriveIntervalMs = 50;
-
         private readonly GuestClientSession session;
         private readonly RemoteWorld remoteWorld;
         private readonly WorldFrameManager frames;
@@ -36,7 +36,6 @@ namespace DeadCellsMultiplayerX.Client.MobSync
         private readonly MobAffectStateManager affectState;
 
         private readonly HashSet<string> authoritativeLevels = [];
-        private readonly Dictionary<uint, long> lastStepMs = [];
 
         private bool loggedFirstMob;
 
@@ -139,7 +138,6 @@ namespace DeadCellsMultiplayerX.Client.MobSync
             }
 
             affectState.Remove(netId);
-            lastStepMs.Remove(netId);
             session.Prediction.OnRemoved(netId);
         }
 
@@ -173,8 +171,6 @@ namespace DeadCellsMultiplayerX.Client.MobSync
         /// <inheritdoc />
         public void AfterFrame(WorldFrame frame, ClientEntityContext ctx)
         {
-            TickMobEvents(frame);
-
             if (!loggedFirstMob && frame.Entities != null)
             {
                 int count = 0;
@@ -226,20 +222,12 @@ namespace DeadCellsMultiplayerX.Client.MobSync
                 int cx = (int)Math.Floor(x);
                 int cy = (int)Math.Floor(y);
 
-                int prevCx = mob.cx;
-                int prevCy = mob.cy;
-
                 mob.setPosCase(cx, cy, x - cx, y - cy);
                 mob.dir = alpha < 0.5 ? prev.Pos.DIR : next.Pos.DIR;
                 mob.dx = 0;
                 mob.dy = 0;
                 mob.bdx = 0;
                 mob.bdy = 0;
-
-                // 快照传送绕过了 Entity.updatePositionXY 的跨格检测，
-                // 这里补一次原版 onStep，让各 mob 的重写逻辑生效
-                if (mob.cx != prevCx || mob.cy != prevCy)
-                    DriveStep(netId, mob, nowMs);
 
                 if (!remoteWorld.MobModifiers.DispatchClientUpdate(mob, nowMs))
                     RemoteMobAnimator.Apply(mob, prev.Anim, next.Anim, renderTimeSec);
@@ -276,22 +264,8 @@ namespace DeadCellsMultiplayerX.Client.MobSync
             }
 
             affectState.Reset();
-            lastStepMs.Clear();
             authoritativeLevels.Clear();
             receiver.ClearSuppressed();
-        }
-
-        /// <summary>
-        /// 快照跨格时补调原版 onStep
-        /// </summary>
-        private void DriveStep(uint netId, Mob mob, long nowMs)
-        {
-            if (lastStepMs.TryGetValue(netId, out long last)
-                && nowMs - last < StepDriveIntervalMs)
-                return;
-
-            lastStepMs[netId] = nowMs;
-            mob.onStep();
         }
 
         /// <summary>
@@ -376,28 +350,18 @@ namespace DeadCellsMultiplayerX.Client.MobSync
             session.Prediction.ClearNetId(dynamic.NetId);
         }
 
-        /// <summary>
-        /// 分发服务端路由出来的 mob 事件。
-        /// </summary>
-        private void TickMobEvents(WorldFrame frame)
+        /// <inheritdoc />
+        public void OnEntityEvent(EntityEvent evt, ClientEntityContext ctx)
         {
-            if (frame?.EntityEvents == null || frame.EntityEvents.Count == 0)
+            if (evt is not MobModifierEvent mobEvt)
                 return;
 
-            foreach (var evt in frame.EntityEvents)
-            {
-                if (evt == null
-                    || evt.Epoch != frame.Epoch
-                    || evt.EntityKind != EntityKind.Mob)
-                    continue;
+            var mob = receiver.Get(mobEvt.NetId);
+            if (mob == null || mob.destroyed)
+                return;
 
-                var mob = receiver.Get(evt.MobNetId);
-                if (mob == null || mob.destroyed)
-                    continue;
-
-                remoteWorld.MobModifiers.DispatchClientEvent(
-                    mob, evt, session.SyncedTimeMs);
-            }
+            remoteWorld.MobModifiers.DispatchClientEvent(
+                mob, mobEvt, session.SyncedTimeMs);
         }
 
         /// <summary>

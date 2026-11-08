@@ -2,6 +2,7 @@ using dc;
 using dc.en;
 using dc.tool.atk;
 using dc.tool.skill;
+using DeadCellsMultiplayerX.Common.Data.Entities;
 using DeadCellsMultiplayerX.Common.MobAI.Events;
 using DeadCellsMultiplayerX.Common.MobAI.Modifiers;
 using DeadCellsMultiplayerX.Server.Core;
@@ -129,7 +130,8 @@ namespace DeadCellsMultiplayerX.Server.MobAI.Modifiers
             ghosts.MobAttacks.SubmitSkill(new MobModifierEvent
             {
                 Epoch = session.Broadcaster.Epoch,
-                MobNetId = netId,
+                NetId = netId,
+                EntityKind = EntityKind.Mob,
                 Kind = MobModifierEventKind.ActionStarted,
                 SkillId = skill.id.ToString(),
                 TargetGuid = targetGuid,

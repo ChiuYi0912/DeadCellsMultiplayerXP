@@ -22,7 +22,7 @@ namespace DeadCellsMultiplayerX.Server.MobAI.Combat
         /// <inheritdoc />
         public void SubmitSkill(MobModifierEvent evt)
         {
-            if (evt == null || evt.MobNetId == 0)
+            if (evt == null || evt.NetId == 0)
                 return;
 
             pendingSkills.Enqueue(evt);

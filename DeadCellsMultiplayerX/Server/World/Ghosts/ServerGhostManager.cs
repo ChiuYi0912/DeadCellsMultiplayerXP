@@ -6,6 +6,7 @@ using dc.pr;
 using dc.tool.atk;
 using DeadCellsMultiplayerX.Common.Data.Ghosts;
 using DeadCellsMultiplayerX.Common.Data.Snapshot;
+using DeadCellsMultiplayerX.Common.EntityEvents;
 using DeadCellsMultiplayerX.Common.MobAI.Events;
 using DeadCellsMultiplayerX.Server.World.Ghosts.Aggro;
 using DeadCellsMultiplayerX.Server.World.Ghosts.Pipeline;
@@ -17,13 +18,14 @@ using DeadCellsMultiplayerX.Server.MobAI.Modifiers;
 using DeadCellsMultiplayerX.Utils;
 using Serilog;
 using DeadCellsMultiplayerX.Server.Core;
+using DeadCellsMultiplayerX.Server.World.Replication.Frames;
 
 namespace DeadCellsMultiplayerX.Server.World.Ghosts
 {
     /// <summary>
     /// 服务端 Ghost 入口
     /// </summary>
-    internal sealed class ServerGhostManager
+    internal sealed class ServerGhostManager : IServerEntityEventSource
     {
         private static readonly ILogger Logger = Log.ForContext("SourceContext", "ServerGhostManager");
 
@@ -170,6 +172,10 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts
         /// 取出 mob 修改器事件；未来由 WorldFrame 广播
         /// </summary>
         public IReadOnlyList<MobModifierEvent> DrainMobEvents()
+            => mobEvents.Drain();
+
+        /// <inheritdoc />
+        public IReadOnlyList<EntityEvent> DrainEntityEvents()
             => mobEvents.Drain();
     }
 }

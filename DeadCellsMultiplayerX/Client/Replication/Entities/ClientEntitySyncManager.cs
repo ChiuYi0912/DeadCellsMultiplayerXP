@@ -69,7 +69,15 @@ namespace DeadCellsMultiplayerX.Client.Replication.Entities
             if (frame.EntityEvents != null)
             {
                 foreach (var evt in frame.EntityEvents)
+                {
+                    if (evt == null || evt.Epoch != frame.Epoch)
+                        continue;
+
+                    if (store.TryGetHandler(evt.EntityKind, out var handler))
+                        handler.OnEntityEvent(evt, store.Context);
+
                     debugLabels.OnEntityEvent(evt);
+                }
             }
         }
 

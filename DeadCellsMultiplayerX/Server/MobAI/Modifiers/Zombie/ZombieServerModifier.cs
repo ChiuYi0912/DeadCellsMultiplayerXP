@@ -1,6 +1,7 @@
 using dc;
 using dc.en;
 using dc.tool.skill;
+using DeadCellsMultiplayerX.Common.Data.Entities;
 using DeadCellsMultiplayerX.Common.MobAI.Events;
 using DeadCellsMultiplayerX.Common.MobAI.Modifiers;
 using DeadCellsMultiplayerX.Server.Core;
@@ -46,7 +47,8 @@ namespace DeadCellsMultiplayerX.Server.MobAI.Modifiers.Zombie
                     new MobModifierEvent
                     {
                         Epoch = session.Broadcaster.Epoch,
-                        MobNetId = netId,
+                        NetId = netId,
+                        EntityKind = EntityKind.Mob,
                         Kind = MobModifierEventKind.ActionStarted,
                         TargetGuid = target.Guid,
                         SkillId = skill.id.ToString(),

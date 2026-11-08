@@ -36,7 +36,7 @@ namespace DeadCellsMultiplayerX.Server.MobAI.Events
                 {
                     Logger.Warning(ex,
                         "Mob event subscriber failed: kind={Kind} mob={NetId}",
-                        evt.Kind, evt.MobNetId);
+                        evt.Kind, evt.NetId);
                 }
             }
         }

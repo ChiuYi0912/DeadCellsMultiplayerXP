@@ -1,4 +1,5 @@
 using dc.en;
+using dc.hl.types;
 using dc.pr;
 using dc.tool;
 using dc.tool.atk;
@@ -8,6 +9,7 @@ using DeadCellsMultiplayerX.Client.Heroes.GhostReplay;
 using DeadCellsMultiplayerX.Client.Replication;
 using DeadCellsMultiplayerX.Common.MobAI.Events;
 using DeadCellsMultiplayerX.Common.MobAI.Modifiers;
+using Hashlink.Proxy.Objects;
 using HaxeProxy.Runtime;
 using ModCore.Utilities;
 using Serilog;
@@ -35,8 +37,9 @@ namespace DeadCellsMultiplayerX.Client.MobBehavior.Modifiers.Zombie
         {
             hooks.OnFixedUpdate(update);
             hooks.OnClientEvent(OnEvent);
-            hooks.OnClientEventHandled(_ => true);
+            hooks.OnClientEventHandled(_ => false);
         }
+
 
         /// <inheritdoc />
         public override void Attach(GameZombie mob, IMobModifierContext context)
@@ -47,36 +50,36 @@ namespace DeadCellsMultiplayerX.Client.MobBehavior.Modifiers.Zombie
         /// <inheritdoc />
         public override void Detach(GameZombie mob)
         {
-            
+
         }
 
         public void OnEvent(MobHookContext context, MobModifierEvent evt)
         {
-            if (context == null || evt == null) return;
-            Game game = session.Game;
-            Hero hero = game.hero;
+            // if (context == null || evt == null) return;
+            // Game game = session.Game;
+            // Hero hero = game.hero;
 
-            var ghostmanager = context.ModifierContext.GetService<RemoteGhostManager>();
-            if (ghostmanager.TryGet(evt.TargetGuid, out var ghost))
-            {
-                ghost.SetPlaceholderVitals();
-                hero = ghost.Hero;
-            }
+            // var ghostmanager = context.ModifierContext.GetService<RemoteGhostManager>();
+            // if (ghostmanager.TryGet(evt.TargetGuid, out var ghost))
+            // {
+            //     ghost.SetPlaceholderVitals();
+            //     hero = ghost.Hero;
+            // }
 
-            context.Mob.setAttackTarget(hero);
-            context.Mob.setNemesisTarget(hero);
+            // context.Mob.setAttackTarget(hero);
+            // context.Mob.setNemesisTarget(hero);
 
-            var skills = context.Mob.oldSkills;
+            // var skills = context.Mob.oldSkills;
 
-            foreach (var item in skills)
-            {
-                if (item is OldMobSkill mobSkill)
-                {
-                    if (mobSkill.id.ToString() != evt.SkillId) continue;
+            // foreach (var item in skills)
+            // {
+            //     if (item is OldMobSkill mobSkill)
+            //     {
+            //         if (mobSkill.id.ToString() != evt.SkillId) continue;
 
-                    mobSkill.prepareOnOwnerTarget(true, null);
-                }
-            }
+            //         mobSkill.prepareOnOwnerTarget(true, null);
+            //     }
+            // }
         }
 
         public void update(MobHookContext context)

@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 using DeadCellsMultiplayerX.Common.Data.Ghosts;
-using DeadCellsMultiplayerX.Common.MobAI.Events;
+using DeadCellsMultiplayerX.Common.EntityEvents;
 using MessagePack;
 using DeadCellsMultiplayerX.Common.Core;
 
@@ -70,6 +70,6 @@ namespace DeadCellsMultiplayerX.Common.Data.Snapshot
         /// <summary>
         /// 本帧统一路由的实体事件
         /// </summary>
-        [Key(11)] public List<MobModifierEvent> EntityEvents { get; set; } = [];
+        [Key(11)] public List<EntityEvent> EntityEvents { get; set; } = [];
     }
 }

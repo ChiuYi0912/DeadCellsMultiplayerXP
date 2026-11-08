@@ -3,6 +3,7 @@ using dc.en;
 using DeadCellsMultiplayerX.Client.Guest;
 using DeadCellsMultiplayerX.Client.Replication.Entities;
 using DeadCellsMultiplayerX.Common.Data.Entities;
+using DeadCellsMultiplayerX.Common.EntityEvents;
 using DeadCellsMultiplayerX.Common.MobAI.Events;
 
 namespace DeadCellsMultiplayerX.Client.UI.DebugTools
@@ -26,27 +27,27 @@ namespace DeadCellsMultiplayerX.Client.UI.DebugTools
 
         public int LabelColor => 0xFFF36B;
 
-        public void OnEvent(MobModifierEvent evt)
+        public void OnEvent(EntityEvent evt)
         {
-            if (evt == null || evt.EntityKind != EntityKind.Mob)
+            if (evt is not MobModifierEvent mobEvt)
                 return;
 
-            if (evt.Kind == MobModifierEventKind.MobDied)
+            if (mobEvt.Kind == MobModifierEventKind.MobDied)
             {
-                states.Remove(evt.MobNetId);
+                states.Remove(mobEvt.NetId);
                 return;
             }
 
-            if (!states.TryGetValue(evt.MobNetId, out var state))
-                states[evt.MobNetId] = state = new State();
+            if (!states.TryGetValue(mobEvt.NetId, out var state))
+                states[mobEvt.NetId] = state = new State();
 
-            if (!string.IsNullOrEmpty(evt.SkillId))
-                state.SkillId = evt.SkillId;
+            if (!string.IsNullOrEmpty(mobEvt.SkillId))
+                state.SkillId = mobEvt.SkillId;
 
-            if (!string.IsNullOrEmpty(evt.TargetGuid))
-                state.TargetGuid = evt.TargetGuid;
+            if (!string.IsNullOrEmpty(mobEvt.TargetGuid))
+                state.TargetGuid = mobEvt.TargetGuid;
 
-            state.Event = evt.Kind;
+            state.Event = mobEvt.Kind;
         }
 
         public string? GetText(

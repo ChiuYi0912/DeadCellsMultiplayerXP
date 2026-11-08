@@ -1,6 +1,6 @@
 using DeadCellsMultiplayerX.Client.Replication.Entities;
 using DeadCellsMultiplayerX.Common.Data.Entities;
-using DeadCellsMultiplayerX.Common.MobAI.Events;
+using DeadCellsMultiplayerX.Common.EntityEvents;
 
 namespace DeadCellsMultiplayerX.Client.UI.DebugTools
 {
@@ -19,7 +19,7 @@ namespace DeadCellsMultiplayerX.Client.UI.DebugTools
         /// <summary>
         /// 实体事件；默认忽略
         /// </summary>
-        void OnEvent(MobModifierEvent evt) { }
+        void OnEvent(EntityEvent evt) { }
 
 
         string? GetText(
