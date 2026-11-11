@@ -47,6 +47,17 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts.Pipeline
             if (request.Kind == HeroActionKind.Talisman && request.Slot != 0)
                 return StageResult.Reject(Rejection.InvalidSlot);
 
+            //判断盾牌动作
+            if (request.Kind == HeroActionKind.Shield)
+            {
+                if (request.ShieldKind > ShieldActionKind.Counter)
+                    return StageResult.Reject(Rejection.InvalidRequest);
+
+                if (request.ShieldKind == ShieldActionKind.Counter
+                    && request.SourceNetId == 0)
+                    return StageResult.Reject(Rejection.InvalidRequest);
+            }
+
             //判断物品是否为空
             if (request.Item == null || string.IsNullOrEmpty(request.Item.ItemId))
                 return StageResult.Reject(Rejection.InvalidItem);
@@ -238,6 +249,10 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts.Pipeline
                 LevelId = context.LevelId,
                 SubLevelIndex = context.SubLevelIndex,
                 ServerTimeMs = context.ServerTimeMs,
+                ShieldKind = request.ShieldKind,
+                FullParry = request.FullParry,
+                SourceNetId = request.SourceNetId,
+                SourceActionId = request.SourceActionId,
             });
 
             return StageResult.Continue;

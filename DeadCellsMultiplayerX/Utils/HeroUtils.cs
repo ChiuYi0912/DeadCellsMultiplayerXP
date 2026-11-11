@@ -6,6 +6,8 @@ using dc.en;
 using dc.en.hero;
 using dc.libs.heaps.slib;
 using dc.libs.heaps.slib._AnimManager;
+using dc.tool;
+using DeadCellsMultiplayerX.Common.Contracts.Loadout;
 using DeadCellsMultiplayerX.Common.Data;
 using DeadCellsMultiplayerX.Common.Data.Snapshot;
 using DeadCellsMultiplayerX.Common.Serializers;
@@ -16,7 +18,11 @@ using ModCore.Utilities;
 
 namespace DeadCellsMultiplayerX.Utils
 {
-    /// <summary>采集 Hero 同步信息</summary>
+    /// <summary>
+    /// 采集 Hero 的同步信息。
+    /// 思路：每次采集同时生成动态状态、外观静态数据与版本化 Loadout；
+    /// Loadout 让晚加入/重连能直接恢复装备，而不必等对方第一次出手。
+    /// </summary>
     public static class HeroUtils
     {
         private static readonly ConditionalWeakTable<AnimManager, AnimTracker> animStartCache = new();
@@ -61,10 +67,32 @@ namespace DeadCellsMultiplayerX.Utils
             dyn.SubLevelIndex = e._level.GetSubLevelIndex();
             dyn.ChangeMask |= HeroDynamic.BitLevel;
 
-            var inventory = ((Hero)e).inventory;
-            spawn.Talisman = inventory.hasTalisman()
-                ? ItemCodec.Collect(inventory.getTalisman())
-                : null;
+            var hero = (Hero)e;
+            var inventory = hero.inventory;
+
+            var loadout = new PlayerLoadout
+            {
+                Weapons =
+                [
+                    CreateSlot(inventory.getEquippedWeaponOn(0)),
+                    CreateSlot(inventory.getEquippedWeaponOn(1)),
+                ],
+                Actives =
+                [
+                    CreateSlot(inventory.getActiveOn(0)),
+                    CreateSlot(inventory.getActiveOn(1)),
+                ],
+                Talisman = inventory.hasTalisman()
+                    ? CreateSlot(inventory.getTalisman())
+                    : null,
+                BrutalityTier = hero.brutalityTier,
+                SurvivalTier = hero.survivalTier,
+                TacticTier = hero.tacticTier,
+            };
+
+            loadout.Version = LoadoutCodec.ComputeVersion(loadout);
+            spawn.Loadout = loadout;
+            spawn.Talisman = null;
 
             if (e.spr != null)
             {
@@ -77,6 +105,10 @@ namespace DeadCellsMultiplayerX.Utils
                 FillGlowData(e, spawn);
             }
         }
+
+        private static EquipmentSlot CreateSlot(InventItem? item)
+            => LoadoutCodec.CreateSlot(
+                item == null ? null : ItemCodec.Collect(item));
 
         public static void FillSkinInfo(Hero hero, HeroSpawn spawn)
         {

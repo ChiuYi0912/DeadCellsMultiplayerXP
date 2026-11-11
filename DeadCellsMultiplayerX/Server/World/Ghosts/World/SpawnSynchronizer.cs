@@ -4,9 +4,6 @@ using DeadCellsMultiplayerX.Server.Core;
 
 namespace DeadCellsMultiplayerX.Server.World.Ghosts.World
 {
-    /// <summary>
-    /// 用客户端最新 spawn 中的项链同步 ServerGhostHero
-    /// </summary>
     internal sealed class SpawnSynchronizer
     {
         private readonly ClientWorldFrameCollector frames;
@@ -30,7 +27,11 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts.World
             if (!actor.NeedsSpawn(spawn.Version))
                 return;
 
-            actor.Ghost.Actions.ApplyTalisman(spawn.Talisman);
+            if (spawn.Loadout != null)
+                actor.Ghost.Actions.ApplyLoadout(spawn.Loadout);
+            else
+                actor.Ghost.Actions.ApplyTalisman(spawn.Talisman);
+
             actor.MarkSpawnApplied(spawn.Version);
         }
 

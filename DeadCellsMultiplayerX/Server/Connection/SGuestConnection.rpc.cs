@@ -2,6 +2,7 @@
 using dc.en;
 using dc.libs.heaps.slib;
 using DeadCellsMultiplayerX.Client.Core;
+using DeadCellsMultiplayerX.Common.Contracts.Protocol;
 using DeadCellsMultiplayerX.Common.Core;
 using DeadCellsMultiplayerX.Common.Data;
 using DeadCellsMultiplayerX.Common.Data.Ghosts;
@@ -20,6 +21,73 @@ namespace DeadCellsMultiplayerX.Server.Connection
     internal partial class SGuestConnection : IServerRPC
     {
         private int transitionGate = 0;
+
+        /// <summary>
+        /// 协议握手；版本不匹配时在进入游戏逻辑前拒绝连接。
+        /// </summary>
+        public Task<HelloResponse> Hello(HelloRequest request)
+        {
+            var response = new HelloResponse
+            {
+                ServerMajor = ProtocolVersion.Major,
+                ServerMinor = ProtocolVersion.Minor,
+                Capabilities = ProtocolVersion.SupportedCapabilities,
+                Epoch = Session.Broadcaster.Epoch,
+            };
+
+            if (request == null)
+            {
+                response.Reason = "missing hello request";
+                return Task.FromResult(response);
+            }
+
+            if (request.Major != ProtocolVersion.Major)
+            {
+                response.Reason =
+                    $"protocol major mismatch: client={request.Major} " +
+                    $"server={ProtocolVersion.Major}";
+                Logger.Warning(
+                    "Protocol rejected: guid={Guid} {Reason}",
+                    GuestInfo.Guid, response.Reason);
+                return Task.FromResult(response);
+            }
+
+            if (request.Minor > ProtocolVersion.Minor)
+            {
+                response.Reason =
+                    $"protocol minor too new: client={request.Minor} " +
+                    $"server={ProtocolVersion.Minor}";
+                Logger.Warning(
+                    "Protocol rejected: guid={Guid} {Reason}",
+                    GuestInfo.Guid, response.Reason);
+                return Task.FromResult(response);
+            }
+
+            if ((request.Capabilities & ProtocolVersion.RequiredCapabilities)
+                != ProtocolVersion.RequiredCapabilities)
+            {
+                response.Reason =
+                    $"missing capabilities: client=0x{request.Capabilities:X} " +
+                    $"required=0x{ProtocolVersion.RequiredCapabilities:X}";
+                Logger.Warning(
+                    "Protocol rejected: guid={Guid} {Reason}",
+                    GuestInfo.Guid, response.Reason);
+                return Task.FromResult(response);
+            }
+
+            response.Accepted = true;
+
+            Logger.Information(
+                "Protocol accepted: guid={Guid} mod={ModVersion} " +
+                "client={ClientMajor}.{ClientMinor} server={ServerMajor}.{ServerMinor} " +
+                "caps=0x{Capabilities:X}",
+                GuestInfo.Guid, request.ModVersion,
+                request.Major, request.Minor,
+                ProtocolVersion.Major, ProtocolVersion.Minor,
+                request.Capabilities);
+
+            return Task.FromResult(response);
+        }
 
         public Task<bool> CheckVersion(string version)
         {

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using dc.pr;
 using DeadCellsMultiplayerX.Common.Data.Ghosts;
+using DeadCellsMultiplayerX.Common.Diagnostics;
 using DeadCellsMultiplayerX.Server.World.Ghosts.Execution;
 using DeadCellsMultiplayerX.Server.World.Ghosts.World;
 using DeadCellsMultiplayerX.Server.World.Replication.Frames;
@@ -12,7 +13,9 @@ using DeadCellsMultiplayerX.Server.Core;
 namespace DeadCellsMultiplayerX.Server.World.Ghosts.Pipeline
 {
     /// <summary>
-    /// Ghost 动作管线
+    /// Ghost 动作管线。
+    /// 思路：Admission -> Binding -> Execution -> Publication 四阶段顺序执行，
+    /// 任一阶段拒绝即停止；可选 ActionJournal 记录接受/拒绝原因，便于定位“动作为什么丢”。
     /// </summary>
     internal sealed class ActionPipeline
     {
@@ -20,13 +23,16 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts.Pipeline
 
         private readonly IReadOnlyList<IActionStage> stages;
         private readonly Func<long> clock;
+        private readonly ActionJournal? journal;
 
         private ActionPipeline(
             IReadOnlyList<IActionStage> stages,
-            Func<long> clock)
+            Func<long> clock,
+            ActionJournal? journal)
         {
             this.stages = stages;
             this.clock = clock;
+            this.journal = journal;
         }
 
         /// <summary>
@@ -39,9 +45,10 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts.Pipeline
             ServerEntityRegistry registry,
             ServerEntityHistory history,
             Func<long> clock,
-            Func<Game?> game)
+            Func<Game?> game,
+            ActionJournal? journal = null)
         {
-            var executor = ActionExecutor.CreateDefault();
+            var executor = ActionExecutor.CreateDefault(registry, clock);
             var rewind = new MobRewind(registry, history);
 
             IActionStage[] stages =
@@ -52,7 +59,7 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts.Pipeline
                 new PublicationStage(world),
             ];
 
-            return new ActionPipeline(stages, clock);
+            return new ActionPipeline(stages, clock, journal);
         }
 
         /// <summary>
@@ -69,8 +76,29 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts.Pipeline
                 if (!result.IsRejected) continue;
 
                 LogRejection(context, result.Rejection);
+                Record(senderGuid, request, context, false, result.Rejection);
                 return;
             }
+
+            Record(senderGuid, request, context, true, Rejection.None);
+        }
+
+        private void Record(
+            string senderGuid,
+            HeroAction? request,
+            ActionContext context,
+            bool accepted,
+            Rejection rejection)
+        {
+            journal?.Record(
+                senderGuid,
+                request?.Kind.ToString() ?? "null",
+                request?.Slot ?? -1,
+                accepted,
+                rejection.ToString(),
+                request?.ClientTimeMs ?? 0,
+                context.ServerTimeMs,
+                request?.LevelId ?? string.Empty);
         }
 
         private static void LogRejection(

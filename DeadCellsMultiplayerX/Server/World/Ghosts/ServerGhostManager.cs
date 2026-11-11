@@ -6,6 +6,7 @@ using dc.pr;
 using dc.tool.atk;
 using DeadCellsMultiplayerX.Common.Data.Ghosts;
 using DeadCellsMultiplayerX.Common.Data.Snapshot;
+using DeadCellsMultiplayerX.Common.Diagnostics;
 using DeadCellsMultiplayerX.Common.EntityEvents;
 using DeadCellsMultiplayerX.Common.MobAI.Events;
 using DeadCellsMultiplayerX.Server.World.Ghosts.Aggro;
@@ -23,7 +24,9 @@ using DeadCellsMultiplayerX.Server.World.Replication.Frames;
 namespace DeadCellsMultiplayerX.Server.World.Ghosts
 {
     /// <summary>
-    /// 服务端 Ghost 入口
+    /// 服务端 Ghost 入口。
+    /// 思路：聚合世界状态、队伍、仇恨、mob 事件与动作管线；
+    /// 对外暴露 ActionJournal 等诊断入口，动作执行细节下沉到 ActionPipeline/Modules。
     /// </summary>
     internal sealed class ServerGhostManager : IServerEntityEventSource
     {
@@ -38,6 +41,7 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts
         private readonly ServerMobEventBus mobEvents;
         private readonly ServerMobModifierRegistry mobModifiers;
         private readonly ServerMobAttackRouter mobAttacks;
+        private readonly ActionJournal actionJournal = new();
 
         public ServerGhostManager(ServerSession session)
         {
@@ -61,7 +65,8 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts
                 session.Entities,
                 session.EntityPublisher.History,
                 () => session.CurrentTimeStamp,
-                () => Game.Class.ME);
+                () => Game.Class.ME,
+                actionJournal);
 
             mobEvents = new ServerMobEventBus();
             mobModifiers = new ServerMobModifierRegistry(
@@ -93,6 +98,11 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts
         /// 服务端 mob 攻击释放路由
         /// </summary>
         public IServerMobAttackRouter MobAttacks => mobAttacks;
+
+        /// <summary>
+        /// 英雄动作诊断日志与计数
+        /// </summary>
+        public ActionJournal ActionJournal => actionJournal;
 
         /// <summary>
         /// 实际持有 ServerGhostHero 的数量

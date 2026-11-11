@@ -7,6 +7,7 @@ using dc.libs.heaps.slib._AnimManager;
 using dc.pr;
 using DeadCellsMultiplayerX.Client.Snapshot;
 using DeadCellsMultiplayerX.Common.Data;
+using DeadCellsMultiplayerX.Common.Data.Ghosts;
 using DeadCellsMultiplayerX.Common.Data.Snapshot;
 using DeadCellsMultiplayerX.Common.Serializers;
 using DeadCellsMultiplayerX.Common.Core.Tools;
@@ -23,6 +24,11 @@ using System.Text.Json;
 
 namespace DeadCellsMultiplayerX.Client.Heroes.Remote
 {
+    /// <summary>
+    /// 可见的远端玩家替身。
+    /// 思路：只根据世界帧插值位置/动画并播放表现（含盾牌视觉）；
+    /// 不可见的 ClientGhostHero 才承担技能/武器回放，两者职责分离，避免把表现塞进战斗代理。
+    /// </summary>
     internal class RemoteHero : KingSkin, IHxbitSerializable<RemoteHero.IHxData>
     {
         private readonly GuestClientSession session;
@@ -34,6 +40,11 @@ namespace DeadCellsMultiplayerX.Client.Heroes.Remote
         /// 当前的动画id
         /// </summary>
         private string lastGroup = "";
+
+        /// <summary>
+        /// 最近一次从服务端动画快照应用的动画，用于盾牌表现结束后恢复
+        /// </summary>
+        private AnimInfo? lastAppliedAnim;
 
         /// <summary>
         /// 用于判断动画开始与结束时间
@@ -267,6 +278,7 @@ namespace DeadCellsMultiplayerX.Client.Heroes.Remote
 
             if (chosen == null) return;
 
+            lastAppliedAnim = chosen;
             string groupName = chosen.GroupName;
             if (string.IsNullOrEmpty(groupName)) return;
 
@@ -301,11 +313,79 @@ namespace DeadCellsMultiplayerX.Client.Heroes.Remote
             }
         }
 
+        public bool ApplyShieldVisual(
+            ShieldActionKind kind,
+            int slot,
+            ItemRef? item,
+            bool fullParry,
+            double elapsedMs)
+        {
+            if (destroyed || spr == null)
+                return false;
+
+            AnimManager? anim = spr.get_anim();
+            if (anim == null || anim.destroyed)
+                return false;
+
+            switch (kind)
+            {
+                case ShieldActionKind.HoldStart:
+                    anim.play("block".AsHaxeString(), null, null);
+                    return true;
+
+                case ShieldActionKind.HoldEnd:
+                    RestoreAnim();
+                    return true;
+
+                case ShieldActionKind.ParryStart:
+                    anim.play("blockEnd".AsHaxeString(), null, null);
+                    PlayParryFx(withText: false);
+                    return true;
+
+                case ShieldActionKind.ParryEnd:
+                    RestoreAnim();
+                    return true;
+
+                case ShieldActionKind.Block:
+                    return true;
+
+                case ShieldActionKind.Counter:
+                    anim.play("blockEnd".AsHaxeString(), null, null);
+                    PlayParryFx(withText: true);
+                    return true;
+
+                default:
+                    return false;
+            }
+        }
+
+        private void RestoreAnim()
+        {
+            if (lastAppliedAnim == null)
+                return;
+
+            lastGroup = "";
+            lastAppliedStartTime = -1;
+            Animate(lastAppliedAnim, lastAppliedAnim,
+                session.SyncedTimeMs / 1000.0);
+        }
+
+        private void PlayParryFx(bool withText)
+        {
+            var level = _level;
+            if (level?.fx == null)
+                return;
+
+            if (withText)
+                popText("Parade !".AsHaxeString(), 65535);
+
+            level.fx.shieldParryStart(this, 4480637, null);
+            level.fx.frontShieldHit(this, 6921449);
+        }
+
         /// <summary>
         /// 用于判断服务端发送的实体状态中,是否存在某个id
         /// </summary>
-        /// <param name="affectId">状态对应索引id</param>
-        /// <returns>bool(数组是否为空)</returns>
         private bool IsAffectActive(int affectId)
         {
             var affects = this.affects;

@@ -10,6 +10,7 @@ using DeadCellsMultiplayerX.Client.Heroes.Local;
 using DeadCellsMultiplayerX.Client.Replication;
 using DeadCellsMultiplayerX.Client.Heroes.Remote;
 using DeadCellsMultiplayerX.Client.Snapshot;
+using DeadCellsMultiplayerX.Common.Contracts.Protocol;
 using DeadCellsMultiplayerX.Common.Data.Snapshot;
 using DeadCellsMultiplayerX.Common.Ghosts;
 using DeadCellsMultiplayerX.Server.Core;
@@ -24,6 +25,7 @@ using System.Diagnostics;
 using DeadCellsMultiplayerX.Client.Core;
 using DeadCellsMultiplayerX.Client.MobBehavior;
 using dc.tool.skill;
+using dc.tool.weap;
 using DeadCellsMultiplayerX.Client.Extensions;
 using dc.hl.types;
 using HaxeProxy.Runtime;
@@ -40,7 +42,9 @@ using DeadCellsMultiplayerX.Client.UI.DebugTools;
 namespace DeadCellsMultiplayerX.Client.Guest
 {
     /// <summary>
-    /// 访客的客户端 session
+    /// 访客的客户端会话。
+    /// 思路：负责连接、协议握手、时间同步、本地采集上传与世界帧分发；
+    /// 远端动作的表现由 RemoteWorld/RemoteGhostManager 的 presenter 链处理，本类不直接做动作分发。
     /// </summary>
     internal class GuestClientSession(GuestClient client, Stream serverStream) : ClientSession,
         IGuestRPC,
@@ -161,9 +165,24 @@ namespace DeadCellsMultiplayerX.Client.Guest
             rpc.Disconnected += Rpc_Disconnected;
             rpc.StartListening();
 
+            HelloResponse hello = await server.Hello(new HelloRequest
+            {
+                Major = ProtocolVersion.Major,
+                Minor = ProtocolVersion.Minor,
+                ModVersion = VersionUtils.ModVersion.ToString(),
+                Capabilities = ProtocolVersion.SupportedCapabilities,
+            });
+
+            if (!hello.Accepted)
+            {
+                Logger.Error(
+                    "Protocol handshake rejected: {Reason}", hello.Reason);
+                Dispose();
+                return;
+            }
+
             if (!await server.CheckVersion(
-               VersionUtils.ModVersion.ToString()
-               ))
+               VersionUtils.ModVersion.ToString()))
             {
                 Logger.Information("Failed to connect lobby. Dismatch version.");
                 Dispose();
@@ -475,7 +494,16 @@ namespace DeadCellsMultiplayerX.Client.Guest
             Hook_OldMobSkill.update += Hook_OldMobSkill_update;
             Hook_OldSkill.interrupt += Hook_OldSkill_interrupt;
             Hook_OldSkill.isReady += Hook_OldSkill_isReady;
+            Hook_BaseShield.counterGrenade += Hook_BaseShield_counterGrenade;
             Hook__LevelTransition.__constructor__ += Hook__LevelTransition__constructor__;
+        }
+
+        private void Hook_BaseShield_counterGrenade(
+            Hook_BaseShield.orig_counterGrenade orig,
+            BaseShield self,
+            Grenade source)
+        {
+            ShieldGrenadeCounter.Run(self, () => orig(self, source));
         }
 
 
@@ -955,6 +983,7 @@ namespace DeadCellsMultiplayerX.Client.Guest
             Hook_OldMobSkill.update -= Hook_OldMobSkill_update;
             Hook_OldSkill.interrupt -= Hook_OldSkill_interrupt;
             Hook_OldSkill.isReady -= Hook_OldSkill_isReady;
+            Hook_BaseShield.counterGrenade -= Hook_BaseShield_counterGrenade;
             localCapture?.Dispose();
             localCapture = null;
 

@@ -1,8 +1,11 @@
 using System;
+using System.Collections.Generic;
 using dc.en;
 using dc.tool;
+using dc.tool.atk;
 using dc.tool.hero;
 using dc.tool.hero.weap;
+using dc.tool.weap;
 using DeadCellsMultiplayerX.Common.Data.Ghosts;
 using DeadCellsMultiplayerX.Common.Serializers;
 using DeadCellsMultiplayerX.Utils;
@@ -14,9 +17,6 @@ using DeadCellsMultiplayerX.Client.Replication;
 
 namespace DeadCellsMultiplayerX.Client.Heroes.Local
 {
-    /// <summary>
-    /// hook本地客户端的武器与技能触发
-    /// </summary>
     internal sealed class LocalGhostCapture
     {
         private static readonly ILogger Logger = Log.ForContext("SourceContext", "LocalGhostCapture");
@@ -28,6 +28,18 @@ namespace DeadCellsMultiplayerX.Client.Heroes.Local
         /// </summary>
         private long nextActionId;
 
+        private sealed class ShieldState
+        {
+            public bool Holding;
+            public bool Parrying;
+        }
+
+        /// <summary>
+        /// 每个本地盾牌当前的姿态，用于抑制重复的起止事件
+        /// </summary>
+        private readonly Dictionary<BaseShield, ShieldState> shieldStates =
+            new(ReferenceEqualityComparer.Instance);
+
         public LocalGhostCapture(GuestClientSession session)
         {
             this.session = session;
@@ -38,6 +50,13 @@ namespace DeadCellsMultiplayerX.Client.Heroes.Local
             Hook_HeroActiveSkillsManager.onActiveSkill += OnActiveSkill;
             Hook_BeheadedWeaponsManager.onWeaponExecute += OnWeaponExecute;
             Hook_Inventory.add += OnInventoryAdd;
+
+            Hook_BaseShield.onShieldChargeStart += OnShieldChargeStart;
+            Hook_BaseShield.onShieldReleased += OnShieldReleased;
+            Hook_BaseShield.startParry += OnStartParry;
+            Hook_BaseShield.onShieldEndParry += OnShieldEndParry;
+            Hook_BaseShield.onShieldBlock += OnShieldBlock;
+            Hook_BaseShield.shieldCounterAttack += OnShieldCounterAttack;
         }
 
         public void Dispose()
@@ -45,6 +64,15 @@ namespace DeadCellsMultiplayerX.Client.Heroes.Local
             Hook_HeroActiveSkillsManager.onActiveSkill -= OnActiveSkill;
             Hook_BeheadedWeaponsManager.onWeaponExecute -= OnWeaponExecute;
             Hook_Inventory.add -= OnInventoryAdd;
+
+            Hook_BaseShield.onShieldChargeStart -= OnShieldChargeStart;
+            Hook_BaseShield.onShieldReleased -= OnShieldReleased;
+            Hook_BaseShield.startParry -= OnStartParry;
+            Hook_BaseShield.onShieldEndParry -= OnShieldEndParry;
+            Hook_BaseShield.onShieldBlock -= OnShieldBlock;
+            Hook_BaseShield.shieldCounterAttack -= OnShieldCounterAttack;
+
+            shieldStates.Clear();
         }
 
 
@@ -181,6 +209,141 @@ namespace DeadCellsMultiplayerX.Client.Heroes.Local
         }
 
 
+        private void OnShieldChargeStart(
+            Hook_BaseShield.orig_onShieldChargeStart orig, BaseShield self)
+        {
+            orig(self);
+            if (!IsLocalShield(self)) return;
+
+            var state = GetShieldState(self);
+            if (state.Holding) return;
+
+            state.Holding = true;
+            SendShieldAction(self, ShieldActionKind.HoldStart);
+        }
+
+        private void OnShieldReleased(
+            Hook_BaseShield.orig_onShieldReleased orig, BaseShield self)
+        {
+            orig(self);
+            if (!IsLocalShield(self)) return;
+
+            var state = GetShieldState(self);
+            state.Holding = false;
+            SendShieldAction(self, ShieldActionKind.HoldEnd);
+        }
+
+        private void OnStartParry(
+            Hook_BaseShield.orig_startParry orig, BaseShield self)
+        {
+            orig(self);
+            if (!IsLocalShield(self)) return;
+
+            var state = GetShieldState(self);
+            if (state.Parrying) return;
+
+            state.Parrying = true;
+            SendShieldAction(self, ShieldActionKind.ParryStart);
+        }
+
+        private void OnShieldEndParry(
+            Hook_BaseShield.orig_onShieldEndParry orig, BaseShield self)
+        {
+            orig(self);
+            if (!IsLocalShield(self)) return;
+
+            var state = GetShieldState(self);
+            if (!state.Parrying) return;
+
+            state.Parrying = false;
+            SendShieldAction(self, ShieldActionKind.ParryEnd);
+        }
+
+        private void OnShieldBlock(
+            Hook_BaseShield.orig_onShieldBlock orig,
+            BaseShield self,
+            AttackData sourceAtk,
+            bool fullParry)
+        {
+            orig(self, sourceAtk, fullParry);
+            if (!IsLocalShield(self)) return;
+
+            SendShieldAction(
+                self, ShieldActionKind.Block, sourceAtk, fullParry);
+        }
+
+        private void OnShieldCounterAttack(
+            Hook_BaseShield.orig_shieldCounterAttack orig,
+            BaseShield self,
+            AttackData sourceAtk,
+            bool fullParry)
+        {
+            orig(self, sourceAtk, fullParry);
+            if (!IsLocalShield(self)) return;
+
+            SendShieldAction(
+                self, ShieldActionKind.Counter, sourceAtk, fullParry);
+        }
+
+        private bool IsLocalShield(BaseShield? shield)
+        {
+            if (shield == null || shield.destroyed)
+                return false;
+
+            var hero = session.Game?.hero;
+            if (hero == null || !ReferenceEquals(shield.owner, hero))
+                return false;
+
+            return shield.item != null && shield.item.posID is >= 0 and <= 1;
+        }
+
+        private ShieldState GetShieldState(BaseShield shield)
+        {
+            if (!shieldStates.TryGetValue(shield, out var state))
+                shieldStates[shield] = state = new ShieldState();
+
+            return state;
+        }
+
+        private void SendShieldAction(
+            BaseShield shield,
+            ShieldActionKind kind,
+            AttackData? sourceAtk = null,
+            bool fullParry = false)
+        {
+            var hero = session.Game?.hero;
+            var item = shield.item;
+            if (hero == null || item == null)
+                return;
+
+            int slot = item.posID;
+            if (slot is < 0 or > 1)
+                return;
+
+            SendHeroAction(
+                hero, HeroActionKind.Shield, slot,
+                ItemCodec.Collect(item),
+                1.0, 0,
+                hero.cx, hero.cy, hero.xr, hero.yr,
+                hero.dir, hero.dx, hero.dy,
+                shieldKind: kind,
+                fullParry: fullParry,
+                sourceNetId: ResolveSourceNetId(sourceAtk));
+        }
+
+        private uint ResolveSourceNetId(AttackData? atk)
+        {
+            var attacker = atk?.source as Mob ?? atk?.carrier as Mob;
+            if (attacker != null
+                && session.RemoteWorld?.Mobs.Receiver.TryGetNetId(
+                    attacker, out uint netId) == true)
+            {
+                return netId;
+            }
+
+            return 0;
+        }
+
         /// <summary>
         /// 发送事件给服务端
         /// </summary>
@@ -196,7 +359,11 @@ namespace DeadCellsMultiplayerX.Client.Heroes.Local
             int dir,
             double dx, double dy,
             int? epoch = null,
-            long? actionId = null)
+            long? actionId = null,
+            ShieldActionKind shieldKind = ShieldActionKind.HoldStart,
+            bool fullParry = false,
+            uint sourceNetId = 0,
+            long sourceActionId = 0)
         {
             var world = session.RemoteWorld;
             if (world == null) return;
@@ -226,6 +393,10 @@ namespace DeadCellsMultiplayerX.Client.Heroes.Local
                 BrutalityTier = hero.brutalityTier,
                 SurvivalTier = hero.survivalTier,
                 TacticTier = hero.tacticTier,
+                ShieldKind = shieldKind,
+                FullParry = fullParry,
+                SourceNetId = sourceNetId,
+                SourceActionId = sourceActionId,
             };
 
             var task = session.Server.SubmitHeroAction(request);

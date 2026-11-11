@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using dc.en;
 using dc.pr;
 using DeadCellsMultiplayerX.Client.Replication;
 using DeadCellsMultiplayerX.Client.Heroes.Remote;
+using DeadCellsMultiplayerX.Client.Heroes.GhostReplay.Presenters;
 using DeadCellsMultiplayerX.Common.Data.Ghosts;
 using DeadCellsMultiplayerX.Common.Data.Snapshot;
 using DeadCellsMultiplayerX.Common.Ghosts;
@@ -13,10 +15,6 @@ using DeadCellsMultiplayerX.Client.Guest;
 
 namespace DeadCellsMultiplayerX.Client.Heroes.GhostReplay
 {
-    /// <summary>
-    /// 客户端远端 Ghost 管理
-    /// 负责 ClientGhostHero 生命周期与 WorldFrame 动作重放
-    /// </summary>
     internal sealed class RemoteGhostManager
     {
         private const long MaxEventAgeMs = 2000;
@@ -25,6 +23,7 @@ namespace DeadCellsMultiplayerX.Client.Heroes.GhostReplay
 
         private readonly GuestClientSession session;
         private readonly RemoteWorld world;
+        private readonly Dictionary<HeroActionKind, IActionPresenter> presenters;
         public readonly string localGuid;
 
         /// <summary>
@@ -44,10 +43,14 @@ namespace DeadCellsMultiplayerX.Client.Heroes.GhostReplay
             this.session = session;
             this.world = world;
             this.localGuid = localGuid;
+            presenters = ActionPresenterCatalog.CreateDefault();
         }
 
         public int Count => ghosts.Count;
 
+        internal GuestClientSession Session => session;
+
+        internal RemoteWorld World => world;
 
         /// <summary>
         /// 确保指定玩家在关卡中有 ClientGhostHero
@@ -184,42 +187,15 @@ namespace DeadCellsMultiplayerX.Client.Heroes.GhostReplay
                 ghost.SetTiers(
                     evt.BrutalityTier, evt.SurvivalTier, evt.TacticTier);
 
-                switch (evt.Kind)
+                if (!presenters.TryGetValue(evt.Kind, out var presenter))
                 {
-                    case HeroActionKind.ActiveSkill:
-                        if (!ghost.Actions.PrepareSkill(evt.Slot, evt.Item)) continue;
-                        if (!ghost.Actions.ReplaySkill(evt.Slot))
-                        {
-                            Logger.Warning(
-                                "Skill replay failed: caster={Caster} slot={Slot} item={Item}",
-                                evt.CasterGuid, evt.Slot, evt.Item?.ItemId);
-                        }
-                        break;
-
-                    case HeroActionKind.Weapon:
-                        using (session.GhostCombat.Begin(frame, evt))
-                        {
-                            if (!ghost.Actions.PrepareWeapon(evt.Slot, evt.Item))
-                                continue;
-
-                            if (!ghost.Actions.UseWeapon(evt.Slot, evt.Cycle))
-                            {
-                                Logger.Warning(
-                                    "Weapon replay failed: caster={Caster} slot={Slot} item={Item}",
-                                    evt.CasterGuid, evt.Slot, evt.Item?.ItemId);
-                            }
-                        }
-                        break;
-
-                    case HeroActionKind.Talisman:
-                        if (!ghost.Actions.ApplyTalisman(evt.Item))
-                        {
-                            Logger.Warning(
-                                "Talisman replay failed: caster={Caster} item={Item}",
-                                evt.CasterGuid, evt.Item?.ItemId);
-                        }
-                        break;
+                    Logger.Debug(
+                        "No presenter for action kind {Kind}: caster={Caster}",
+                        evt.Kind, evt.CasterGuid);
+                    continue;
                 }
+
+                presenter.Present(this, frame, evt, ghost);
             }
         }
 

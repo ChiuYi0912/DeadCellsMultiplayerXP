@@ -1,53 +1,46 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using DeadCellsMultiplayerX.Common.Data.Ghosts;
 using DeadCellsMultiplayerX.Common.Ghosts;
+using DeadCellsMultiplayerX.Server.World.Ghosts.Modules;
+using DeadCellsMultiplayerX.Server.World.Replication.Entities;
 using Serilog;
 using DeadCellsMultiplayerX.Server.Core;
 
 namespace DeadCellsMultiplayerX.Server.World.Ghosts.Execution
 {
-    /// <summary>
-    /// 按类型执行GhostHero行为
-    /// </summary>
-    internal interface IActionHandler
-    {
-        HeroActionKind Kind { get; }
-
-        bool TryExecute(
-            ServerGhostHero ghost,
-            HeroAction request,
-            double ratio);
-    }
-
-    /// <summary>
-    /// 执行对应action
-    /// </summary>
     internal sealed class ActionExecutor
     {
-        private readonly Dictionary<HeroActionKind, IActionHandler> handlers;
+        private readonly Dictionary<HeroActionKind, IServerActionModule> modules;
 
         private static readonly ILogger Logger = Log.ForContext("SourceContext", "ActionExecutor");
 
-        private ActionExecutor(IEnumerable<IActionHandler> handlers)
+        private ActionExecutor(IEnumerable<IServerActionModule> modules)
         {
-            this.handlers = handlers.ToDictionary(handler => handler.Kind);
+            this.modules = [];
+
+            foreach (var module in modules)
+            {
+                if (module == null)
+                    continue;
+
+                if (!this.modules.TryAdd(module.Descriptor.Kind, module))
+                {
+                    throw new InvalidOperationException(
+                        $"Duplicate action module for {module.Descriptor.Kind}");
+                }
+            }
         }
 
         /// <summary>
         /// 根据<see cref="HeroActionKind"/>执行武器释放,技能释放,佩戴项链
         /// </summary>
-        public static ActionExecutor CreateDefault()
+        public static ActionExecutor CreateDefault(
+            ServerEntityRegistry entities,
+            Func<long> clock)
         {
-            IActionHandler[] handlers =
-            [
-                new SkillActionHandler(),
-                new WeaponActionHandler(),
-                new TalismanActionHandler(),
-            ];
-
-            return new ActionExecutor(handlers);
+            var modules = ActionModuleCatalog.CreateDefault(entities, clock);
+            return new ActionExecutor(modules);
         }
 
         /// <summary>
@@ -76,8 +69,8 @@ namespace DeadCellsMultiplayerX.Server.World.Ghosts.Execution
                 ghost.SetTiers(brutality, survival, tactic);
             }
 
-            return handlers.TryGetValue(request.Kind, out var handler)
-                && handler.TryExecute(ghost, request, ratio);
+            return modules.TryGetValue(request.Kind, out var module)
+                && module.TryExecute(ghost, request, ratio);
         }
     }
 }

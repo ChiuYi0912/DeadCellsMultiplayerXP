@@ -1,4 +1,5 @@
 ﻿using DeadCellsMultiplayerX.Client.Core;
+using DeadCellsMultiplayerX.Common.Contracts.Protocol;
 using DeadCellsMultiplayerX.Common.Data;
 using DeadCellsMultiplayerX.Common.Data.Ghosts;
 using DeadCellsMultiplayerX.Common.Data.Snapshot;
@@ -19,6 +20,11 @@ namespace DeadCellsMultiplayerX.Server.Core
             public RectInt Rect { get; set; } = new();
             public int SubLevelId { get; set; }
         }
+        /// <summary>
+        /// 协议握手；必须是会话建立后的第一个调用。
+        /// </summary>
+        public Task<HelloResponse> Hello(HelloRequest request);
+
         /// <summary>
         /// 设置玩家信息
         /// </summary>

@@ -1,5 +1,7 @@
 ﻿using dc;
 using dc.en;
+using dc.tool.weap;
+using DeadCellsMultiplayerX.Common.Ghosts;
 using dc.en.hero;
 using dc.en.inter;
 using dc.en.mob;
@@ -148,6 +150,15 @@ namespace DeadCellsMultiplayerX.Server.Core
             Hook_Power.update += Hook_Power_update;
             Hook__AttackUtils.applyHitResult += Hook_AttackUtils_applyHitResult;
             Hook_LevelAreaAffect.init += Hook_LevelAreaAffect_init;
+            Hook_BaseShield.counterGrenade += Hook_BaseShield_counterGrenade;
+        }
+
+        private void Hook_BaseShield_counterGrenade(
+            Hook_BaseShield.orig_counterGrenade orig,
+            BaseShield self,
+            Grenade source)
+        {
+            ShieldGrenadeCounter.Run(self, () => orig(self, source));
         }
 
 

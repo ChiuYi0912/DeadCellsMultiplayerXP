@@ -2,15 +2,13 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using DeadCellsMultiplayerX.Common.Contracts.Loadout;
 using DeadCellsMultiplayerX.Common.Data.Ghosts;
 using MessagePack;
 using DeadCellsMultiplayerX.Common.Core;
 
 namespace DeadCellsMultiplayerX.Common.Data.Snapshot
 {
-    /// <summary>
-    /// 初始化hero
-    /// </summary>
     [MessagePackObject]
     public class HeroSpawn
     {   
@@ -60,9 +58,14 @@ namespace DeadCellsMultiplayerX.Common.Data.Snapshot
         [Key(8)] public uint Version { get; set; }
 
         /// <summary>
-        /// 当前项链
+        /// 当前项链（旧字段，保留用于兼容过渡；新逻辑使用 <see cref="Loadout"/>）
         /// </summary>
         [Key(9)] public ItemRef? Talisman { get; set; }
+
+        /// <summary>
+        /// 完整装备快照；晚加入/重连依赖它恢复武器、技能与项链。
+        /// </summary>
+        [Key(10)] public PlayerLoadout? Loadout { get; set; }
 
 
         /// <summary>
@@ -79,7 +82,68 @@ namespace DeadCellsMultiplayerX.Common.Data.Snapshot
                 && SubLevelId == o.SubLevelId
                 && SpriteSame(MainSprite, o.MainSprite)
                 && GlowSame(GlowData, o.GlowData)
-                && ItemRefSame(Talisman, o.Talisman);
+                && LoadoutSame(Loadout, o.Loadout);
+        }
+
+        private static bool LoadoutSame(PlayerLoadout? a, PlayerLoadout? b)
+        {
+            if (ReferenceEquals(a, b)) return true;
+            if (a == null || b == null) return false;
+
+            return a.BrutalityTier == b.BrutalityTier
+                && a.SurvivalTier == b.SurvivalTier
+                && a.TacticTier == b.TacticTier
+                && SlotsSame(a.Weapons, b.Weapons)
+                && SlotsSame(a.Actives, b.Actives)
+                && SlotSame(a.Talisman, b.Talisman);
+        }
+
+        private static bool SlotsSame(
+            List<EquipmentSlot>? a,
+            List<EquipmentSlot>? b)
+        {
+            if (ReferenceEquals(a, b)) return true;
+            if (a == null || b == null) return false;
+            if (a.Count != b.Count) return false;
+
+            for (int i = 0; i < a.Count; i++)
+            {
+                if (!SlotSame(a[i], b[i]))
+                    return false;
+            }
+
+            return true;
+        }
+
+        private static bool SlotSame(EquipmentSlot? a, EquipmentSlot? b)
+        {
+            if (ReferenceEquals(a, b)) return true;
+            if (a == null || b == null) return false;
+
+            return ItemDefSame(a.Def, b.Def)
+                && RuntimeSame(a.Runtime, b.Runtime);
+        }
+
+        private static bool ItemDefSame(ItemDef? a, ItemDef? b)
+        {
+            if (ReferenceEquals(a, b)) return true;
+            if (a == null || b == null) return false;
+
+            return a.Kind == b.Kind
+                && a.ItemId == b.ItemId
+                && a.Level == b.Level
+                && a.PermanentId == b.PermanentId
+                && ListSame(a.Affixes, b.Affixes)
+                && ListSame(a.InactiveAffixes, b.InactiveAffixes);
+        }
+
+        private static bool RuntimeSame(ItemRuntime? a, ItemRuntime? b)
+        {
+            if (ReferenceEquals(a, b)) return true;
+            if (a == null || b == null) return false;
+
+            return a.Ammo == b.Ammo
+                && a.CooldownUntilMs == b.CooldownUntilMs;
         }
 
         private static bool ItemRefSame(ItemRef? a, ItemRef? b)

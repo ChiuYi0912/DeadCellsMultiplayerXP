@@ -12,6 +12,7 @@ namespace DeadCellsMultiplayerX.Common.Data.Ghosts
         ActiveSkill = 0,
         Weapon = 1,
         Talisman = 2,
+        Shield = 3,
     }
 
     /// <summary>
@@ -89,6 +90,26 @@ namespace DeadCellsMultiplayerX.Common.Data.Ghosts
         /// 战术等级
         /// </summary>
         [Key(20)] public int TacticTier { get; set; }
+
+        /// <summary>
+        /// 盾牌动作类型
+        /// </summary>
+        [Key(21)] public ShieldActionKind ShieldKind { get; set; }
+
+        /// <summary>
+        /// 是否完美弹反
+        /// </summary>
+        [Key(22)] public bool FullParry { get; set; }
+
+        /// <summary>
+        /// 触发格挡的实体 NetId
+        /// </summary>
+        [Key(23)] public uint SourceNetId { get; set; }
+
+        /// <summary>
+        /// 攻击方的 ActionId
+        /// </summary>
+        [Key(24)] public long SourceActionId { get; set; }
     }
 
     /// <summary>
@@ -130,5 +151,10 @@ namespace DeadCellsMultiplayerX.Common.Data.Ghosts
         [Key(18)] public string LevelId { get; set; } = string.Empty;
         [Key(19)] public int SubLevelIndex { get; set; } = -1;
         [Key(20)] public long ServerTimeMs { get; set; }
+
+        [Key(21)] public ShieldActionKind ShieldKind { get; set; }
+        [Key(22)] public bool FullParry { get; set; }
+        [Key(23)] public uint SourceNetId { get; set; }
+        [Key(24)] public long SourceActionId { get; set; }
     }
 }

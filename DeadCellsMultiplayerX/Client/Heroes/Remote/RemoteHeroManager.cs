@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using dc.en;
 using DeadCellsMultiplayerX.Client.Core.Event;
 using DeadCellsMultiplayerX.Client.MobSync;
+using DeadCellsMultiplayerX.Client.Heroes.GhostReplay;
 using DeadCellsMultiplayerX.Client.Heroes.Remote;
 using DeadCellsMultiplayerX.Client.Effects;
 using DeadCellsMultiplayerX.Client.Snapshot;
@@ -14,10 +15,7 @@ using DeadCellsMultiplayerX.Client.Replication;
 
 namespace DeadCellsMultiplayerX.Client.Heroes.Remote
 {
-    /// <summary>
-    /// 管理所有远端玩家
-    /// 以服务端世界帧中的英雄集合为权威,负责创建、销毁与关卡过滤
-    /// </summary>
+
     internal class RemoteHeroManager : DisposableEventReceiver,
     IOnLocalHeroInitDone
     {
@@ -44,6 +42,11 @@ namespace DeadCellsMultiplayerX.Client.Heroes.Remote
         /// 记录生成有误的玩家
         /// </summary>
         private readonly HashSet<string> missingSpawnLogged = [];
+
+        /// <summary>
+        /// 已应用到 ClientGhostHero 的 Loadout 版本
+        /// </summary>
+        private readonly Dictionary<string, uint> appliedLoadoutVersions = [];
         public IEnumerable<RemoteHero> All => heroes.Values;
 
         /// <summary>
@@ -94,7 +97,7 @@ namespace DeadCellsMultiplayerX.Client.Heroes.Remote
                         existing.ApplySpawn(spawn);
                     }
 
-                    PushGhostTalisman(spawn);
+                    PushGhostLoadout(spawn);
                 }
             }
 
@@ -151,7 +154,7 @@ namespace DeadCellsMultiplayerX.Client.Heroes.Remote
                         remoteWorld.Ghosts.Ensure(state.GUID, currentLevel);
 
                     if (frames.TryGetSpawn(state.GUID, out var stateSpawn))
-                        PushGhostTalisman(stateSpawn);
+                        PushGhostLoadout(stateSpawn);
 
                     hero.LevelId = state.LevelId;
                     hero.SubLevelIndex = state.SubLevelIndex;
@@ -183,6 +186,7 @@ namespace DeadCellsMultiplayerX.Client.Heroes.Remote
         /// <param name="guid">客户id</param>
         public void Despawn(string guid)
         {
+            appliedLoadoutVersions.Remove(guid);
             remoteWorld.Ghosts.Remove(guid);
 
             if (heroes.Remove(guid, out var hero))
@@ -200,6 +204,7 @@ namespace DeadCellsMultiplayerX.Client.Heroes.Remote
             foreach (var h in heroes.Values)
                 h?.destroy();
             heroes.Clear();
+            appliedLoadoutVersions.Clear();
 
             remoteWorld.Ghosts.Clear();
         }
@@ -220,15 +225,32 @@ namespace DeadCellsMultiplayerX.Client.Heroes.Remote
         }
 
         /// <summary>
-        /// 把客户端静态数据中的项链应用到对应ClientGhostHero
+        /// 把客户端静态数据中的完整装备应用到对应 ClientGhostHero
         /// </summary>
-        private void PushGhostTalisman(HeroSpawn spawn)
+        private void PushGhostLoadout(HeroSpawn spawn)
         {
             if (spawn == null) return;
+
+            if (appliedLoadoutVersions.TryGetValue(
+                    spawn.GUID, out uint appliedVersion)
+                && appliedVersion == spawn.Version)
+                return;
+
             if (!remoteWorld.Ghosts.TryGet(spawn.GUID, out var ghost))
                 return;
 
-            ghost.Actions.ApplyTalisman(spawn.Talisman);
+            ApplyLoadout(ghost, spawn);
+            appliedLoadoutVersions[spawn.GUID] = spawn.Version;
+        }
+
+        private static void ApplyLoadout(
+            ClientGhostHero ghost,
+            HeroSpawn spawn)
+        {
+            if (spawn.Loadout != null)
+                ghost.Actions.ApplyLoadout(spawn.Loadout);
+            else
+                ghost.Actions.ApplyTalisman(spawn.Talisman);
         }
 
         /// <summary>
@@ -248,7 +270,11 @@ namespace DeadCellsMultiplayerX.Client.Heroes.Remote
             heroes[spawn.GUID] = hero;
 
             var ghost = remoteWorld.Ghosts.Ensure(spawn.GUID, level);
-            ghost?.Actions.ApplyTalisman(spawn.Talisman);
+            if (ghost != null)
+            {
+                ApplyLoadout(ghost, spawn);
+                appliedLoadoutVersions[spawn.GUID] = spawn.Version;
+            }
 
             // 直接用触发创建的新关卡状态摆放,避免用旧关卡插值坐标
             hero.SnapToState(state.LevelId, state.SubLevelIndex, state.Pos);
@@ -332,6 +358,7 @@ namespace DeadCellsMultiplayerX.Client.Heroes.Remote
 
             heroes.Clear();
             missingSpawnLogged.Clear();
+            appliedLoadoutVersions.Clear();
             remoteWorld.Ghosts.Clear();
         }
     }
