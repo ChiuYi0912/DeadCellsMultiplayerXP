@@ -1,44 +1,44 @@
+namespace DeadCellsMultiplayerX.Engine.Serialization;
+
 using System.Buffers;
-namespace DeadCellsMultiplayerX.Engine.Serialization
+
+public interface IBinarySerializer
 {
-    public interface IBinarySerializer
-    {
-        SerializerKind Kind { get; }
+    public SerializerKind Kind { get; }
 
-        byte[] Serialize<T>(T? obj);
+    public byte[] Serialize<T>(T? obj);
 
-        T? Deserialize<T>(ReadOnlySpan<byte> data);
+    public T? Deserialize<T>(ReadOnlySpan<byte> data);
 
 
 
-        object? Deserialize(ReadOnlySpan<byte> data, Type type);
+    public object? Deserialize(ReadOnlySpan<byte> data, Type type);
 
-        byte[] Serialize(object obj, Type type);
+    public byte[] Serialize(object obj, Type type);
 
 
 
-        void Serialize<T>(IBufferWriter<byte> writer, T? obj);
+    public void Serialize<T>(IBufferWriter<byte> writer, T? obj);
 
-        void Serialize(
-            IBufferWriter<byte> writer,
-            object obj,
-            Type type);
+    public void Serialize(
+        IBufferWriter<byte> writer,
+        object obj,
+        Type type);
 
-        T? Deserialize<T>(byte[] data)
-            => Deserialize<T>((ReadOnlySpan<byte>)data);
+    public T? Deserialize<T>(byte[] data)
+        => this.Deserialize<T>((ReadOnlySpan<byte>)data);
 
-        object? Deserialize(byte[] data, Type type)
-            => Deserialize((ReadOnlySpan<byte>)data, type);
-    }
+    public object? Deserialize(byte[] data, Type type)
+        => this.Deserialize((ReadOnlySpan<byte>)data, type);
+}
 
-    public static class DCMXSerializers
-    {
-        public static IBinarySerializer MessagePack { get; }
-            = MessagePackSerializerImpl.Instance;
-    }
+public static class DCMXSerializers
+{
+    public static IBinarySerializer MessagePack { get; }
+        = MessagePackBinarySerializer.Instance;
+}
 
-    public enum SerializerKind : byte
-    {
-        MessagePack = 2
-    }
+public enum SerializerKind : byte
+{
+    MessagePack = 2
 }

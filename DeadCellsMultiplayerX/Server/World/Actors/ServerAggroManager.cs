@@ -1,253 +1,276 @@
+namespace DeadCellsMultiplayerX.Server.World.Actors;
+
 using dc;
 using dc.en;
 using dc.pr;
 using dc.tool.atk;
-using DeadCellsMultiplayerX.Server.Replication.Entities;
 using DeadCellsMultiplayerX.Engine.Hooks.Shared;
+using DeadCellsMultiplayerX.Server.Replication.Entities;
 using Serilog;
-namespace DeadCellsMultiplayerX.Server.World.Actors
+
+/// <summary>
+/// 服务端 Ghost 仇恨协调器
+/// </summary>
+/// <remarks>
+/// 绑定 Ghost 队伍、mob 注册表与游戏实例
+/// </remarks>
+internal sealed class ServerAggroManager(
+    ServerTeamManager teams,
+    ServerEntityRegistry mobs,
+    Func<Game?> gameProvider)
 {
     /// <summary>
-    /// 服务端 Ghost 仇恨协调器
+    /// 目标巡检间隔
     /// </summary>
-    internal sealed class ServerAggroManager
+    private const long THINK_INTERVAL_MS = 100;
+
+    private static readonly ILogger Logger = Log.ForContext("SourceContext", "ServerAggroManager");
+
+    private readonly ServerTeamManager teams = teams;
+    private readonly ServerEntityRegistry mobs = mobs;
+    private readonly Func<Game?> gameProvider = gameProvider;
+
+    private long nextThinkMs;
+
+    /// <summary>
+    /// 在 mob 原版 AI 已经锁定 Ghost 时，临时把 game.hero 指向该 Ghost
+    /// 没有目标的 mob 保持原版 AI，不因附近是否存在 Ghost 改变行为
+    /// </summary>
+    public void RunAsMobHero(Mob mob, Action body) => this.RunAsHero(this.ResolveMobHero(mob), body);
+
+    /// <summary>
+    /// 在指定 Hero 上下文里执行原版代码，结束后恢复全局 game.hero
+    /// 同时把 viewport 临时伪装成覆盖全图：
+    /// 某些 mob 需要判断相机距离
+    /// </summary>
+    public void RunAsHero(Hero? hero, Action body)
     {
-        /// <summary>
-        /// 目标巡检间隔
-        /// </summary>
-        private const long THINK_INTERVAL_MS = 100;
-
-        private static readonly ILogger Logger = Log.ForContext("SourceContext", "ServerAggroManager");
-
-        private readonly ServerTeamManager teams;
-        private readonly ServerEntityRegistry mobs;
-        private readonly Func<Game?> gameProvider;
-
-        private long nextThinkMs;
-
-        /// <summary>
-        /// 绑定 Ghost 队伍、mob 注册表与游戏实例
-        /// </summary>
-        public ServerAggroManager(
-            ServerTeamManager teams,
-            ServerEntityRegistry mobs,
-            Func<Game?> gameProvider)
+        var game = this.gameProvider();
+        if (game == null)
         {
-            this.teams = teams;
-            this.mobs = mobs;
-            this.gameProvider = gameProvider;
+            body();
+            return;
         }
 
-        /// <summary>
-        /// 在 mob 原版 AI 已经锁定 Ghost 时，临时把 game.hero 指向该 Ghost
-        /// 没有目标的 mob 保持原版 AI，不因附近是否存在 Ghost 改变行为
-        /// </summary>
-        public void RunAsMobHero(Mob mob, Action body) => RunAsHero(ResolveMobHero(mob), body);
-
-        /// <summary>
-        /// 在指定 Hero 上下文里执行原版代码，结束后恢复全局 game.hero
-        /// 同时把 viewport 临时伪装成覆盖全图：
-        /// 某些 mob 需要判断相机距离
-        /// </summary>
-        public void RunAsHero(Hero? hero, Action body)
+        using (HeroContextScope.Enter(game, hero))
         {
-            var game = gameProvider();
-            if (game == null)
+            try
             {
                 body();
-                return;
             }
-
-            using (HeroContextScope.Enter(game, hero))
+            catch (Exception ex)
             {
-                try
-                {
-                    body();
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warning(ex,
-                        "Mob hero-context failed: hero={Hero}", hero?.type);
-                }
+                Logger.Warning(ex,
+                    "Mob hero-context failed: hero={Hero}", hero?.type);
             }
         }
+    }
 
-        /// <summary>
-        /// 当前 mob 原版 AI 已经选中的 Ghost
-        /// </summary>
-        public Hero? ResolveMobHero(Mob mob)
+    /// <summary>
+    /// 当前 mob 原版 AI 已经选中的 Ghost
+    /// </summary>
+    public Hero? ResolveMobHero(Mob mob)
+    {
+        if (mob == null || mob.destroyed)
         {
-            if (mob == null || mob.destroyed)
-                return null;
-
-            var target = mob.aTarget as Hero ?? mob.nemesisTarget as Hero;
-            return IsUsableGhostHero(target) ? target : null;
+            return null;
         }
 
-        /// <summary>
-        /// 造成这次攻击的 Ghost
-        /// </summary>
-        public Hero? ResolveAttackerHero(AttackData? atk)
+        var target = mob.aTarget as Hero ?? mob.nemesisTarget as Hero;
+        return this.IsUsableGhostHero(target) ? target : null;
+    }
+
+    /// <summary>
+    /// 造成这次攻击的 Ghost
+    /// </summary>
+    public Hero? ResolveAttackerHero(AttackData? atk)
+    {
+        var entity = atk?.carrier ?? atk?.source;
+        return entity is Hero hero && this.IsUsableGhostHero(hero)
+            ? hero
+            : null;
+    }
+
+    /// <summary>
+    /// 清理跨关卡/死亡/断线的 Ghost 目标
+    /// </summary>
+    public void Tick(long nowMs)
+    {
+        if (nowMs < this.nextThinkMs)
         {
-            var entity = atk?.carrier ?? atk?.source;
-            return entity is Hero hero && IsUsableGhostHero(hero)
-                ? hero
-                : null;
+            return;
         }
 
-        /// <summary>
-        /// 清理跨关卡/死亡/断线的 Ghost 目标
-        /// </summary>
-        public void Tick(long nowMs)
+        this.nextThinkMs = nowMs + THINK_INTERVAL_MS;
+
+        var game = this.gameProvider();
+        if (game == null || this.teams.Combatants.Count == 0)
         {
-            if (nowMs < nextThinkMs)
-                return;
+            return;
+        }
 
-            nextThinkMs = nowMs + THINK_INTERVAL_MS;
-
-            var game = gameProvider();
-            if (game == null || teams.Combatants.Count == 0)
-                return;
-
-            foreach (var entry in mobs.Entries)
+        foreach (var entry in this.mobs.Entries)
+        {
+            if (entry.Native is Mob mob)
             {
-                if (entry.Native is Mob mob)
-                    ValidateCurrentTarget(mob, game);
+                this.ValidateCurrentTarget(mob, game);
             }
         }
+    }
 
-        /// <summary>
-        /// 原版 updateThreat 之后调用，只做目标校验，不改变正常选择
-        /// </summary>
-        public void OnThreatUpdated(Mob mob)
+    /// <summary>
+    /// 原版 updateThreat 之后调用，只做目标校验，不改变正常选择
+    /// </summary>
+    public void OnThreatUpdated(Mob mob)
+    {
+        var game = this.gameProvider();
+        if (game == null || this.teams.Combatants.Count == 0)
         {
-            var game = gameProvider();
-            if (game == null || teams.Combatants.Count == 0)
-                return;
-
-            ValidateCurrentTarget(mob, game);
+            return;
         }
 
-        /// <summary>
-        /// 阻止 mob 硬锁定服务端假人；Ghost 目标只校验有效性
-        /// </summary>
-        public bool TryRedirectNemesis(
-            Mob mob, Entity? requested, out Entity? target)
+        this.ValidateCurrentTarget(mob, game);
+    }
+
+    /// <summary>
+    /// 阻止 mob 硬锁定服务端假人；Ghost 目标只校验有效性
+    /// </summary>
+    public bool TryRedirectNemesis(
+        Mob mob, Entity? requested, out Entity? target)
+    {
+        target = requested;
+
+        if (requested == null)
         {
-            target = requested;
-
-            if (requested == null)
-                return false;
-
-            // 先按 Ghost 校验, mob 上下文里 game.hero 会被临时指向 Ghost，
-            // 不能再把这个 Ghost 当成服务端假人改掉
-            if (teams.TryGet(requested, out var combatant))
-            {
-                if (IsValidTarget(mob, combatant))
-                    return false;
-
-                target = null;
-                return true;
-            }
-
-            var game = gameProvider();
-            if (game?.hero != null && ReferenceEquals(requested, game.hero))
-            {
-                target = null;
-                return true;
-            }
-
             return false;
         }
 
-        /// <summary>
-        /// 校验 mob 当前的 aTarget / nemesisTarget
-        /// 清理跨关卡、死亡、断线的 Ghost，以及服务端假人
-        /// </summary>
-        private void ValidateCurrentTarget(Mob mob, Game game)
+        // 先按 Ghost 校验, mob 上下文里 game.hero 会被临时指向 Ghost，
+        // 不能再把这个 Ghost 当成服务端假人改掉
+        if (this.teams.TryGet(requested, out var combatant))
         {
-            if (mob == null || mob.destroyed || mob.life <= 0)
-                return;
-
-            if (mob._level == null || !ReferenceEquals(mob._team, mob._level.teamMob))
-                return;
-
-            ValidateNemesis(mob, game);
-
-            var target = mob.aTarget;
-            if (target == null)
-                return;
-
-            if (teams.TryGet(target, out var combatant))
+            if (IsValidTarget(mob, combatant))
             {
-                if (!IsValidTarget(mob, combatant))
-                    ClearTarget(mob, target);
-
-                return;
+                return false;
             }
 
-            // 服务端假人没有玩家控制，不允许成为目标
-            if (game.hero != null && ReferenceEquals(target, game.hero))
+            target = null;
+            return true;
+        }
+
+        var game = this.gameProvider();
+        if (game?.hero != null && ReferenceEquals(requested, game.hero))
+        {
+            target = null;
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// 校验 mob 当前的 aTarget / nemesisTarget
+    /// 清理跨关卡、死亡、断线的 Ghost，以及服务端假人
+    /// </summary>
+    private void ValidateCurrentTarget(Mob mob, Game game)
+    {
+        if (mob == null || mob.destroyed || mob.life <= 0)
+        {
+            return;
+        }
+
+        if (mob._level == null || !ReferenceEquals(mob._team, mob._level.teamMob))
+        {
+            return;
+        }
+
+        this.ValidateNemesis(mob, game);
+
+        var target = mob.aTarget;
+        if (target == null)
+        {
+            return;
+        }
+
+        if (this.teams.TryGet(target, out var combatant))
+        {
+            if (!IsValidTarget(mob, combatant))
+            {
                 ClearTarget(mob, target);
-        }
-
-        /// <summary>
-        /// 单独校验 nemesisTarget
-        /// Ghost 在 mob 上下文里可能就是 game.hero，不能误当成假人清掉
-        /// </summary>
-        private void ValidateNemesis(Mob mob, Game game)
-        {
-            var nemesis = mob.nemesisTarget;
-            if (nemesis == null)
-                return;
-
-            // Ghost 在 mob 上下文里可能就是 game.hero
-            // 必须先用 Ghost 身份校验
-            if (teams.TryGet(nemesis, out var combatant))
-            {
-                if (!IsValidTarget(mob, combatant))
-                    mob.clearNemesisTarget();
-
-                return;
             }
 
-            if (game.hero != null && ReferenceEquals(nemesis, game.hero))
-                mob.clearNemesisTarget();
+            return;
         }
 
-        /// <summary>
-        /// Hero 是否为当前可参与战斗的 Ghost
-        /// </summary>
-        private bool IsUsableGhostHero(Hero? hero)
-            => hero != null
-                && !hero.destroyed
-                && teams.TryGet(hero, out var combatant)
-                && IsValidGhost(combatant);
-
-        /// <summary>
-        /// Ghost 是否可作为该 mob 的合法目标（存活、同关卡）
-        /// </summary>
-        private static bool IsValidTarget(Mob mob, ServerHeroCombatView combatant)
-            => IsValidGhost(combatant)
-                && ReferenceEquals(combatant.Level, mob._level);
-
-        /// <summary>
-        /// Ghost 是否处于可被 mob 选中的战斗状态
-        /// </summary>
-        private static bool IsValidGhost(ServerHeroCombatView combatant)
-            => combatant != null
-                && combatant.CombatEnabled
-                && !combatant.IsDead
-                && combatant.Life > 0
-                && combatant.Entity is { destroyed: false };
-
-        /// <summary>
-        /// 清除对目标的仇恨并解除 mob 的攻击目标
-        /// </summary>
-        private static void ClearTarget(Mob mob, Entity target)
+        // 服务端假人没有玩家控制，不允许成为目标
+        if (game.hero != null && ReferenceEquals(target, game.hero))
         {
-            mob.removeAllThreatFor(target);
-            mob.setAttackTarget(null);
+            ClearTarget(mob, target);
         }
+    }
+
+    /// <summary>
+    /// 单独校验 nemesisTarget
+    /// Ghost 在 mob 上下文里可能就是 game.hero，不能误当成假人清掉
+    /// </summary>
+    private void ValidateNemesis(Mob mob, Game game)
+    {
+        var nemesis = mob.nemesisTarget;
+        if (nemesis == null)
+        {
+            return;
+        }
+
+        // Ghost 在 mob 上下文里可能就是 game.hero
+        // 必须先用 Ghost 身份校验
+        if (this.teams.TryGet(nemesis, out var combatant))
+        {
+            if (!IsValidTarget(mob, combatant))
+            {
+                mob.clearNemesisTarget();
+            }
+
+            return;
+        }
+
+        if (game.hero != null && ReferenceEquals(nemesis, game.hero))
+        {
+            mob.clearNemesisTarget();
+        }
+    }
+
+    /// <summary>
+    /// Hero 是否为当前可参与战斗的 Ghost
+    /// </summary>
+    private bool IsUsableGhostHero(Hero? hero)
+        => hero != null
+            && !hero.destroyed
+            && this.teams.TryGet(hero, out var combatant)
+            && IsValidGhost(combatant);
+
+    /// <summary>
+    /// Ghost 是否可作为该 mob 的合法目标（存活、同关卡）
+    /// </summary>
+    private static bool IsValidTarget(Mob mob, ServerHeroCombatView combatant)
+        => IsValidGhost(combatant)
+            && ReferenceEquals(combatant.Level, mob._level);
+
+    /// <summary>
+    /// Ghost 是否处于可被 mob 选中的战斗状态
+    /// </summary>
+    private static bool IsValidGhost(ServerHeroCombatView combatant)
+        => combatant != null
+            && combatant.CombatEnabled
+            && !combatant.IsDead
+            && combatant.Life > 0
+            && combatant.Entity is { destroyed: false };
+
+    /// <summary>
+    /// 清除对目标的仇恨并解除 mob 的攻击目标
+    /// </summary>
+    private static void ClearTarget(Mob mob, Entity target)
+    {
+        mob.removeAllThreatFor(target);
+        mob.setAttackTarget(null);
     }
 }

@@ -1,26 +1,26 @@
+namespace DeadCellsMultiplayerX.Engine.Adapters.Heroes;
+
 using dc.en.hero;
 using dc.pr;
 using DeadCellsMultiplayerX.Contracts.Entities;
-namespace DeadCellsMultiplayerX.Engine.Adapters.Heroes
+
+/// <summary>
+/// 服务端/客户端 Ghost 实体的公共只读契约。
+/// </summary>
+internal interface IGhostEntity : IDisposable
 {
-    /// <summary>
-    /// 服务端/客户端 Ghost 实体的公共只读契约。
-    /// </summary>
-    internal interface IGhostEntity : IDisposable
-    {
-        string OwnerGuid { get; }
+    public string OwnerGuid { get; }
 
-        Beheaded Hero { get; }
+    public Beheaded Hero { get; }
 
-        bool IsAlive { get; }
+    public bool IsAlive { get; }
 
-        LevelKey LevelKey { get; }
+    public LevelKey LevelKey { get; }
 
-        bool MatchesLevel(Level? level);
+    public bool MatchesLevel(Level? level);
 
-        void SetTransform(
-            int cx, int cy, double xr, double yr, int dir, double dx, double dy);
+    public void SetTransform(
+        int cx, int cy, double xr, double yr, int dir, double dx, double dy);
 
-        void SetTiers(int brutality, int survival, int tactic);
-    }
+    public void SetTiers(int brutality, int survival, int tactic);
 }

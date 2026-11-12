@@ -1,39 +1,32 @@
+namespace DeadCellsMultiplayerX.Client.UI;
+
 using dc.pr;
+using DeadCellsMultiplayerX.Client.Session;
 using DeadCellsMultiplayerX.Client.UI.Common;
 using DeadCellsMultiplayerX.Client.UI.Lobby;
-using DeadCellsMultiplayerX.Client.Session;
 
-namespace DeadCellsMultiplayerX.Client.UI
+internal sealed class LobbyMenuX : UIProcess
 {
-    internal class LobbyMenuX : UIProcess
+    private readonly LobbyUI lobby;
+
+    public LobbyMenuX(ClientRuntime client, TitleScreen titleScreen) : base(titleScreen, dc.Const.Class.ROOT_DP_MENU)
     {
-        private readonly LobbyUI lobby;
+        this.lobby = new LobbyUI(client, titleScreen, this);
+        this.lobby.OnCloseRequested += this.OnLobbyCloseRequested;
+    }
 
-        public LobbyMenuX(ClientRuntime client, TitleScreen titleScreen) : base(titleScreen, dc.Const.Class.ROOT_DP_MENU)
-        {
-            lobby = new LobbyUI(client, titleScreen, this);
-            lobby.OnCloseRequested += OnLobbyCloseRequested;
-        }
+    public override void update() => base.update();
 
-        public override void update()
-        {
-            base.update();
-        }
+    private void OnLobbyCloseRequested() => this.Dispose();
 
-        private void OnLobbyCloseRequested()
+    protected override void MyDispose()
+    {
+        if (this.lobby != null)
         {
-            Dispose();
+            this.lobby.OnCloseRequested -= this.OnLobbyCloseRequested;
+            this.lobby.Dispose();
         }
-
-        protected override void MyDispose()
-        {
-            if (lobby != null)
-            {
-                lobby.OnCloseRequested -= OnLobbyCloseRequested;
-                lobby.Dispose();
-            }
-            TitleScreen.Class.ME?.unblur();
-            TitleScreen.Class.ME?.controller.manualLock = false;
-        }
+        TitleScreen.Class.ME?.unblur();
+        TitleScreen.Class.ME?.controller.manualLock = false;
     }
 }

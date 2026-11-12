@@ -1,13 +1,13 @@
-using DeadCellsMultiplayerX.Foundation.Lifecycle;
-namespace DeadCellsMultiplayerX.Client.Session
-{
-    public abstract class ClientBase : DisposableEventReceiver
-    {
+namespace DeadCellsMultiplayerX.Client.Session;
 
-        protected override void MyDispose()
-        {
-            Logger.Information("Disposing client...");
-            base.MyDispose();
-        }
+using DeadCellsMultiplayerX.Foundation.Lifecycle;
+
+public abstract class ClientBase : DisposableEventReceiver
+{
+
+    protected override void MyDispose()
+    {
+        this.Logger.Information("Disposing client...");
+        base.MyDispose();
     }
 }

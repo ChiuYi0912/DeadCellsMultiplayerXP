@@ -1,10 +1,10 @@
+namespace DeadCellsMultiplayerX.Server.Integration.Events;
+
 using dc.en;
 using ModCore.Events;
-namespace DeadCellsMultiplayerX.Server.Integration.Events
+
+[Event]
+public interface IOnHeroInitDone
 {
-    [Event]
-    public interface IOnHeroInitDone
-    {
-        void OnHeroInitDone(Hero hero);
-    }
+    public void OnHeroInitDone(Hero hero);
 }

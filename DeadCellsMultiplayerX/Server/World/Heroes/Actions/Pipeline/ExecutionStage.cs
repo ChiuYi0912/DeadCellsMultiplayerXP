@@ -1,46 +1,41 @@
+namespace DeadCellsMultiplayerX.Server.World.Heroes.Actions.Pipeline;
+
 using DeadCellsMultiplayerX.Contracts.Actions;
 using DeadCellsMultiplayerX.Server.World.Heroes.Actions.Execution;
-namespace DeadCellsMultiplayerX.Server.World.Heroes.Actions.Pipeline
+
+internal sealed class ExecutionStage(
+    ActionExecutor executor,
+    MobRewind rewind) : IActionStage
 {
-    internal sealed class ExecutionStage : IActionStage
+    private readonly ActionExecutor executor = executor;
+    private readonly MobRewind rewind = rewind;
+
+    public StageResult Process(ActionContext context)
     {
-        private readonly ActionExecutor executor;
-        private readonly MobRewind rewind;
+        var request = context.Request!;
 
-        public ExecutionStage(
-            ActionExecutor executor,
-            MobRewind rewind)
+        IDisposable? scope = request.Kind == HeroActionKind.Weapon
+            ? this.rewind.Begin(
+                context.Level!,
+                request.ClientTimeMs,
+                context.ServerTimeMs)
+            : null;
+
+        try
         {
-            this.executor = executor;
-            this.rewind = rewind;
+            return this.executor.TryExecute(
+                    context.Ghost!, request, context.Ratio)
+                ? StageResult.Continue
+                : StageResult.Reject(Rejection.ExecutionRejected);
         }
-
-        public StageResult Process(ActionContext context)
+        finally
         {
-            var request = context.Request!;
-
-            IDisposable? scope = request.Kind == HeroActionKind.Weapon
-                ? rewind.Begin(
-                    context.Level!,
-                    request.ClientTimeMs,
-                    context.ServerTimeMs)
-                : null;
-
-            try
-            {
-                return executor.TryExecute(
-                        context.Ghost!, request, context.Ratio)
-                    ? StageResult.Continue
-                    : StageResult.Reject(Rejection.ExecutionRejected);
-            }
-            finally
-            {
-                scope?.Dispose();
-            }
+            scope?.Dispose();
         }
     }
-
-    /// <summary>
-    /// 构建并记录广播事件
-    /// </summary>
 }
+
+/// <summary>
+/// 构建并记录广播事件
+/// </summary>
+

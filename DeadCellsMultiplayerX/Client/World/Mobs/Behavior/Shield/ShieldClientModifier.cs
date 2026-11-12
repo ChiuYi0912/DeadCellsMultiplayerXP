@@ -1,26 +1,28 @@
+namespace DeadCellsMultiplayerX.Client.World.Mobs.Behavior.Shield;
+
+using dc.hl.types;
 using DeadCellsMultiplayerX.Engine.Adapters.Mobs.Behavior;
 using Serilog;
 using GameShield = dc.en.mob.Shield;
-using dc.hl.types;
-namespace DeadCellsMultiplayerX.Client.World.Mobs.Behavior.Shield
+
+internal sealed class ShieldClientModifier : MobModifierBase<GameShield>
 {
-    internal sealed class ShieldClientModifier : MobModifierBase<GameShield>
+    private static readonly ILogger Logger = Log.ForContext("SourceContext", "ShieldClientModifier");
+
+    /// <inheritdoc />
+    public override void InitHook(IMobHookRegistry hooks)
     {
-        private static readonly ILogger Logger = Log.ForContext("SourceContext", "ShieldClientModifier");
+        hooks.OnInitSkills(this.OnInitSkills);
 
-        /// <inheritdoc />
-        public override void InitHook(IMobHookRegistry hooks)
+        if (hooks is IClientMobHooks clientHooks)
         {
-            hooks.OnInitSkills(OnInitSkills);
-
-            if (hooks is IClientMobHooks clientHooks)
-                clientHooks.OnClientEventHandled(_ => false);
+            clientHooks.OnClientEventHandled(_ => false);
         }
+    }
 
-        private void OnInitSkills(
-            MobHookContext context, ArrayObj oldSkills, ArrayObj skills)
-        {
+    private void OnInitSkills(
+        MobHookContext context, ArrayObj oldSkills, ArrayObj skills)
+    {
 
-        }
     }
 }

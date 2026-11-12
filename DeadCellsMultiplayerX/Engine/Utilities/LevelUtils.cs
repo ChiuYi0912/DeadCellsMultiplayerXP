@@ -1,84 +1,98 @@
+namespace DeadCellsMultiplayerX.Engine.Utilities;
+
 using dc.pr;
 using DeadCellsMultiplayerX.Contracts.Entities;
-namespace DeadCellsMultiplayerX.Engine.Utilities
+
+internal static class LevelUtils
 {
-    internal static class LevelUtils
+    public static int GetSubLevelIndex(this Level lvl, Game? game = null)
     {
-        public static int GetSubLevelIndex(this Level lvl, Game? game = null)
+        game ??= lvl.game;
+
+        var subLevelId = 0;
+
+        for (var i = 0; i < game.subLevels.length; i++)
         {
-            game ??= lvl.game;
-
-            int subLevelId = 0;
-
-            for (int i = 0; i < game.subLevels.length; i++)
+            if ((Level)game.subLevels.getDyn(i) == lvl)
             {
-                if ((Level)game.subLevels.getDyn(i) == lvl)
-                {
-                    subLevelId = i;
-                }
+                subLevelId = i;
             }
-            return subLevelId;
+        }
+        return subLevelId;
+    }
+
+    /// <summary>
+    /// Stable key for a level instance.
+    /// </summary>
+    public static LevelKey KeyOf(Level? level)
+        => level == null
+            ? default
+            : new LevelKey(
+                level.map?.id?.ToString() ?? string.Empty,
+                level.GetSubLevelIndex());
+
+    /// <summary>
+    /// 判断 Level 是否匹配稳定 key。
+    /// </summary>
+    public static bool Matches(Level? level, LevelKey key)
+    {
+        if (level == null)
+        {
+            return false;
         }
 
-        /// <summary>
-        /// Stable key for a level instance.
-        /// </summary>
-        public static LevelKey KeyOf(Level? level)
-            => level == null
-                ? default
-                : new LevelKey(
-                    level.map?.id?.ToString() ?? string.Empty,
-                    level.GetSubLevelIndex());
+        return (level.map?.id?.ToString() ?? string.Empty) == key.LevelId
+            && level.GetSubLevelIndex() == key.SubLevelIndex;
+    }
 
-        /// <summary>
-        /// 判断 Level 是否匹配稳定 key。
-        /// </summary>
-        public static bool Matches(Level? level, LevelKey key)
+    /// <summary>
+    /// 按 level id 和子关卡索引查找本地 Level
+    /// </summary>
+    public static Level? ResolveLevel(
+        Game? game, string levelId, int subLevelIndex)
+    {
+        if (game == null)
         {
-            if (level == null) return false;
-
-            return (level.map?.id?.ToString() ?? string.Empty) == key.LevelId
-                && level.GetSubLevelIndex() == key.SubLevelIndex;
-        }
-
-        /// <summary>
-        /// 按 level id 和子关卡索引查找本地 Level
-        /// </summary>
-        public static Level? ResolveLevel(
-            Game? game, string levelId, int subLevelIndex)
-        {
-            if (game == null) return null;
-
-            var current = game.curLevel;
-            if (Matches(current, levelId, subLevelIndex))
-                return current;
-
-            var subLevels = game.subLevels;
-            if (subLevels == null) return null;
-
-            for (int i = 0; i < subLevels.length; i++)
-            {
-                if (subLevels.getDyn(i) is Level level
-                    && Matches(level, levelId, subLevelIndex))
-                {
-                    return level;
-                }
-            }
-
             return null;
         }
 
-        /// <summary>
-        /// 判断 Level 是否匹配 level id 和子关卡索引
-        /// </summary>
-        public static bool Matches(
-            Level? level, string levelId, int subLevelIndex)
+        var current = game.curLevel;
+        if (Matches(current, levelId, subLevelIndex))
         {
-            if (level == null) return false;
-
-            return (level.map?.id?.ToString() ?? string.Empty) == levelId
-                && level.GetSubLevelIndex() == subLevelIndex;
+            return current;
         }
 
+        var subLevels = game.subLevels;
+        if (subLevels == null)
+        {
+            return null;
+        }
+
+        for (var i = 0; i < subLevels.length; i++)
+        {
+            if (subLevels.getDyn(i) is Level level
+                && Matches(level, levelId, subLevelIndex))
+            {
+                return level;
+            }
+        }
+
+        return null;
     }
+
+    /// <summary>
+    /// 判断 Level 是否匹配 level id 和子关卡索引
+    /// </summary>
+    public static bool Matches(
+        Level? level, string levelId, int subLevelIndex)
+    {
+        if (level == null)
+        {
+            return false;
+        }
+
+        return (level.map?.id?.ToString() ?? string.Empty) == levelId
+            && level.GetSubLevelIndex() == subLevelIndex;
+    }
+
 }

@@ -1,7 +1,7 @@
+namespace DeadCellsMultiplayerX.Composition;
+
 using System.Reflection;
 using System.Runtime.CompilerServices;
-
-namespace DeadCellsMultiplayerX.Composition;
 
 internal static class ModuleInit
 {

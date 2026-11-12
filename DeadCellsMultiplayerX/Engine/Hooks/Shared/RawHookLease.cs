@@ -1,36 +1,31 @@
+namespace DeadCellsMultiplayerX.Engine.Hooks.Shared;
+
 using ModCore.Modules;
 
-namespace DeadCellsMultiplayerX.Engine.Hooks.Shared
+/// <summary>
+/// Hashlink 原生 Hook 的生命周期句柄。
+/// 持有 <see cref="HashlinkHooks.HookHandle"/>，Dispose 时禁用。
+/// </summary>
+internal sealed class RawHookLease(HashlinkHooks.HookHandle handle) : IDisposable
 {
+    private HashlinkHooks.HookHandle? handle = handle;
+
     /// <summary>
-    /// Hashlink 原生 Hook 的生命周期句柄。
-    /// 持有 <see cref="HashlinkHooks.HookHandle"/>，Dispose 时禁用。
+    /// 是否已经禁用。
     /// </summary>
-    internal sealed class RawHookLease : IDisposable
+    public bool IsDisposed { get; private set; }
+
+    /// <inheritdoc />
+    public void Dispose()
     {
-        private HashlinkHooks.HookHandle? handle;
-        private bool disposed;
-
-        public RawHookLease(HashlinkHooks.HookHandle handle)
+        if (this.IsDisposed)
         {
-            this.handle = handle;
+            return;
         }
 
-        /// <summary>
-        /// 是否已经禁用。
-        /// </summary>
-        public bool IsDisposed => disposed;
-
-        /// <inheritdoc />
-        public void Dispose()
-        {
-            if (disposed)
-                return;
-
-            disposed = true;
-            HashlinkHooks.HookHandle? current = handle;
-            handle = null;
-            current?.Disable();
-        }
+        this.IsDisposed = true;
+        HashlinkHooks.HookHandle? current = this.handle;
+        this.handle = null;
+        current?.Disable();
     }
 }

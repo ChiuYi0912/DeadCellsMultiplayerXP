@@ -11,7 +11,7 @@
     <AutoInstallMod Condition="'$(Configuration)' == 'Debug'">true</AutoInstallMod>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Platform>x64</Platform>
-    <NoWarn>$(NoWarn);MSB3270</NoWarn>
+    <NoWarn>$(NoWarn);MSB3270;NBMsgPack100;NBMsgPack102;NBMsgPack103;NBMsgPack104</NoWarn>
     <GenerateSinglePakFile>true</GenerateSinglePakFile>
      <Features>$(Features);runtime-async=on</Features>
   </PropertyGroup>

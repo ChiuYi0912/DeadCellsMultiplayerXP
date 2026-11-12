@@ -1,9 +1,9 @@
+namespace DeadCellsMultiplayerX.Server.Integration.Events;
+
 using ModCore.Events;
-namespace DeadCellsMultiplayerX.Server.Integration.Events
+
+[Event]
+internal interface IOnServerEnterNewLevel
 {
-    [Event]
-    internal interface IOnServerEnterNewLevel
-    {
-        public void OnServerEnterNewLevel();
-    }
+    public void OnServerEnterNewLevel();
 }

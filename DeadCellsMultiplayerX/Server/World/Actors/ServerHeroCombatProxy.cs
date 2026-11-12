@@ -1,155 +1,180 @@
+namespace DeadCellsMultiplayerX.Server.World.Actors;
+
 using dc;
 using dc.en.hero;
 using dc.pr;
 using DeadCellsMultiplayerX.Contracts.Entities;
 using DeadCellsMultiplayerX.Engine.Adapters.Heroes;
-using Serilog;
-
 using DeadCellsMultiplayerX.Engine.Adapters.Snapshots;
 using DeadCellsMultiplayerX.Engine.Utilities;
-namespace DeadCellsMultiplayerX.Server.World.Actors
+using Serilog;
+
+/// <summary>
+/// 服务端 Ghost 代表远端玩家的权威战斗实体
+/// 不参与真实扣血，只负责队伍、目标与动作重放
+/// </summary>
+internal sealed class ServerHeroCombatProxy : IGhostEntity
 {
-    /// <summary>
-    /// 服务端 Ghost 代表远端玩家的权威战斗实体
-    /// 不参与真实扣血，只负责队伍、目标与动作重放
-    /// </summary>
-    internal sealed class ServerHeroCombatProxy : IGhostEntity
+    private const int SERVER_LIFE = 1_000_000;
+
+    private static readonly ILogger Logger = Log.ForContext("SourceContext", "ServerHeroCombatProxy");
+
+    private bool disposed;
+
+    private ServerHeroCombatProxy(Beheaded hero, string ownerGuid)
     {
-        private const int SERVER_LIFE = 1_000_000;
+        this.Hero = hero;
+        this.OwnerGuid = ownerGuid;
+        this.Actions = new ServerHeroActionRuntime(hero, ownerGuid);
+        this.LevelKey = LevelUtils.KeyOf(hero._level);
+    }
 
-        private static readonly ILogger Logger = Log.ForContext("SourceContext", "ServerHeroCombatProxy");
+    public Beheaded Hero { get; }
 
-        private bool disposed;
+    public string OwnerGuid { get; }
 
-        private ServerHeroCombatProxy(Beheaded hero, string ownerGuid)
+    public ServerHeroActionRuntime Actions { get; }
+
+    public bool IsAlive => this.Hero != null && !this.Hero.destroyed;
+
+    public LevelKey LevelKey { get; private set; }
+
+    public void SetServerVitals()
+    {
+        this.Hero.maxLife = SERVER_LIFE;
+        this.Hero.life = SERVER_LIFE;
+    }
+
+    /// <summary>
+    /// 显式保证 Ghost 在 teamHero.members 中。
+    /// </summary>
+    public void EnsureTeamMember()
+    {
+        if (this.Hero._team == null)
         {
-            Hero = hero;
-            OwnerGuid = ownerGuid;
-            Actions = new ServerHeroActionRuntime(hero, ownerGuid);
-            LevelKey = LevelUtils.KeyOf(hero._level);
+            return;
         }
 
-        public Beheaded Hero { get; }
-
-        public string OwnerGuid { get; }
-
-        public ServerHeroActionRuntime Actions { get; }
-
-        public bool IsAlive => Hero != null && !Hero.destroyed;
-
-        public LevelKey LevelKey { get; private set; }
-
-        public void SetServerVitals()
+        var members = this.Hero._team.members;
+        if (members == null)
         {
-            Hero.maxLife = SERVER_LIFE;
-            Hero.life = SERVER_LIFE;
+            return;
         }
 
-        /// <summary>
-        /// 显式保证 Ghost 在 teamHero.members 中。
-        /// </summary>
-        public void EnsureTeamMember()
+        for (var i = 0; i < members.length; i++)
         {
-            if (Hero._team == null) return;
-
-            var members = Hero._team.members;
-            if (members == null) return;
-
-            for (int i = 0; i < members.length; i++)
+            if (ReferenceEquals(
+                    AffectCodec.ToObject<Entity>(members.getDyn(i)), this.Hero))
             {
-                if (ReferenceEquals(
-                        AffectCodec.ToObject<Entity>(members.getDyn(i)), Hero))
-                    return;
+                return;
             }
-
-            Hero._team.addMember(Hero);
         }
 
-        public void ExcludeFromSave()
+        this.Hero._team.addMember(this.Hero);
+    }
+
+    public void ExcludeFromSave()
+    {
+        var level = this.Hero._level;
+        level?.savedEntities?.remove(this.Hero);
+    }
+
+    /// <summary>
+    /// 控制服务端 Ghost 是否加入 teamHero 并成为 mob 的目标
+    /// </summary>
+    public void SetCombatEnabled(bool enabled)
+    {
+        if (this.disposed || this.Hero.destroyed)
         {
-            var level = Hero._level;
-            level?.savedEntities?.remove(Hero);
+            return;
         }
 
-        /// <summary>
-        /// 控制服务端 Ghost 是否加入 teamHero 并成为 mob 的目标
-        /// </summary>
-        public void SetCombatEnabled(bool enabled)
+        if (enabled)
         {
-            if (disposed || Hero.destroyed) return;
-
-            if (enabled)
-            {
-                Hero.ignoreDetection = false;
-                Hero.visible = true;
-                Hero.spr.visible = true;
-            }
-
-            if (Hero._targetable != enabled)
-                Hero.set_targetable(enabled);
-
-            if (enabled)
-                EnsureTeamMember();
+            this.Hero.ignoreDetection = false;
+            this.Hero.visible = true;
+            this.Hero.spr.visible = true;
         }
 
-        public void SyncLevel()
+        if (this.Hero._targetable != enabled)
         {
-            LevelKey = LevelUtils.KeyOf(Hero._level);
+            this.Hero.set_targetable(enabled);
         }
 
-        /// <summary>
-        /// 只有同一个 Level 实例且 levelId/subLevel 都一致才复用
-        /// 否则由 Actor 销毁重建
-        /// </summary>
-        public bool MatchesLevel(Level? level)
+        if (enabled)
         {
-            if (level == null || !IsAlive) return false;
-            if (!ReferenceEquals(Hero._level, level)) return false;
-            return LevelUtils.Matches(level, LevelKey);
+            this.EnsureTeamMember();
         }
+    }
 
-        public void SetTransform(
-            int cx, int cy, double xr, double yr, int dir, double dx, double dy)
+    public void SyncLevel() => this.LevelKey = LevelUtils.KeyOf(this.Hero._level);
+
+    /// <summary>
+    /// 只有同一个 Level 实例且 levelId/subLevel 都一致才复用
+    /// 否则由 Actor 销毁重建
+    /// </summary>
+    public bool MatchesLevel(Level? level)
+    {
+        if (level == null || !this.IsAlive)
         {
-            Hero.setPosCase(cx, cy, xr, yr);
-            Hero.dir = dir;
-            Hero.dx = dx;
-            Hero.dy = dy;
+            return false;
         }
 
-        public void SetTiers(int brutality, int survival, int tactic)
+        if (!ReferenceEquals(this.Hero._level, level))
         {
-            Hero.setBrutalityTier(brutality);
-            Hero.setSurvivalTier(survival);
-            Hero.setTacticTier(tactic);
+            return false;
         }
 
-        public void Dispose()
+        return LevelUtils.Matches(level, this.LevelKey);
+    }
+
+    public void SetTransform(
+        int cx, int cy, double xr, double yr, int dir, double dx, double dy)
+    {
+        this.Hero.setPosCase(cx, cy, xr, yr);
+        this.Hero.dir = dir;
+        this.Hero.dx = dx;
+        this.Hero.dy = dy;
+    }
+
+    public void SetTiers(int brutality, int survival, int tactic)
+    {
+        this.Hero.setBrutalityTier(brutality);
+        this.Hero.setSurvivalTier(survival);
+        this.Hero.setTacticTier(tactic);
+    }
+
+    public void Dispose()
+    {
+        if (this.disposed)
         {
-            if (disposed) return;
-            disposed = true;
-
-            Actions.Dispose();
-            HeroProxyFactory.DisposeServer(Hero);
-            Logger.Information("ServerHeroCombatProxy disposed: owner={Owner}", OwnerGuid);
+            return;
         }
 
-        public static ServerHeroCombatProxy? CreateServer(
-            Game? game,
-            Level? level,
-            string ownerGuid,
-            int cx = 0,
-            int cy = 0)
+        this.disposed = true;
+
+        this.Actions.Dispose();
+        HeroProxyFactory.DisposeServer(this.Hero);
+        Logger.Information("ServerHeroCombatProxy disposed: owner={Owner}", this.OwnerGuid);
+    }
+
+    public static ServerHeroCombatProxy? CreateServer(
+        Game? game,
+        Level? level,
+        string ownerGuid,
+        int cx = 0,
+        int cy = 0)
+    {
+        var hero = HeroProxyFactory.CreateServer(
+            game, level, cx, cy, SERVER_LIFE);
+        if (hero == null)
         {
-            var hero = HeroProxyFactory.CreateServer(
-                game, level, cx, cy, SERVER_LIFE);
-            if (hero == null)
-                return null;
-
-            var ghost = new ServerHeroCombatProxy(hero, ownerGuid);
-            ghost.SyncLevel();
-            ghost.ExcludeFromSave();
-            return ghost;
+            return null;
         }
+
+        var ghost = new ServerHeroCombatProxy(hero, ownerGuid);
+        ghost.SyncLevel();
+        ghost.ExcludeFromSave();
+        return ghost;
     }
 }

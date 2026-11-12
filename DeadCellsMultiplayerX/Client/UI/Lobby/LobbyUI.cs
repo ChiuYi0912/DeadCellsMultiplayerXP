@@ -1,146 +1,160 @@
+namespace DeadCellsMultiplayerX.Client.UI.Lobby;
+
 using dc.pr;
 using dc.ui;
+using DeadCellsMultiplayerX.Client.Session;
 using DeadCellsMultiplayerX.Client.Session.Guest;
 using DeadCellsMultiplayerX.Client.UI.Common;
 using DeadCellsMultiplayerX.Client.UI.Lobby.Controllers;
 using DeadCellsMultiplayerX.Client.UI.Lobby.Views;
-using DeadCellsMultiplayerX.Client.Session;
 
-namespace DeadCellsMultiplayerX.Client.UI.Lobby
+//入口
+internal sealed class LobbyUI : UIProcess
 {
-    //入口
-    internal class LobbyUI : UIProcess
+    private readonly ClientRuntime client;
+    private readonly LobbyStateMachine state = new();
+    public event Action? OnCloseRequested;
+
+    private readonly HostController host;
+    private readonly GuestController guest;
+    private readonly LobbyView view;
+
+    public LobbyState State => this.state.Current;
+    public LobbyContext Context { get; } = new();
+
+    private double latencyTimer;
+    private bool latencyInFlight;
+    private const double LATENCY_INTERVAL_SEC = 2.0;
+
+    public LobbyUI(ClientRuntime client, TitleScreen titleScreen, Process? parent = null)
+        : base(parent)
     {
-        private readonly ClientRuntime client;
-        private readonly LobbyContext ctx = new();
-        private readonly LobbyStateMachine state = new();
-        public event Action? OnCloseRequested;
+        this.client = client;
 
-        private readonly HostController host;
-        private readonly GuestController guest;
-        private readonly LobbyView view;
+        this.host = new HostController(client, this.Context, this.state);
+        this.guest = new GuestController(client, this.Context, this.state);
+        this.view = new LobbyView(this, titleScreen, this);
 
-        public LobbyState State => state.Current;
-        public LobbyContext Context => ctx;
+        this.state.OnChanged += this.OnStateChanged;
 
-        private double latencyTimer;
-        private bool latencyInFlight;
-        private const double LATENCY_INTERVAL_SEC = 2.0;
+        this.view.Show();
+        this.state.ForceGo(LobbyState.MainMenu);
 
-        public LobbyUI(ClientRuntime client, TitleScreen titleScreen, Process? parent = null)
-            : base(parent)
+        titleScreen.controller.manualLock = true;
+        titleScreen.blur(default, default);
+    }
+
+    public Task OnCreateRoom(string ip, int port) => this.host.CreateRoom(ip, port);
+    public Task OnJoinRoom(string ip, int port) => this.guest.JoinRoom(ip, port);
+    public Task OnStartGame() => this.host.StartGame();
+    public void OnToggleReady() => this.guest.ToggleReady();
+
+    public void OnRequestClose() => OnCloseRequested?.Invoke();
+
+    public void OnLeaveRoom()
+    {
+        if (this.Context.IsHost)
         {
-            this.client = client;
+            this.host.DestroyRoom();
+        }
+        else
+        {
+            this.guest.LeaveRoom();
+        }
+    }
 
-            host = new HostController(client, ctx, state);
-            guest = new GuestController(client, ctx, state);
-            view = new LobbyView(this, titleScreen, this);
-
-            state.OnChanged += OnStateChanged;
-
-            view.Show();
-            state.ForceGo(LobbyState.MainMenu);
-
-            titleScreen.controller.manualLock = true;
-            titleScreen.blur(default, default);
+    public override void update()
+    {
+        base.update();
+        if (this.IsDisposed)
+        {
+            return;
         }
 
-        public Task OnCreateRoom(string ip, int port) => host.CreateRoom(ip, port);
-        public Task OnJoinRoom(string ip, int port) => guest.JoinRoom(ip, port);
-        public Task OnStartGame() => host.StartGame();
-        public void OnToggleReady() => guest.ToggleReady();
+        this.RefreshContext();
+        this.TickLatency();
+        this.view.Refresh(this.Context, this.State);
+    }
 
-        public void OnRequestClose()
+    private void TickLatency()
+    {
+        if (this.latencyInFlight)
         {
-            OnCloseRequested?.Invoke();
+            return;
         }
 
-        public void OnLeaveRoom()
+        this.latencyTimer += 1.0 / 60.0;
+        if (this.latencyTimer < LATENCY_INTERVAL_SEC)
         {
-            if (ctx.IsHost) host.DestroyRoom();
-            else guest.LeaveRoom();
+            return;
         }
 
-        public override void update()
-        {
-            base.update();
-            if (IsDisposed) return;
+        this.latencyTimer = 0;
 
-            RefreshContext();
-            TickLatency();
-            view.Refresh(ctx, State);
+        var gc = this.client.CurrentGuestClient;
+        if (gc == null)
+        {
+            return;
         }
 
-        private void TickLatency()
+        this.latencyInFlight = true;
+        _ = this.PingAsync(gc);
+    }
+
+    private async Task PingAsync(GuestClient gc)
+    {
+        try
         {
-            if (latencyInFlight) return;
+            var ms = await gc.Ping();
+            this.Context.LatencyMs = ms;
+        }
+        finally
+        {
+            this.latencyInFlight = false;
+        }
+    }
 
-            latencyTimer += 1.0 / 60.0;
-            if (latencyTimer < LATENCY_INTERVAL_SEC) return;
-            latencyTimer = 0;
+    private void RefreshContext()
+    {
+        var lobby = this.Context.IsHost
+            ? this.client.CurrentHostClient?.LobbyInfo
+            : this.client.CurrentGuestClient?.LobbyInfo;
 
-            var gc = client.CurrentGuestClient;
-            if (gc == null) return;
+        this.Context.Lobby = lobby;
 
-            latencyInFlight = true;
-            _ = PingAsync(gc);
+        var gc = this.client.CurrentGuestClient;
+        if (gc == null || lobby == null)
+        {
+            this.Context.Me = null;
+            return;
         }
 
-        private async Task PingAsync(GuestClient gc)
-        {
-            try
-            {
-                long ms = await gc.Ping();
-                ctx.LatencyMs = ms;
-            }
-            finally
-            {
-                latencyInFlight = false;
-            }
-        }
+        this.Context.Me = lobby.Guests.TryGetValue(gc.Guid, out var me) ? me : null;
+    }
 
-        private void RefreshContext()
-        {
-            var lobby = ctx.IsHost
-                ? client.CurrentHostClient?.LobbyInfo
-                : client.CurrentGuestClient?.LobbyInfo;
+    private void OnStateChanged(LobbyState from, LobbyState to)
+    {
+        this.Logger.Information($"LobbyState: {from} -> {to}");
+        this.view.OnEnterState(to, this.Context);
+    }
 
-            ctx.Lobby = lobby;
+    public void OnGoCreateRoom() => this.state.ForceGo(LobbyState.CreateRoom);
+    public void OnGoJoinRoom() => this.state.ForceGo(LobbyState.JoinRoom);
+    public void OnBackToMain() => this.state.ForceGo(LobbyState.MainMenu);
+    public void OnReturnToMain()
+    {
+        this.Context.Reset();
+        this.state.ForceGo(LobbyState.MainMenu);
+    }
+    public void OnGotoDebug() => this.state.ForceGo(LobbyState.Debug);
 
-            var gc = client.CurrentGuestClient;
-            if (gc == null || lobby == null)
-            {
-                ctx.Me = null;
-                return;
-            }
+    protected override void MyDispose()
+    {
+        this.state.OnChanged -= this.OnStateChanged;
+        OnCloseRequested = null;
 
-            ctx.Me = lobby.Guests.TryGetValue(gc.Guid, out var me) ? me : null;
-        }
-
-        private void OnStateChanged(LobbyState from, LobbyState to)
-        {
-            Logger.Information($"LobbyState: {from} -> {to}");
-            view.OnEnterState(to, ctx);
-        }
-
-        public void OnGoCreateRoom() => state.ForceGo(LobbyState.CreateRoom);
-        public void OnGoJoinRoom() => state.ForceGo(LobbyState.JoinRoom);
-        public void OnBackToMain() => state.ForceGo(LobbyState.MainMenu);
-        public void OnReturnToMain()
-        {
-            ctx.Reset();
-            state.ForceGo(LobbyState.MainMenu);
-        }
-        public void OnGotoDebug() => state.ForceGo(LobbyState.Debug);
-
-        protected override void MyDispose()
-        {
-            state.OnChanged -= OnStateChanged;
-            OnCloseRequested = null;
-
-            host.Dispose();
-            guest.Dispose();
-            view.Dispose();
-        }
+        this.host.Dispose();
+        this.guest.Dispose();
+        this.view.Dispose();
     }
 }

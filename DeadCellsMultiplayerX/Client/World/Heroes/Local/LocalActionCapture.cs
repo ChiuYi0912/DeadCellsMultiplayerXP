@@ -1,45 +1,39 @@
+namespace DeadCellsMultiplayerX.Client.World.Heroes.Local;
+
 using DeadCellsMultiplayerX.Client.Integration.Hooks;
 using DeadCellsMultiplayerX.Client.Session.Guest;
 using DeadCellsMultiplayerX.Engine.Hooks.Client;
 using DeadCellsMultiplayerX.Engine.Hooks.Shared;
 
-namespace DeadCellsMultiplayerX.Client.World.Heroes.Local
+/// <summary>
+/// 本地动作捕获的组合根：持有 Hook 生命周期与三个协作者，
+/// 捕获/去重/发送逻辑分别在 LocalIntentRecorder / LocalActionDeduper / LocalActionSender。
+/// </summary>
+internal sealed class LocalActionCapture(
+    GuestClientSession session, IHeroActionSink actionSink) : IDisposable
 {
-    /// <summary>
-    /// 本地动作捕获的组合根：持有 Hook 生命周期与三个协作者，
-    /// 捕获/去重/发送逻辑分别在 LocalIntentRecorder / LocalActionDeduper / LocalActionSender。
-    /// </summary>
-    internal sealed class LocalActionCapture : IDisposable
+    private readonly LocalIntentRecorder recorder = new LocalIntentRecorder(
+            session,
+            new LocalActionSender(actionSink),
+            new LocalActionDeduper());
+    private HookGroup? hookGroup;
+
+    public void Init()
     {
-        private readonly LocalIntentRecorder recorder;
-        private HookGroup? hookGroup;
+        this.hookGroup = new HookGroup();
+        this.hookGroup.Add(ClientActionHookBinding.Install(this.recorder));
+    }
 
-        public LocalActionCapture(
-            GuestClientSession session, IHeroActionSink actionSink)
-        {
-            recorder = new LocalIntentRecorder(
-                session,
-                new LocalActionSender(actionSink),
-                new LocalActionDeduper());
-        }
+    internal void DebugCastSkill(string itemId, int slot)
+        => this.recorder.DebugCastSkill(itemId, slot);
 
-        public void Init()
-        {
-            hookGroup = new HookGroup();
-            hookGroup.Add(ClientActionHookBinding.Install(recorder));
-        }
+    internal void DebugUseWeapon(string itemId, int slot, int cycle = 0)
+        => this.recorder.DebugUseWeapon(itemId, slot, cycle);
 
-        internal void DebugCastSkill(string itemId, int slot)
-            => recorder.DebugCastSkill(itemId, slot);
-
-        internal void DebugUseWeapon(string itemId, int slot, int cycle = 0)
-            => recorder.DebugUseWeapon(itemId, slot, cycle);
-
-        public void Dispose()
-        {
-            hookGroup?.Dispose();
-            hookGroup = null;
-            recorder.Clear();
-        }
+    public void Dispose()
+    {
+        this.hookGroup?.Dispose();
+        this.hookGroup = null;
+        this.recorder.Clear();
     }
 }

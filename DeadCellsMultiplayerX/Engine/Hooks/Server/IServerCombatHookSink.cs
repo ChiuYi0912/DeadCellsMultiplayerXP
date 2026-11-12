@@ -1,16 +1,15 @@
-using dc.tool.atk;
+namespace DeadCellsMultiplayerX.Engine.Hooks.Server;
 
 using dc;
-namespace DeadCellsMultiplayerX.Engine.Hooks.Server
+using dc.tool.atk;
+
+/// <summary>
+/// 战斗结算 Hook 的端侧接收者。
+/// </summary>
+internal interface IServerCombatHookSink
 {
-    /// <summary>
-    /// 战斗结算 Hook 的端侧接收者。
-    /// </summary>
-    internal interface IServerCombatHookSink
-    {
-        void OnApplyHitResult(
-            Hook__AttackUtils.orig_applyHitResult orig,
-            AttackData atk,
-            Entity target);
-    }
+    public void OnApplyHitResult(
+        Hook__AttackUtils.orig_applyHitResult orig,
+        AttackData atk,
+        Entity target);
 }

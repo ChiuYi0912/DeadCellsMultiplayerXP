@@ -1,26 +1,27 @@
-using DeadCellsMultiplayerX.Engine.Hooks.Server;
+namespace DeadCellsMultiplayerX.Server.Integration.Hooks;
 
 using dc;
-namespace DeadCellsMultiplayerX.Server.Integration.Hooks
+using DeadCellsMultiplayerX.Engine.Hooks.Server;
+
+/// <summary>
+/// Power Hook 路由：清理 owner 已销毁的 Ghost Power。
+/// </summary>
+internal sealed class ServerPowerHookRouter : IServerPowerHookSink
 {
-    /// <summary>
-    /// Power Hook 路由：清理 owner 已销毁的 Ghost Power。
-    /// </summary>
-    internal sealed class ServerPowerHookRouter : IServerPowerHookSink
+    public void OnUpdate(Hook_Power.orig_update orig, Power self)
     {
-        public void OnUpdate(Hook_Power.orig_update orig, Power self)
+        if (self == null)
         {
-            if (self == null)
-                return;
-
-            var owner = self.owner;
-            if (owner == null || owner._level == null)
-            {
-                self.destroy();
-                return;
-            }
-
-            orig(self);
+            return;
         }
+
+        var owner = self.owner;
+        if (owner == null || owner._level == null)
+        {
+            self.destroy();
+            return;
+        }
+
+        orig(self);
     }
 }

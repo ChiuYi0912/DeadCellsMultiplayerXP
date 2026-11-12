@@ -1,220 +1,275 @@
+namespace DeadCellsMultiplayerX.Client.World.Heroes.Replay;
+
 using dc.pr;
+using DeadCellsMultiplayerX.Client.Session.Guest;
 using DeadCellsMultiplayerX.Client.World.Heroes.Remote;
 using DeadCellsMultiplayerX.Client.World.Heroes.Replay.Presenters;
 using DeadCellsMultiplayerX.Contracts.Actions;
 using DeadCellsMultiplayerX.Contracts.Snapshots;
-using Serilog;
-using DeadCellsMultiplayerX.Client.Session.Guest;
-
 using DeadCellsMultiplayerX.Engine.Utilities;
-namespace DeadCellsMultiplayerX.Client.World.Heroes.Replay
+using Serilog;
+
+internal sealed class ClientReplayProxyManager(GuestClientSession session, string localGuid)
 {
-    internal sealed class ClientReplayProxyManager
+    private const long MAX_EVENT_AGE_MS = 2000;
+
+    private static readonly ILogger Logger = Log.ForContext("SourceContext", "ClientReplayProxyManager");
+    private readonly Dictionary<HeroActionKind, IActionPresenter> presenters = ActionPresenterCatalog.CreateDefault();
+    public string LocalGuid { get; } = localGuid;
+
+    /// <summary>
+    /// 可见远端 Hero 的只读查询入口，由组合根在创建后绑定。
+    /// </summary>
+    private RemoteHeroManager? remoteHeroes;
+
+    /// <summary>
+    /// 本地每个客户端对应的技能释放hero
+    /// </summary>
+    private readonly Dictionary<string, ClientHeroReplayProxy> ghosts = [];
+
+    /// <summary>
+    /// 已释放的事件
+    /// </summary>
+    private readonly HashSet<(string Caster, long ActionId)> appliedActions = [];
+
+    private int lastEpoch = int.MinValue;
+
+    public int Count => this.ghosts.Count;
+
+    internal GuestClientSession Session { get; } = session;
+
+    /// <summary>
+    /// 绑定可见远端 Hero 查询；两者由组合根共同创建，存在互相引用。
+    /// </summary>
+    public void BindRemoteHeroes(RemoteHeroManager heroes) => this.remoteHeroes = heroes
+            ?? throw new ArgumentNullException(nameof(heroes));
+
+    public bool TryGetRemoteHero(string guid, out RemoteHero hero)
     {
-        private const long MAX_EVENT_AGE_MS = 2000;
-
-        private static readonly ILogger Logger = Log.ForContext("SourceContext", "ClientReplayProxyManager");
-
-        private readonly GuestClientSession session;
-        private readonly Dictionary<HeroActionKind, IActionPresenter> presenters;
-        public readonly string localGuid;
-
-        /// <summary>
-        /// 可见远端 Hero 的只读查询入口，由组合根在创建后绑定。
-        /// </summary>
-        private RemoteHeroManager? remoteHeroes;
-
-        /// <summary>
-        /// 本地每个客户端对应的技能释放hero
-        /// </summary>
-        private readonly Dictionary<string, ClientHeroReplayProxy> ghosts = [];
-
-        /// <summary>
-        /// 已释放的事件
-        /// </summary>
-        private readonly HashSet<(string Caster, long ActionId)> appliedActions = [];
-
-        private int lastEpoch = int.MinValue;
-
-        public ClientReplayProxyManager(GuestClientSession session, string localGuid)
+        if (this.remoteHeroes != null)
         {
-            this.session = session;
-            this.localGuid = localGuid;
-            presenters = ActionPresenterCatalog.CreateDefault();
+            return this.remoteHeroes.TryGet(guid, out hero);
         }
 
-        public int Count => ghosts.Count;
+        hero = null!;
+        return false;
+    }
 
-        internal GuestClientSession Session => session;
-
-        /// <summary>
-        /// 绑定可见远端 Hero 查询；两者由组合根共同创建，存在互相引用。
-        /// </summary>
-        public void BindRemoteHeroes(RemoteHeroManager heroes)
+    /// <summary>
+    /// 确保指定玩家在关卡中有 ClientHeroReplayProxy
+    /// 仅由 RemoteHeroManager 在创建 RemoteHero 时调用
+    /// </summary>
+    /// <param name="guid">客户id</param>
+    /// <param name="level">对应关卡</param>
+    /// <returns></returns>
+    public ClientHeroReplayProxy? Ensure(string guid, Level level)
+    {
+        if (string.IsNullOrEmpty(guid) || level == null)
         {
-            remoteHeroes = heroes
-                ?? throw new ArgumentNullException(nameof(heroes));
+            return null;
         }
 
-        public bool TryGetRemoteHero(string guid, out RemoteHero hero)
+        if (this.ghosts.TryGetValue(guid, out var ghost))
         {
-            if (remoteHeroes != null)
-                return remoteHeroes.TryGet(guid, out hero);
-
-            hero = null!;
-            return false;
-        }
-
-        /// <summary>
-        /// 确保指定玩家在关卡中有 ClientHeroReplayProxy
-        /// 仅由 RemoteHeroManager 在创建 RemoteHero 时调用
-        /// </summary>
-        /// <param name="guid">客户id</param>
-        /// <param name="level">对应关卡</param>
-        /// <returns></returns>
-        public ClientHeroReplayProxy? Ensure(string guid, Level level)
-        {
-            if (string.IsNullOrEmpty(guid) || level == null) return null;
-
-            if (ghosts.TryGetValue(guid, out var ghost))
+            if (ghost.MatchesLevel(level))
             {
-                if (ghost.MatchesLevel(level)) return ghost;
-
-                ghost.Dispose();
-                ghosts.Remove(guid);
+                return ghost;
             }
 
-            ghost = ClientHeroReplayProxy.CreateClient(session.Game, level, guid);
-            if (ghost == null) return null;
-
-            ghosts[guid] = ghost;
-            return ghost;
+            ghost.Dispose();
+            this.ghosts.Remove(guid);
         }
 
-        public bool TryGet(string guid, out ClientHeroReplayProxy ghost)
-            => ghosts.TryGetValue(guid, out ghost!);
-
-        public void Remove(string guid)
+        ghost = ClientHeroReplayProxy.CreateClient(GuestClientSession.Game, level, guid);
+        if (ghost == null)
         {
-            if (string.IsNullOrEmpty(guid)) return;
-
-            if (ghosts.Remove(guid, out var ghost))
-                ghost.Dispose();
+            return null;
         }
 
-        public void Clear()
-        {
-            foreach (var ghost in ghosts.Values)
-                ghost.Dispose();
+        this.ghosts[guid] = ghost;
+        return ghost;
+    }
 
-            ghosts.Clear();
+    public bool TryGet(string guid, out ClientHeroReplayProxy ghost)
+        => this.ghosts.TryGetValue(guid, out ghost!);
+
+    public void Remove(string guid)
+    {
+        if (string.IsNullOrEmpty(guid))
+        {
+            return;
         }
 
-        public void Tick(long nowMs)
+        if (this.ghosts.Remove(guid, out var ghost))
         {
-            SyncPositions(session?.Game?.curLevel);
+            ghost.Dispose();
+        }
+    }
+
+    public void Clear()
+    {
+        foreach (var ghost in this.ghosts.Values)
+        {
+            ghost.Dispose();
         }
 
-        public void SyncPositions(Level? level)
-        {
-            if (level == null || ghosts.Count == 0 || remoteHeroes == null)
-                return;
+        this.ghosts.Clear();
+    }
 
-            foreach (var (guid, ghost) in ghosts)
+    public void Tick(long nowMs) => this.SyncPositions(GuestClientSession.Game?.curLevel);
+
+    public void SyncPositions(Level? level)
+    {
+        if (level == null || this.ghosts.Count == 0 || this.remoteHeroes == null)
+        {
+            return;
+        }
+
+        foreach (var (guid, ghost) in this.ghosts)
+        {
+            if (ghost == null
+                || !ghost.IsAlive
+                || !ghost.MatchesLevel(level))
             {
-                if (ghost == null
-                    || !ghost.IsAlive
-                    || !ghost.MatchesLevel(level))
-                    continue;
-
-                if (!remoteHeroes.TryGet(guid, out var hero)
-                    || hero == null
-                    || hero.destroyed)
-                    continue;
-
-                ghost.SetTransform(
-                    hero.cx, hero.cy, hero.xr, hero.yr, hero.dir,
-                    hero.dx, hero.dy);
+                continue;
             }
-        }
 
-        /// <summary>
-        /// 应用事件结果
-        /// </summary>
-        /// <param name="frame">世界帧</param>
-        /// <summary>
-        /// 在帧应用前处理 epoch：先于 RemoteHeroManager 清理旧 Ghost。
-        /// </summary>
-        public void BeginFrame(WorldFrame frame)
-        {
-            if (frame == null) return;
-
-            if (frame.Epoch == lastEpoch) return;
-
-            Clear();
-            appliedActions.Clear();
-            lastEpoch = frame.Epoch;
-        }
-
-        public void ApplyFrame(WorldFrame frame)
-        {
-            if (frame == null) return;
-
-            BeginFrame(frame);
-
-            // 长时间运行后清理去重集合；旧事件本身有 2s 年龄过滤
-            if (appliedActions.Count > 8192)
-                appliedActions.Clear();
-
-            if (frame.Actions == null || frame.Actions.Count == 0) return;
-
-            var game = session.Game;
-            var level = game?.curLevel;
-            if (game == null || level == null) return;
-
-            string levelId = level.map?.id?.ToString() ?? string.Empty;
-            int subLevelIndex = level.GetSubLevelIndex();
-
-            foreach (var evt in frame.Actions)
+            if (!this.remoteHeroes.TryGet(guid, out var hero)
+                || hero == null
+                || hero.destroyed)
             {
-                if (evt == null) continue;
-                if (evt.Epoch != frame.Epoch) continue;
-                if (!appliedActions.Add((evt.CasterGuid, evt.ActionId))) continue;
-                if (string.Equals(evt.CasterGuid, localGuid, StringComparison.Ordinal)) continue;
-                if (frame.ServerTimeMs - evt.ServerTimeMs > MAX_EVENT_AGE_MS) continue;
-                if (evt.LevelId != levelId || evt.SubLevelIndex != subLevelIndex) continue;
-                if (evt.Slot is < 0 or > 1) continue;
-
-                // ClientHeroReplayProxy 生命周期由 RemoteHeroManager 管理 这里只重放已存在的实例
-                if (!TryGet(evt.CasterGuid, out var ghost)) continue;
-
-                if (!ghost.MatchesLevel(level))
-                {
-                    Remove(evt.CasterGuid);
-                    continue;
-                }
-
-                ghost.SetTransform(
-                    evt.CX, evt.CY, evt.XR, evt.YR, evt.Dir, evt.DX, evt.DY);
-                ghost.SetTiers(
-                    evt.BrutalityTier, evt.SurvivalTier, evt.TacticTier);
-
-                if (!presenters.TryGetValue(evt.Kind, out var presenter))
-                {
-                    Logger.Debug(
-                        "No presenter for action kind {Kind}: caster={Caster}",
-                        evt.Kind, evt.CasterGuid);
-                    continue;
-                }
-
-                presenter.Present(this, frame, evt, ghost);
+                continue;
             }
+
+            ghost.SetTransform(
+                hero.cx, hero.cy, hero.xr, hero.yr, hero.dir,
+                hero.dx, hero.dy);
+        }
+    }
+
+    /// <summary>
+    /// 应用事件结果
+    /// </summary>
+    /// <param name="frame">世界帧</param>
+    /// <summary>
+    /// 在帧应用前处理 epoch：先于 RemoteHeroManager 清理旧 Ghost。
+    /// </summary>
+    public void BeginFrame(WorldFrame frame)
+    {
+        if (frame == null)
+        {
+            return;
         }
 
-        public void Dispose()
+        if (frame.Epoch == this.lastEpoch)
         {
-            Clear();
-            appliedActions.Clear();
+            return;
         }
+
+        this.Clear();
+        this.appliedActions.Clear();
+        this.lastEpoch = frame.Epoch;
+    }
+
+    public void ApplyFrame(WorldFrame frame)
+    {
+        if (frame == null)
+        {
+            return;
+        }
+
+        this.BeginFrame(frame);
+
+        // 长时间运行后清理去重集合；旧事件本身有 2s 年龄过滤
+        if (this.appliedActions.Count > 8192)
+        {
+            this.appliedActions.Clear();
+        }
+
+        if (frame.Actions == null || frame.Actions.Count == 0)
+        {
+            return;
+        }
+
+        var game = GuestClientSession.Game;
+        var level = game?.curLevel;
+        if (game == null || level == null)
+        {
+            return;
+        }
+
+        var levelId = level.map?.id?.ToString() ?? string.Empty;
+        var subLevelIndex = level.GetSubLevelIndex();
+
+        foreach (var evt in frame.Actions)
+        {
+            if (evt == null)
+            {
+                continue;
+            }
+
+            if (evt.Epoch != frame.Epoch)
+            {
+                continue;
+            }
+
+            if (!this.appliedActions.Add((evt.CasterGuid, evt.ActionId)))
+            {
+                continue;
+            }
+
+            if (string.Equals(evt.CasterGuid, this.LocalGuid, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (frame.ServerTimeMs - evt.ServerTimeMs > MAX_EVENT_AGE_MS)
+            {
+                continue;
+            }
+
+            if (evt.LevelId != levelId || evt.SubLevelIndex != subLevelIndex)
+            {
+                continue;
+            }
+
+            if (evt.Slot is < 0 or > 1)
+            {
+                continue;
+            }
+
+            // ClientHeroReplayProxy 生命周期由 RemoteHeroManager 管理 这里只重放已存在的实例
+            if (!this.TryGet(evt.CasterGuid, out var ghost))
+            {
+                continue;
+            }
+
+            if (!ghost.MatchesLevel(level))
+            {
+                this.Remove(evt.CasterGuid);
+                continue;
+            }
+
+            ghost.SetTransform(
+                evt.CX, evt.CY, evt.XR, evt.YR, evt.Dir, evt.DX, evt.DY);
+            ghost.SetTiers(
+                evt.BrutalityTier, evt.SurvivalTier, evt.TacticTier);
+
+            if (!this.presenters.TryGetValue(evt.Kind, out var presenter))
+            {
+                Logger.Debug(
+                    "No presenter for action kind {Kind}: caster={Caster}",
+                    evt.Kind, evt.CasterGuid);
+                continue;
+            }
+
+            presenter.Present(this, frame, evt, ghost);
+        }
+    }
+
+    public void Dispose()
+    {
+        this.Clear();
+        this.appliedActions.Clear();
     }
 }

@@ -1,25 +1,25 @@
+namespace DeadCellsMultiplayerX.Networking.Time;
+
 using System.Diagnostics;
-namespace DeadCellsMultiplayerX.Networking.Time
+
+internal sealed class ServerTimeSystem
 {
-    internal class ServerTimeSystem
+    private readonly Stopwatch stopwatch = new();
+    private long prevMs;    //上一个时间戳
+    public long Now { get; private set; }   //当前服务端时间
+
+    public void Start()
     {
-        private readonly Stopwatch stopwatch = new();
-        private long prevMs;    //上一个时间戳
-        public long Now { get; private set; }   //当前服务端时间
+        this.stopwatch.Restart();
+        this.prevMs = 0;
+        this.Now = 0;
+    }
 
-        public void Start()
-        {
-            stopwatch.Restart();
-            prevMs = 0;
-            Now = 0;
-        }
-
-        //每帧调用
-        public void Tick()
-        {
-            long now = stopwatch.ElapsedMilliseconds;
-            Now += now - prevMs;
-            prevMs = now;
-        }
+    //每帧调用
+    public void Tick()
+    {
+        var now = this.stopwatch.ElapsedMilliseconds;
+        this.Now += now - this.prevMs;
+        this.prevMs = now;
     }
 }

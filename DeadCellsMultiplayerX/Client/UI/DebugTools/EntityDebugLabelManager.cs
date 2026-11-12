@@ -1,157 +1,188 @@
+namespace DeadCellsMultiplayerX.Client.UI.DebugTools;
+
 using dc;
-using HaxeProxy.Runtime;
-using ModCore.Utilities;
 using DeadCellsMultiplayerX.Client.World.Entities;
 using DeadCellsMultiplayerX.Contracts.Entities;
 using DeadCellsMultiplayerX.Contracts.EntityEvents;
+using HaxeProxy.Runtime;
+using ModCore.Utilities;
 
-namespace DeadCellsMultiplayerX.Client.UI.DebugTools
+internal sealed class EntityDebugLabelManager
 {
-    internal sealed class EntityDebugLabelManager
+    private const long UPDATE_INTERVAL_MS = 150;
+
+    private readonly Dictionary<EntityKind, IEntityDebugTextProvider> providers = [];
+    private readonly Dictionary<uint, Entry> active = [];
+
+    private long lastUpdateMs;
+    private bool visible;
+
+    private sealed class Entry
     {
-        private const long UPDATE_INTERVAL_MS = 150;
+        public required object Native { get; init; }
+        public required IEntityDebugTextProvider Provider { get; init; }
+        public string Text { get; set; } = string.Empty;
+    }
 
-        private readonly Dictionary<EntityKind, IEntityDebugTextProvider> providers = [];
-        private readonly Dictionary<uint, Entry> active = [];
-
-        private long lastUpdateMs;
-        private bool visible;
-
-        private sealed class Entry
+    public void Register(IEntityDebugTextProvider provider)
+    {
+        if (provider == null)
         {
-            public required object Native { get; init; }
-            public required IEntityDebugTextProvider Provider { get; init; }
-            public string Text = string.Empty;
+            return;
         }
 
-        public void Register(IEntityDebugTextProvider provider)
-        {
-            if (provider == null)
-                return;
+        this.providers[provider.Kind] = provider;
+    }
 
-            providers[provider.Kind] = provider;
+    /// <summary>
+    /// 实体创建后开始跟踪
+    /// </summary>
+    public void OnCreated(ClientEntityRecord record)
+    {
+        if (record?.Native == null)
+        {
+            return;
         }
 
-        /// <summary>
-        /// 实体创建后开始跟踪
-        /// </summary>
-        public void OnCreated(ClientEntityRecord record)
+        if (!this.providers.TryGetValue(record.Kind, out var provider))
         {
-            if (record?.Native == null)
-                return;
-
-            if (!providers.TryGetValue(record.Kind, out var provider))
-                return;
-
-            active[record.NetId] = new Entry
-            {
-                Native = record.Native,
-                Provider = provider,
-            };
+            return;
         }
 
-        public void OnRemoved(ClientEntityRecord record)
+        this.active[record.NetId] = new Entry
         {
-            if (record == null)
-                return;
+            Native = record.Native,
+            Provider = provider,
+        };
+    }
 
-            active.Remove(record.NetId);
+    public void OnRemoved(ClientEntityRecord record)
+    {
+        if (record == null)
+        {
+            return;
         }
 
-        /// <summary>
-        /// 实体事件按类型分发
-        /// </summary>
-        public void OnEntityEvent(EntityEvent evt)
-        {
-            if (evt == null)
-                return;
+        this.active.Remove(record.NetId);
+    }
 
-            if (providers.TryGetValue(evt.EntityKind, out var provider))
-                provider.OnEvent(evt);
+    /// <summary>
+    /// 实体事件按类型分发
+    /// </summary>
+    public void OnEntityEvent(EntityEvent evt)
+    {
+        if (evt == null)
+        {
+            return;
         }
 
-        public void Reset()
+        if (this.providers.TryGetValue(evt.EntityKind, out var provider))
         {
-            active.Clear();
-
-            foreach (var provider in providers.Values)
-                provider.Reset();
+            provider.OnEvent(evt);
         }
+    }
 
-        public void Tick(long nowMs)
+    public void Reset()
+    {
+        this.active.Clear();
+
+        foreach (var provider in this.providers.Values)
         {
-            bool show = DebugFlags.Get("entityLabels");
-            if (show != visible)
-            {
-                visible = show;
-                if (!show)
-                    ClearLabels();
-            }
+            provider.Reset();
+        }
+    }
 
+    public void Tick(long nowMs)
+    {
+        var show = DebugFlags.Get("entityLabels");
+        if (show != this.visible)
+        {
+            this.visible = show;
             if (!show)
-                return;
-
-            if (nowMs - lastUpdateMs < UPDATE_INTERVAL_MS)
-                return;
-
-            lastUpdateMs = nowMs;
-
-            List<uint>? stale = null;
-
-            foreach (var (netId, entry) in active)
             {
-                if (entry.Native is not Entity entity || entity.destroyed)
-                {
-                    (stale ??= []).Add(netId);
-                    continue;
-                }
-
-                string? text = entry.Provider.GetText(
-                    netId, entry.Native, nowMs);
-
-                if (string.IsNullOrEmpty(text))
-                {
-                    if (entry.Text.Length == 0)
-                        continue;
-
-                    ClearLabel(entity, entry.Provider);
-                    entry.Text = string.Empty;
-                    continue;
-                }
-
-                if (entry.Text == text)
-                    continue;
-
-                entity.setGameplayLabel(
-                    text.AsHaxeString(),
-                    Ref<int>.In(entry.Provider.LabelColor));
-                entry.Text = text;
+                this.ClearLabels();
             }
-
-            if (stale == null)
-                return;
-
-            foreach (var netId in stale)
-                active.Remove(netId);
         }
 
-        private void ClearLabels()
+        if (!show)
         {
-            foreach (var entry in active.Values)
-            {
-                if (entry.Native is not Entity entity || entity.destroyed)
-                    continue;
+            return;
+        }
 
+        if (nowMs - this.lastUpdateMs < UPDATE_INTERVAL_MS)
+        {
+            return;
+        }
+
+        this.lastUpdateMs = nowMs;
+
+        List<uint>? stale = null;
+
+        foreach (var (netId, entry) in this.active)
+        {
+            if (entry.Native is not Entity entity || entity.destroyed)
+            {
+                (stale ??= []).Add(netId);
+                continue;
+            }
+
+            var text = entry.Provider.GetText(
+                netId, entry.Native, nowMs);
+
+            if (string.IsNullOrEmpty(text))
+            {
                 if (entry.Text.Length == 0)
+                {
                     continue;
+                }
 
                 ClearLabel(entity, entry.Provider);
                 entry.Text = string.Empty;
+                continue;
             }
+
+            if (entry.Text == text)
+            {
+                continue;
+            }
+
+            entity.setGameplayLabel(
+                text.AsHaxeString(),
+                Ref<int>.In(entry.Provider.LabelColor));
+            entry.Text = text;
         }
 
-        private static void ClearLabel(
-            Entity entity, IEntityDebugTextProvider provider)
-            => entity.setGameplayLabel(null, Ref<int>.In(provider.LabelColor));
+        if (stale == null)
+        {
+            return;
+        }
+
+        foreach (var netId in stale)
+        {
+            this.active.Remove(netId);
+        }
     }
+
+    private void ClearLabels()
+    {
+        foreach (var entry in this.active.Values)
+        {
+            if (entry.Native is not Entity entity || entity.destroyed)
+            {
+                continue;
+            }
+
+            if (entry.Text.Length == 0)
+            {
+                continue;
+            }
+
+            ClearLabel(entity, entry.Provider);
+            entry.Text = string.Empty;
+        }
+    }
+
+    private static void ClearLabel(
+        Entity entity, IEntityDebugTextProvider provider)
+        => entity.setGameplayLabel(null, Ref<int>.In(provider.LabelColor));
 }

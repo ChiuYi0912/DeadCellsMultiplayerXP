@@ -1,101 +1,97 @@
+namespace DeadCellsMultiplayerX.Engine.Adapters.Heroes;
+
 using dc.tool;
 using DeadCellsMultiplayerX.Contracts.Actions;
+using DeadCellsMultiplayerX.Engine.Adapters.Items;
 using ModCore.Utilities;
 using Serilog;
 
-using DeadCellsMultiplayerX.Engine.Adapters.Items;
-namespace DeadCellsMultiplayerX.Engine.Adapters.Heroes
+/// <summary>
+/// 按物品池管理 GhostHero 的 2 个槽位
+/// </summary>
+internal sealed class GhostLoadout(GhostActionContext context, InventItemKind.Indexes kind)
 {
+    private static readonly ILogger Logger = Log.ForContext("SourceContext", "GhostLoadout");
+
+    private readonly GhostActionContext context = context;
+    private readonly InventItemKind.Indexes kind = kind;
+    private readonly string?[] signatures = new string?[2];
+
     /// <summary>
-    /// 按物品池管理 GhostHero 的 2 个槽位
+    /// 准备对应槽位的物品
+    /// 签名一致时复用，否则重建并写回 Hero 背包
     /// </summary>
-    internal sealed class GhostLoadout
+    public bool TryPrepare(int slot, ItemRef? snapshot, out InventItem? item, out bool changed)
     {
-        private static readonly ILogger Logger = Log.ForContext("SourceContext", "GhostLoadout");
+        item = null;
+        changed = false;
 
-        private readonly GhostActionContext context;
-        private readonly InventItemKind.Indexes kind;
-        private readonly string?[] signatures = new string?[2];
-
-        public GhostLoadout(GhostActionContext context, InventItemKind.Indexes kind)
+        if (snapshot == null || string.IsNullOrEmpty(snapshot.ItemId))
         {
-            this.context = context;
-            this.kind = kind;
+            return false;
         }
 
-        /// <summary>
-        /// 准备对应槽位的物品
-        /// 签名一致时复用，否则重建并写回 Hero 背包
-        /// </summary>
-        public bool TryPrepare(int slot, ItemRef? snapshot, out InventItem? item, out bool changed)
+        if (slot is < 0 or > 1)
         {
-            item = null;
-            changed = false;
+            return false;
+        }
 
-            if (snapshot == null || string.IsNullOrEmpty(snapshot.ItemId))
-                return false;
+        var signature = Signature(snapshot);
+        var existing = this.GetEquipped(slot);
 
-            if (slot is < 0 or > 1)
-                return false;
-
-            string signature = Signature(snapshot);
-            var existing = GetEquipped(slot);
-
-            if (signatures[slot] == signature && existing != null)
-            {
-                // 签名一致不重建
-                item = existing;
-                return true;
-            }
-
-            // 必须在对应 cdb 中存在
-            if (dc.Data.Class.item.byId.get(snapshot.ItemId.AsHaxeString()) == null)
-            {
-                Logger.Warning(
-                    "GhostLoadout {Owner}: unknown {Kind} item {ItemId}",
-                    context.OwnerGuid, kind, snapshot.ItemId);
-                return false;
-            }
-
-            var newItem = ItemCodec.Create(snapshot, kind);
-            newItem.posID = slot;
-
-            if (existing != null)
-                context.Hero.inventory.remove(existing);
-
-            context.Hero.inventory.items.push(newItem);
-            signatures[slot] = signature;
-
-            item = newItem;
-            changed = true;
-
-            Logger.Debug("GhostLoadout {Owner}: slot {Slot} {Kind} item {ItemId} lv{Level}",
-                context.OwnerGuid, slot, kind, snapshot.ItemId, snapshot.ItemLevel);
+        if (this.signatures[slot] == signature && existing != null)
+        {
+            // 签名一致不重建
+            item = existing;
             return true;
         }
 
-        /// <summary>
-        /// 获取槽位当前物品
-        /// </summary>
-        public InventItem? GetEquipped(int slot)
-            => kind == InventItemKind.Indexes.Active
-                ? context.Hero.inventory.getActiveOn(slot)
-                : context.Hero.inventory.getEquippedWeaponOn(slot);
-
-        /// <summary>
-        /// 清空签名记录，不删除 Hero 身上的物品
-        /// </summary>
-        public void Clear()
+        // 必须在对应 cdb 中存在
+        if (dc.Data.Class.item.byId.get(snapshot.ItemId.AsHaxeString()) == null)
         {
-            Array.Clear(signatures);
+            Logger.Warning(
+                "GhostLoadout {Owner}: unknown {Kind} item {ItemId}",
+                this.context.OwnerGuid, this.kind, snapshot.ItemId);
+            return false;
         }
 
-        /// <summary>
-        /// 生成物品签名
-        /// </summary>
-        internal static string Signature(ItemRef snapshot)
-            => $"{snapshot.ItemId}|{snapshot.ItemLevel}|{snapshot.PermanentId}|" +
-               $"{snapshot.Ammo}|{string.Join(',', snapshot.Affixes)}|" +
-               string.Join(',', snapshot.InactiveAffixes);
+        var newItem = ItemCodec.Create(snapshot, this.kind);
+        newItem.posID = slot;
+
+        if (existing != null)
+        {
+            this.context.Hero.inventory.remove(existing);
+        }
+
+        this.context.Hero.inventory.items.push(newItem);
+        this.signatures[slot] = signature;
+
+        item = newItem;
+        changed = true;
+
+        Logger.Debug("GhostLoadout {Owner}: slot {Slot} {Kind} item {ItemId} lv{Level}",
+            this.context.OwnerGuid, slot, this.kind, snapshot.ItemId, snapshot.ItemLevel);
+        return true;
     }
+
+    /// <summary>
+    /// 获取槽位当前物品
+    /// </summary>
+    public InventItem? GetEquipped(int slot)
+        => this.kind == InventItemKind.Indexes.Active
+            ? this.context.Hero.inventory.getActiveOn(slot)
+            : this.context.Hero.inventory.getEquippedWeaponOn(slot);
+
+    /// <summary>
+    /// 清空签名记录，不删除 Hero 身上的物品
+    /// </summary>
+    public void Clear() => Array.Clear(this.signatures);
+
+    /// <summary>
+    /// 生成物品签名
+    /// </summary>
+    internal static string Signature(ItemRef snapshot)
+        => $"{snapshot.ItemId}|{snapshot.ItemLevel}|{snapshot.PermanentId}|" +
+           $"{snapshot.Ammo}|{string.Join(',', snapshot.Affixes)}|" +
+           string.Join(',', snapshot.InactiveAffixes);
 }

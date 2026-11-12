@@ -8,22 +8,17 @@ namespace DeadCellsMultiplayerX.Client.World.Frames;
 /// interpolation alpha. The type-specific Lerp is left to the caller, because it depends on how the
 /// caller's state is laid out (e.g. Dead Cells double pixel coordinates).
 /// </summary>
-public sealed class SnapshotBuffer<T>
+public sealed class SnapshotBuffer<T>(double interpolationDelaySeconds)
 {
-    private readonly List<(double time, T state)> _buffer = new();
-    private readonly double _interpolationDelaySeconds;
+    private readonly List<(double time, T state)> buffer = [];
+    private readonly double delaySeconds = interpolationDelaySeconds;
 
-    public SnapshotBuffer(double interpolationDelaySeconds)
-    {
-        _interpolationDelaySeconds = interpolationDelaySeconds;
-    }
-
-    public int Count => _buffer.Count;
+    public int Count => this.buffer.Count;
 
     /// <summary>
     /// 只读历史视图（旧 -> 新，与内部存储同序）。不要在枚举期间调用会修改缓冲区的 API。
     /// </summary>
-    public IReadOnlyList<(double time, T state)> Entries => _buffer;
+    public IReadOnlyList<(double time, T state)> Entries => this.buffer;
 
     /// <summary>
     /// Ingests a snapshot for time <paramref name="time"/>. Out-of-order arrivals are inserted in
@@ -31,22 +26,22 @@ public sealed class SnapshotBuffer<T>
     /// </summary>
     public void AddSnapshot(double time, T state)
     {
-        if (_buffer.Count > 0 && time <= _buffer[^1].time)
+        if (this.buffer.Count > 0 && time <= this.buffer[^1].time)
         {
-            var insertionIndex = _buffer.FindIndex(entry => entry.time >= time);
-            if (_buffer[insertionIndex].time == time)
+            var insertionIndex = this.buffer.FindIndex(entry => entry.time >= time);
+            if (this.buffer[insertionIndex].time == time)
             {
                 return; // duplicate timestamp, ignore
             }
 
-            _buffer.Insert(insertionIndex, (time, state));
+            this.buffer.Insert(insertionIndex, (time, state));
             return;
         }
 
-        _buffer.Add((time, state));
+        this.buffer.Add((time, state));
     }
 
-    public void Clear() => _buffer.Clear();
+    public void Clear() => this.buffer.Clear();
 
     /// <summary>
     /// 丢弃时间早于 <paramref name="oldestTimeInclusive"/> 的样本，并把数量限制在
@@ -54,16 +49,22 @@ public sealed class SnapshotBuffer<T>
     /// </summary>
     public void Trim(double oldestTimeInclusive, int maxCount)
     {
-        int removeCount = 0;
-        while (removeCount < _buffer.Count && _buffer[removeCount].time < oldestTimeInclusive)
+        var removeCount = 0;
+        while (removeCount < this.buffer.Count && this.buffer[removeCount].time < oldestTimeInclusive)
+        {
             removeCount++;
+        }
 
-        int overflow = _buffer.Count - removeCount - maxCount;
+        var overflow = this.buffer.Count - removeCount - maxCount;
         if (overflow > 0)
+        {
             removeCount += overflow;
+        }
 
         if (removeCount > 0)
-            _buffer.RemoveRange(0, removeCount);
+        {
+            this.buffer.RemoveRange(0, removeCount);
+        }
     }
 
     /// <summary>
@@ -76,7 +77,7 @@ public sealed class SnapshotBuffer<T>
     /// </summary>
     public bool TryGetInterpolation(double localTimeSeconds, out T previous, out T next, out double alpha)
     {
-        if (_buffer.Count == 0)
+        if (this.buffer.Count == 0)
         {
             previous = default!;
             next = default!;
@@ -84,23 +85,23 @@ public sealed class SnapshotBuffer<T>
             return false;
         }
 
-        var renderTime = localTimeSeconds - _interpolationDelaySeconds;
+        var renderTime = localTimeSeconds - this.delaySeconds;
 
-        if (renderTime <= _buffer[0].time)
+        if (renderTime <= this.buffer[0].time)
         {
-            previous = next = _buffer[0].state;
+            previous = next = this.buffer[0].state;
             alpha = 0;
             return true;
         }
 
-        for (var i = 0; i < _buffer.Count - 1; i++)
+        for (var i = 0; i < this.buffer.Count - 1; i++)
         {
-            var (timeA, stateA) = _buffer[i];
-            var (timeB, stateB) = _buffer[i + 1];
+            var (timeA, stateA) = this.buffer[i];
+            var (timeB, stateB) = this.buffer[i + 1];
 
             if (renderTime >= timeA && renderTime <= timeB)
             {
-                PruneBefore(i);
+                this.PruneBefore(i);
                 previous = stateA;
                 next = stateB;
                 alpha = timeB == timeA ? 0 : (renderTime - timeA) / (timeB - timeA);
@@ -109,9 +110,9 @@ public sealed class SnapshotBuffer<T>
         }
 
         // Render time is ahead of every snapshot (buffer underrun): hold the last known state.
-        var last = _buffer[^1];
-        PruneBefore(_buffer.Count - 1);
-        previous = next = last.state;
+        var (time, state) = this.buffer[^1];
+        this.PruneBefore(this.buffer.Count - 1);
+        previous = next = state;
         alpha = 0;
         return true;
     }
@@ -120,7 +121,7 @@ public sealed class SnapshotBuffer<T>
     {
         if (keepFromIndex > 0)
         {
-            _buffer.RemoveRange(0, keepFromIndex);
+            this.buffer.RemoveRange(0, keepFromIndex);
         }
     }
 }

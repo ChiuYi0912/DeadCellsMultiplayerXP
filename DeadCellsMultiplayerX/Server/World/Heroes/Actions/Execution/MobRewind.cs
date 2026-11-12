@@ -1,176 +1,188 @@
+namespace DeadCellsMultiplayerX.Server.World.Heroes.Actions.Execution;
+
 using dc.en;
 using dc.pr;
+using DeadCellsMultiplayerX.Engine.Adapters.Snapshots;
+using DeadCellsMultiplayerX.Networking.Time;
 using DeadCellsMultiplayerX.Server.Replication.Entities;
 using Serilog;
 
-
-using DeadCellsMultiplayerX.Engine.Adapters.Snapshots;
-using DeadCellsMultiplayerX.Networking.Time;
-namespace DeadCellsMultiplayerX.Server.World.Heroes.Actions.Execution
+/// <summary>
+/// 武器执行前的服务端 mob 位置回退
+/// 让服务端命中判定使用客户端开火时刻看到的位置
+/// </summary>
+internal sealed class MobRewind(
+    ServerEntityRegistry registry,
+    ServerEntityHistory history)
 {
+    private const long MAX_REWIND_MS = 300;
+
+    private static readonly ILogger Logger = Log.ForContext("SourceContext", "MobRewind");
+
+    private readonly ServerEntityRegistry registry = registry;
+    private readonly ServerEntityHistory history = history;
+
     /// <summary>
-    /// 武器执行前的服务端 mob 位置回退
-    /// 让服务端命中判定使用客户端开火时刻看到的位置
+    /// 回退 mob 位置；返回的 scope 在武器执行后恢复原始位置
     /// </summary>
-    internal sealed class MobRewind
+    public IDisposable? Begin(
+        Level level,
+        long clientTimeMs,
+        long serverTimeMs)
     {
-        private const long MAX_REWIND_MS = 300;
-
-        private static readonly ILogger Logger = Log.ForContext("SourceContext", "MobRewind");
-
-        private readonly ServerEntityRegistry registry;
-        private readonly ServerEntityHistory history;
-
-        public MobRewind(
-            ServerEntityRegistry registry,
-            ServerEntityHistory history)
+        if (level == null)
         {
-            this.registry = registry;
-            this.history = history;
+            return null;
         }
 
-        /// <summary>
-        /// 回退 mob 位置；返回的 scope 在武器执行后恢复原始位置
-        /// </summary>
-        public IDisposable? Begin(
-            Level level,
-            long clientTimeMs,
-            long serverTimeMs)
+        var targetMs = clientTimeMs > 0
+            ? clientTimeMs - SnapshotTiming.INTERPOLATION_DELAY_MS
+            : serverTimeMs - SnapshotTiming.INTERPOLATION_DELAY_MS;
+
+        targetMs = Math.Clamp(
+            targetMs,
+            serverTimeMs - MAX_REWIND_MS,
+            serverTimeMs);
+
+        var mobs = CollectMobs(level);
+        var saved = new List<RawPose>(mobs.Count);
+
+        foreach (var mob in mobs)
         {
-            if (level == null)
-                return null;
-
-            long targetMs = clientTimeMs > 0
-                ? clientTimeMs - SnapshotTiming.INTERPOLATION_DELAY_MS
-                : serverTimeMs - SnapshotTiming.INTERPOLATION_DELAY_MS;
-
-            targetMs = Math.Clamp(
-                targetMs,
-                serverTimeMs - MAX_REWIND_MS,
-                serverTimeMs);
-
-            var mobs = CollectMobs(level);
-            var saved = new List<RawPose>(mobs.Count);
-
-            foreach (var mob in mobs)
+            if (!this.registry.TryGetNetId(mob, out var netId))
             {
-                if (!registry.TryGetNetId(mob, out uint netId))
-                    continue;
-
-                if (!history.TryGetPose(netId, targetMs, out var pose))
-                    continue;
-
-                saved.Add(new RawPose(
-                    mob, mob.cx, mob.cy, mob.xr, mob.yr, mob.dir));
-
-                Apply(mob, pose);
+                continue;
             }
 
-            if (saved.Count == 0)
-                return null;
-
-            Logger.Debug(
-                "Mob rewind: target={Target} server={Server} mobs={Mobs}",
-                targetMs, serverTimeMs, saved.Count);
-
-            return new Scope(saved);
-        }
-
-        private static List<Mob> CollectMobs(Level level)
-        {
-            var result = new List<Mob>();
-            var seen = new HashSet<Mob>();
-
-            CollectTeam(level.teamMob, result, seen);
-            CollectTeam(level.teamProp, result, seen);
-
-            var entities = level.entities;
-            if (entities != null)
+            if (!this.history.TryGetPose(netId, targetMs, out var pose))
             {
-                for (int i = 0; i < entities.length; i++)
-                {
-                    Add(
-                        AffectCodec.ToObject<Mob>(entities.getDyn(i)),
-                        result, seen);
-                }
+                continue;
             }
 
-            return result;
+            saved.Add(new RawPose(
+                mob, mob.cx, mob.cy, mob.xr, mob.yr, mob.dir));
+
+            Apply(mob, pose);
         }
 
-        private static void CollectTeam(
-            dc.tool.Team? team,
-            List<Mob> result,
-            HashSet<Mob> seen)
+        if (saved.Count == 0)
         {
-            var mobs = team?.asMobs;
-            if (mobs == null) return;
+            return null;
+        }
 
-            for (int i = 0; i < mobs.length; i++)
+        Logger.Debug(
+            "Mob rewind: target={Target} server={Server} mobs={Mobs}",
+            targetMs, serverTimeMs, saved.Count);
+
+        return new Scope(saved);
+    }
+
+    private static List<Mob> CollectMobs(Level level)
+    {
+        var result = new List<Mob>();
+        var seen = new HashSet<Mob>();
+
+        CollectTeam(level.teamMob, result, seen);
+        CollectTeam(level.teamProp, result, seen);
+
+        var entities = level.entities;
+        if (entities != null)
+        {
+            for (var i = 0; i < entities.length; i++)
             {
                 Add(
-                    AffectCodec.ToObject<Mob>(mobs.getDyn(i)),
+                    AffectCodec.ToObject<Mob>(entities.getDyn(i)),
                     result, seen);
             }
         }
 
-        private static void Add(
-            Mob? mob,
-            List<Mob> result,
-            HashSet<Mob> seen)
-        {
-            if (mob == null || mob.destroyed) return;
-            if (!seen.Add(mob)) return;
+        return result;
+    }
 
-            result.Add(mob);
+    private static void CollectTeam(
+        dc.tool.Team? team,
+        List<Mob> result,
+        HashSet<Mob> seen)
+    {
+        var mobs = team?.asMobs;
+        if (mobs == null)
+        {
+            return;
         }
 
-        private static void Apply(Mob mob, EntityPose pose)
+        for (var i = 0; i < mobs.length; i++)
         {
-            int cx = (int)Math.Floor(pose.X);
-            int cy = (int)Math.Floor(pose.Y);
+            Add(
+                AffectCodec.ToObject<Mob>(mobs.getDyn(i)),
+                result, seen);
+        }
+    }
 
-            mob.cx = cx;
-            mob.cy = cy;
-            mob.xr = pose.X - cx;
-            mob.yr = pose.Y - cy;
-            mob.dir = pose.Dir;
+    private static void Add(
+        Mob? mob,
+        List<Mob> result,
+        HashSet<Mob> seen)
+    {
+        if (mob == null || mob.destroyed)
+        {
+            return;
         }
 
-        private readonly record struct RawPose(
-            Mob Mob,
-            int Cx,
-            int Cy,
-            double Xr,
-            double Yr,
-            int Dir);
-
-        private sealed class Scope : IDisposable
+        if (!seen.Add(mob))
         {
-            private readonly List<RawPose> saved;
-            private bool disposed;
+            return;
+        }
 
-            public Scope(List<RawPose> saved)
+        result.Add(mob);
+    }
+
+    private static void Apply(Mob mob, EntityPose pose)
+    {
+        var cx = (int)Math.Floor(pose.X);
+        var cy = (int)Math.Floor(pose.Y);
+
+        mob.cx = cx;
+        mob.cy = cy;
+        mob.xr = pose.X - cx;
+        mob.yr = pose.Y - cy;
+        mob.dir = pose.Dir;
+    }
+
+    private readonly record struct RawPose(
+        Mob Mob,
+        int Cx,
+        int Cy,
+        double Xr,
+        double Yr,
+        int Dir);
+
+    private sealed class Scope(List<RawPose> saved) : IDisposable
+    {
+        private readonly List<RawPose> saved = saved;
+        private bool disposed;
+
+        public void Dispose()
+        {
+            if (this.disposed)
             {
-                this.saved = saved;
+                return;
             }
 
-            public void Dispose()
+            this.disposed = true;
+
+            foreach (var pose in this.saved)
             {
-                if (disposed) return;
-                disposed = true;
-
-                foreach (var pose in saved)
+                var mob = pose.Mob;
+                if (mob == null || mob.destroyed)
                 {
-                    var mob = pose.Mob;
-                    if (mob == null || mob.destroyed) continue;
-
-                    mob.cx = pose.Cx;
-                    mob.cy = pose.Cy;
-                    mob.xr = pose.Xr;
-                    mob.yr = pose.Yr;
-                    mob.dir = pose.Dir;
+                    continue;
                 }
+
+                mob.cx = pose.Cx;
+                mob.cy = pose.Cy;
+                mob.xr = pose.Xr;
+                mob.yr = pose.Yr;
+                mob.dir = pose.Dir;
             }
         }
     }

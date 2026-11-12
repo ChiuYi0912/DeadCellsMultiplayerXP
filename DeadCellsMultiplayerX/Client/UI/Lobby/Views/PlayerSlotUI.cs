@@ -1,371 +1,407 @@
+namespace DeadCellsMultiplayerX.Client.UI.Lobby.Views;
+
 using dc;
 using dc.h2d;
 using dc.libs.heaps.slib;
 using dc.tool;
 using dc.ui;
 using DeadCellsMultiplayerX.Client.UI.Common;
+using DeadCellsMultiplayerX.Contracts.Lobby;
 using ModCore.Utilities;
 using Serilog;
 
-using DeadCellsMultiplayerX.Contracts.Lobby;
-
-namespace DeadCellsMultiplayerX.Client.UI.Lobby.Views
+internal sealed class PlayerSlotUI
 {
-    internal class PlayerSlotUI
+    public Flow Container { get; }
+    public HSprite? HeroSprite { get; private set; }
+    public dc.ui.Text? NameLabel { get; private set; }
+    public dc.ui.Text? StatusLabel { get; private set; }
+
+    public GuestInfo? Guest { get; set; }
+    public bool IsOccupied => this.Guest != null;
+
+    private readonly LobbyView host;
+    private readonly ILogger logger;
+    private Flow? emptyBox;
+    private GuestInfo? prevSnapshot;
+
+    public event Action<PlayerSlotUI>? OnChanged;
+
+    public PlayerSlotUI(Flow parent, LobbyView host)
     {
-        public Flow Container { get; }
-        public HSprite? HeroSprite { get; private set; }
-        public dc.ui.Text? NameLabel { get; private set; }
-        public dc.ui.Text? StatusLabel { get; private set; }
+        this.host = host;
+        this.logger = Log.ForContext<PlayerSlotUI>();
 
-        public GuestInfo? Guest { get; set; }
-        public bool IsOccupied => Guest != null;
+        this.Container = new Flow(parent);
+        this.Container.set_isVertical(true);
+        this.Container.set_verticalAlign(new FlowAlign.Middle());
+        this.Container.set_horizontalAlign(new FlowAlign.Middle());
 
-        private readonly LobbyView host;
-        private readonly ILogger logger;
-        private Flow? emptyBox;
-        private GuestInfo? prevSnapshot;
+        this.ShowEmpty();
+    }
 
-        public event Action<PlayerSlotUI>? OnChanged;
-
-        public PlayerSlotUI(Flow parent, LobbyView host)
+    public void Bind(GuestInfo guest, bool force = false)
+    {
+        if (string.IsNullOrEmpty(guest.SkinMould))
         {
-            this.host = host;
-            logger = Log.ForContext<PlayerSlotUI>();
-
-            Container = new Flow(parent);
-            Container.set_isVertical(true);
-            Container.set_verticalAlign(new FlowAlign.Middle());
-            Container.set_horizontalAlign(new FlowAlign.Middle());
-
-            ShowEmpty();
+            return;
         }
 
-        public void Bind(GuestInfo guest, bool force = false)
+        //已绑定同一玩家
+        if (!force && this.Guest?.Guid == guest.Guid)
         {
-            if (string.IsNullOrEmpty(guest.SkinMould)) return;
+            this.Guest = guest;
+            this.NameLabel?.set_text(guest.Name.AsHaxeString());
 
-            //已绑定同一玩家
-            if (!force && Guest?.Guid == guest.Guid)
-            {
-                Guest = guest;
-                if (NameLabel != null)
-                    NameLabel.set_text(guest.Name.AsHaxeString());
-                RefreshStatus();
-                return;
-            }
-
-            //新玩家
-            Guest = guest;
-            ClearContent();
-            HideEmpty();
-
-            string skin = guest.IsHost
-                ? Save.Class.tryLoad().heroSkin.ToString()
-                : guest.SkinMould;
-
-            HeroSprite = UIRenderer.CreateHeroSpr(skin, Container);
-            NameLabel = Assets.Class.makeText(guest.Name.AsHaxeString(), 0xDDDDDD, null, Container);
-            StatusLabel = Assets.Class.makeText("".AsHaxeString(), null, null, Container);
-
-            RefreshStatus();
-            ApplyScale();
-
-            OnChanged?.Invoke(this);
+            this.RefreshStatus();
+            return;
         }
 
-        public void Clear()
+        //新玩家
+        this.Guest = guest;
+        this.ClearContent();
+        this.HideEmpty();
+
+        var skin = guest.IsHost
+            ? Save.Class.tryLoad().heroSkin.ToString()
+            : guest.SkinMould;
+
+        this.HeroSprite = UIRenderer.CreateHeroSpr(skin, this.Container);
+        this.NameLabel = Assets.Class.makeText(guest.Name.AsHaxeString(), 0xDDDDDD, null, this.Container);
+        this.StatusLabel = Assets.Class.makeText("".AsHaxeString(), null, null, this.Container);
+
+        this.RefreshStatus();
+        this.ApplyScale();
+
+        OnChanged?.Invoke(this);
+    }
+
+    public void Clear()
+    {
+        if (this.Guest == null)
         {
-            if (Guest == null) return;
-            Guest = null;
-            prevSnapshot = null;
-
-            ClearContent();
-            ShowEmpty();
-
-            Container.reflow();
-            OnChanged?.Invoke(this);
+            return;
         }
 
-        private void ClearContent()
+        this.Guest = null;
+        this.prevSnapshot = null;
+
+        this.ClearContent();
+        this.ShowEmpty();
+
+        this.Container.reflow();
+        OnChanged?.Invoke(this);
+    }
+
+    private void ClearContent()
+    {
+        this.HeroSprite?.remove();
+        this.HeroSprite = null;
+        this.NameLabel?.remove();
+        this.NameLabel = null;
+        this.StatusLabel?.remove();
+        this.StatusLabel = null;
+    }
+
+    //空位
+    private void ShowEmpty()
+    {
+        if (this.emptyBox != null)
         {
-            HeroSprite?.remove(); HeroSprite = null;
-            NameLabel?.remove(); NameLabel = null;
-            StatusLabel?.remove(); StatusLabel = null;
+            return;
         }
 
-        //空位
-        private void ShowEmpty()
+        this.emptyBox = new Flow(this.Container);
+        var text = Assets.Class.makeText("[Empty]".AsHaxeString(), 0x666666, null, this.emptyBox);
+        this.ApplyEmptyScale(text);
+    }
+
+    private void HideEmpty()
+    {
+        if (this.emptyBox == null)
         {
-            if (emptyBox != null) return;
-            emptyBox = new Flow(Container);
-            var text = Assets.Class.makeText("[Empty]".AsHaxeString(), 0x666666, null, emptyBox);
-            ApplyEmptyScale(text);
+            return;
         }
 
-        private void HideEmpty()
+        this.emptyBox.removeChildren();
+        this.emptyBox.remove();
+        this.emptyBox = null;
+    }
+
+    //状态刷新
+    public void RefreshStatus()
+    {
+        if (this.Guest == null || this.StatusLabel == null)
         {
-            if (emptyBox == null) return;
-            emptyBox.removeChildren();
-            emptyBox.remove();
-            emptyBox = null;
+            return;
         }
 
-        //状态刷新
-        public void RefreshStatus()
+        var status = this.Guest.IsHost ? "[Host]"
+                      : this.Guest.IsReady ? "[Ready]"
+                      : "[...]";
+
+        var color = this.Guest.IsHost ? 0xFFDD44
+                  : this.Guest.IsReady ? 0x44FF44
+                  : 0x888888;
+
+        this.StatusLabel.set_text(status.AsHaxeString());
+        this.StatusLabel.set_textColor(color);
+        this.StatusLabel.posChanged = true;
+
+        //名称皮肤变化重绑
+        if (this.prevSnapshot == null)
         {
-            if (Guest == null || StatusLabel == null) return;
-
-            string status = Guest.IsHost ? "[Host]"
-                          : Guest.IsReady ? "[Ready]"
-                          : "[...]";
-
-            int color = Guest.IsHost ? 0xFFDD44
-                      : Guest.IsReady ? 0x44FF44
-                      : 0x888888;
-
-            StatusLabel.set_text(status.AsHaxeString());
-            StatusLabel.set_textColor(color);
-            StatusLabel.posChanged = true;
-
-            //名称皮肤变化重绑
-            if (prevSnapshot == null)
-            {
-                prevSnapshot = Guest.Clone();
-                return;
-            }
-
-            if (prevSnapshot.SkinMould != Guest.SkinMould
-                || prevSnapshot.Name != Guest.Name
-                || prevSnapshot.IsHost != Guest.IsHost)
-            {
-                prevSnapshot = Guest.Clone();
-                Bind(Guest, force: true);
-            }
+            this.prevSnapshot = this.Guest.Clone();
+            return;
         }
 
-        //缩放
-        public void ApplyScale()
+        if (this.prevSnapshot.SkinMould != this.Guest.SkinMould
+            || this.prevSnapshot.Name != this.Guest.Name
+            || this.prevSnapshot.IsHost != this.Guest.IsHost)
         {
-            var scale = host.get_pixelScale.Invoke();
-
-            if (emptyBox != null)
-            {
-                foreach (var child in emptyBox.children)
-                {
-                    if (child is dc.ui.Text t) ApplyEmptyScale(t, scale);
-                }
-            }
-
-            if (HeroSprite != null)
-            {
-                HeroSprite.scaleX = HeroSprite.scaleY = scale * 0.5;
-                HeroSprite.posChanged = true;
-            }
-            if (NameLabel != null)
-            {
-                NameLabel.scaleX = NameLabel.scaleY = scale * 0.30;
-                NameLabel.posChanged = true;
-            }
-            if (StatusLabel != null)
-            {
-                StatusLabel.scaleX = StatusLabel.scaleY = scale * 0.25;
-                StatusLabel.posChanged = true;
-            }
-        }
-
-        private void ApplyEmptyScale(dc.ui.Text text, double? scale = null)
-        {
-            scale ??= host.get_pixelScale.Invoke();
-            text.scaleX = text.scaleY = scale.Value * 0.25;
-            text.posChanged = true;
+            this.prevSnapshot = this.Guest.Clone();
+            this.Bind(this.Guest, force: true);
         }
     }
 
-
-    internal class PlayerSlotPanel : UIProcess
+    //缩放
+    public void ApplyScale()
     {
-        private const int MAX_SLOTS = 4;
+        var scale = this.host.get_pixelScale.Invoke();
 
-        public Flow Root { get; private set; }
-        public Flow Container { get; private set; }
-        public Flow Title { get; private set; }
-        public HtmlText TitleText { get; }
-        public PlayerSlotUI[] Slots { get; }
-
-        private readonly LobbyView host;
-        private readonly Queue<string> nameQueue = new();
-        private bool isShowingName;
-
-        public PlayerSlotPanel(LobbyView host, Flow parent, Process? processParent = null)
-            : base(processParent)
+        if (this.emptyBox != null)
         {
-            this.host = host;
-
-            Root = new Flow(parent);
-            Root.set_isVertical(true);
-            Root.set_horizontalAlign(new FlowAlign.Middle());
-            Root.set_verticalAlign(new FlowAlign.Middle());
-            Root.set_verticalSpacing(host.Pixel(10));
-            Root.set_minWidth(host.CardW);
-            Root.set_maxWidth(host.CardW);
-
-            //标题
-            Title = new Flow(Root);
-            Title.set_isVertical(false);
-            Title.set_horizontalAlign(new FlowAlign.Middle());
-            Title.set_verticalAlign(new FlowAlign.Top());
-
-            TitleText = new HtmlText(Assets.Class.font12, Title);
-            ApplyTitleFont();
-
-            //卡槽容器
-            Container = new Flow(Root);
-            Container.set_isVertical(false);
-            Container.set_horizontalAlign(new FlowAlign.Middle());
-            Container.set_verticalAlign(new FlowAlign.Middle());
-            Container.set_horizontalSpacing(host.Pixel(20));
-
-            //创建4个卡槽
-            Slots = new PlayerSlotUI[MAX_SLOTS];
-            for (int i = 0; i < MAX_SLOTS; i++)
+            foreach (var child in this.emptyBox.children)
             {
-                Slots[i] = new PlayerSlotUI(Container, host);
-                Slots[i].OnChanged += OnSlotChanged;
-            }
-
-            ApplyLayout();
-
-            //订阅屏幕变化
-            host.OnScreenResized += ApplyLayout;
-        }
-
-
-        public void Refresh(IEnumerable<GuestInfo>? guests)
-        {
-            var list = guests?.Take(MAX_SLOTS).ToList() ?? new List<GuestInfo>();
-
-            //移除已离开的
-            for (int i = 0; i < MAX_SLOTS; i++)
-            {
-                var g = Slots[i].Guest;
-                if (g != null && !list.Any(x => x.Guid == g.Guid))
-                    Slots[i].Clear();
-            }
-
-            //绑定和刷新
-            for (int i = 0; i < list.Count; i++)
-            {
-                var guest = list[i];
-                if (Slots[i].Guest?.Guid == guest.Guid)
+                if (child is dc.ui.Text t)
                 {
-                    Slots[i].Guest = guest;
-                    Slots[i].RefreshStatus();
-                }
-                else
-                {
-                    Slots[i].Clear();
-                    Slots[i].Bind(guest);
+                    this.ApplyEmptyScale(t, scale);
                 }
             }
-
-            //多余槽清空
-            for (int i = list.Count; i < MAX_SLOTS; i++)
-                Slots[i].Clear();
         }
 
-        private void ApplyLayout()
+        if (this.HeroSprite != null)
         {
-            Root.set_minWidth(host.CardW);
-            Root.set_maxWidth(host.CardW);
+            this.HeroSprite.scaleX = this.HeroSprite.scaleY = scale * 0.5;
+            this.HeroSprite.posChanged = true;
+        }
+        if (this.NameLabel != null)
+        {
+            this.NameLabel.scaleX = this.NameLabel.scaleY = scale * 0.30;
+            this.NameLabel.posChanged = true;
+        }
+        if (this.StatusLabel != null)
+        {
+            this.StatusLabel.scaleX = this.StatusLabel.scaleY = scale * 0.25;
+            this.StatusLabel.posChanged = true;
+        }
+    }
 
-            Title.set_minWidth(host.CardW);
-            Title.set_minHeight(host.CardH / 8);
-            Title.set_maxHeight(host.CardH / 8);
+    private void ApplyEmptyScale(dc.ui.Text text, double? scale = null)
+    {
+        scale ??= this.host.get_pixelScale.Invoke();
+        text.scaleX = text.scaleY = scale.Value * 0.25;
+        text.posChanged = true;
+    }
+}
 
-            Container.set_minWidth(host.CardW);
 
-            int spacing = host.Pixel(20);
-            Container.set_horizontalSpacing(spacing);
-            Container.set_minWidth(host.CardW);
-            Container.set_maxWidth(host.CardW);
+internal sealed class PlayerSlotPanel : UIProcess
+{
+    private const int MAX_SLOTS = 4;
 
-            int totalSpacing = spacing * (MAX_SLOTS - 1);
-            int slotW = (host.CardW - totalSpacing) / MAX_SLOTS;
+    public Flow Root { get; private set; }
+    public Flow Container { get; private set; }
+    public Flow Title { get; private set; }
+    public HtmlText TitleText { get; }
+    public PlayerSlotUI[] Slots { get; }
 
-            foreach (var s in Slots)
+    private readonly LobbyView host;
+    private readonly Queue<string> nameQueue = new();
+    private bool isShowingName;
+
+    public PlayerSlotPanel(LobbyView host, Flow parent, Process? processParent = null)
+        : base(processParent)
+    {
+        this.host = host;
+
+        this.Root = new Flow(parent);
+        this.Root.set_isVertical(true);
+        this.Root.set_horizontalAlign(new FlowAlign.Middle());
+        this.Root.set_verticalAlign(new FlowAlign.Middle());
+        this.Root.set_verticalSpacing(host.Pixel(10));
+        this.Root.set_minWidth(host.CardW);
+        this.Root.set_maxWidth(host.CardW);
+
+        //标题
+        this.Title = new Flow(this.Root);
+        this.Title.set_isVertical(false);
+        this.Title.set_horizontalAlign(new FlowAlign.Middle());
+        this.Title.set_verticalAlign(new FlowAlign.Top());
+
+        this.TitleText = new HtmlText(Assets.Class.font12, this.Title);
+        this.ApplyTitleFont();
+
+        //卡槽容器
+        this.Container = new Flow(this.Root);
+        this.Container.set_isVertical(false);
+        this.Container.set_horizontalAlign(new FlowAlign.Middle());
+        this.Container.set_verticalAlign(new FlowAlign.Middle());
+        this.Container.set_horizontalSpacing(host.Pixel(20));
+
+        //创建4个卡槽
+        this.Slots = new PlayerSlotUI[MAX_SLOTS];
+        for (var i = 0; i < MAX_SLOTS; i++)
+        {
+            this.Slots[i] = new PlayerSlotUI(this.Container, host);
+            this.Slots[i].OnChanged += this.OnSlotChanged;
+        }
+
+        this.ApplyLayout();
+
+        //订阅屏幕变化
+        host.OnScreenResized += this.ApplyLayout;
+    }
+
+
+    public void Refresh(IEnumerable<GuestInfo>? guests)
+    {
+        var list = guests?.Take(MAX_SLOTS).ToList() ?? [];
+
+        //移除已离开的
+        for (var i = 0; i < MAX_SLOTS; i++)
+        {
+            var g = this.Slots[i].Guest;
+            if (g != null && !list.Any(x => x.Guid == g.Guid))
             {
-                s.Container.set_minWidth(slotW);
-                s.Container.set_maxWidth(slotW);
-                s.ApplyScale();
-                s.Container.reflow();
+                this.Slots[i].Clear();
             }
-
-            ApplyTitleFont();
-
-            Title.reflow();
-            Container.reflow();
-            Root.reflow();
         }
 
-        public void ClearAll()
+        //绑定和刷新
+        for (var i = 0; i < list.Count; i++)
         {
-            foreach (var s in Slots) s.Clear();
-
-            Title.removeChildren();
-            Title.remove();
-            Container.removeChildren();
-            Container.remove();
-            Root.removeChildren();
-            Root.remove();
-        }
-
-        private void ApplyTitleFont()
-        {
-            var pixelScale = host.get_pixelScale.Invoke();
-            var font = pixelScale <= 3.0 ? Assets.Class.fontConf.font12
-                     : pixelScale <= 4.0 ? Assets.Class.fontConf.font18
-                     : pixelScale <= 6.0 ? Assets.Class.fontConf.font12
-                     : Assets.Class.fontConf.font18;
-
-            TitleText.set_font(font.toFont());
-            TitleText.scaleX = TitleText.scaleY = pixelScale * 0.25;
-            TitleText.posChanged = true;
-        }
-
-        //新玩家提示
-        private void OnSlotChanged(PlayerSlotUI slot)
-        {
-            var name = slot.Guest?.Name;
-            if (string.IsNullOrEmpty(name)) return;
-
-            nameQueue.Enqueue(name);
-            if (!isShowingName)
-                ShowNextName();
-        }
-
-        private void ShowNextName()
-        {
-            if (nameQueue.Count == 0)
+            var guest = list[i];
+            if (this.Slots[i].Guest?.Guid == guest.Guid)
             {
-                isShowingName = false;
-                return;
+                this.Slots[i].Guest = guest;
+                this.Slots[i].RefreshStatus();
             }
-
-            isShowingName = true;
-            string next = nameQueue.Dequeue();
-            host.ShowToast($"玩家 {next} 加入");
-            ShowNextName();
+            else
+            {
+                this.Slots[i].Clear();
+                this.Slots[i].Bind(guest);
+            }
         }
 
-        protected override void MyDispose()
+        //多余槽清空
+        for (var i = list.Count; i < MAX_SLOTS; i++)
         {
-            host.OnScreenResized -= ApplyLayout;
-
-            foreach (var s in Slots)
-                s.OnChanged -= OnSlotChanged;
-
-            ClearAll();
+            this.Slots[i].Clear();
         }
+    }
+
+    private void ApplyLayout()
+    {
+        this.Root.set_minWidth(this.host.CardW);
+        this.Root.set_maxWidth(this.host.CardW);
+
+        this.Title.set_minWidth(this.host.CardW);
+        this.Title.set_minHeight(this.host.CardH / 8);
+        this.Title.set_maxHeight(this.host.CardH / 8);
+
+        this.Container.set_minWidth(this.host.CardW);
+
+        var spacing = this.host.Pixel(20);
+        this.Container.set_horizontalSpacing(spacing);
+        this.Container.set_minWidth(this.host.CardW);
+        this.Container.set_maxWidth(this.host.CardW);
+
+        var totalSpacing = spacing * (MAX_SLOTS - 1);
+        var slotW = (this.host.CardW - totalSpacing) / MAX_SLOTS;
+
+        foreach (var s in this.Slots)
+        {
+            s.Container.set_minWidth(slotW);
+            s.Container.set_maxWidth(slotW);
+            s.ApplyScale();
+            s.Container.reflow();
+        }
+
+        this.ApplyTitleFont();
+
+        this.Title.reflow();
+        this.Container.reflow();
+        this.Root.reflow();
+    }
+
+    public void ClearAll()
+    {
+        foreach (var s in this.Slots)
+        {
+            s.Clear();
+        }
+
+        this.Title.removeChildren();
+        this.Title.remove();
+        this.Container.removeChildren();
+        this.Container.remove();
+        this.Root.removeChildren();
+        this.Root.remove();
+    }
+
+    private void ApplyTitleFont()
+    {
+        var pixelScale = this.host.get_pixelScale.Invoke();
+        var font = pixelScale <= 3.0 ? Assets.Class.fontConf.font12
+                 : pixelScale <= 4.0 ? Assets.Class.fontConf.font18
+                 : pixelScale <= 6.0 ? Assets.Class.fontConf.font12
+                 : Assets.Class.fontConf.font18;
+
+        this.TitleText.set_font(font.toFont());
+        this.TitleText.scaleX = this.TitleText.scaleY = pixelScale * 0.25;
+        this.TitleText.posChanged = true;
+    }
+
+    //新玩家提示
+    private void OnSlotChanged(PlayerSlotUI slot)
+    {
+        var name = slot.Guest?.Name;
+        if (string.IsNullOrEmpty(name))
+        {
+            return;
+        }
+
+        this.nameQueue.Enqueue(name);
+        if (!this.isShowingName)
+        {
+            this.ShowNextName();
+        }
+    }
+
+    private void ShowNextName()
+    {
+        if (this.nameQueue.Count == 0)
+        {
+            this.isShowingName = false;
+            return;
+        }
+
+        this.isShowingName = true;
+        var next = this.nameQueue.Dequeue();
+        this.host.ShowToast($"玩家 {next} 加入");
+        this.ShowNextName();
+    }
+
+    protected override void MyDispose()
+    {
+        this.host.OnScreenResized -= this.ApplyLayout;
+
+        foreach (var s in this.Slots)
+        {
+            s.OnChanged -= this.OnSlotChanged;
+        }
+
+        this.ClearAll();
     }
 }

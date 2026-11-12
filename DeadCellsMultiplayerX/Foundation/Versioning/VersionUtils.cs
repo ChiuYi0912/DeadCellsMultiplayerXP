@@ -1,7 +1,6 @@
-namespace DeadCellsMultiplayerX.Foundation.Versioning
+namespace DeadCellsMultiplayerX.Foundation.Versioning;
+
+internal sealed class VersionUtils
 {
-    internal class VersionUtils
-    {
-        public static Version ModVersion => typeof(VersionUtils).Assembly.GetName().Version!;
-    }
+    public static Version ModVersion => typeof(VersionUtils).Assembly.GetName().Version!;
 }

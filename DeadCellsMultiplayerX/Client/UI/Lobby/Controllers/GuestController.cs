@@ -1,62 +1,81 @@
+namespace DeadCellsMultiplayerX.Client.UI.Lobby.Controllers;
+
 using DeadCellsMultiplayerX.Client.Session;
 
-namespace DeadCellsMultiplayerX.Client.UI.Lobby.Controllers
+internal sealed class GuestController(
+    ClientRuntime client,
+    LobbyContext ctx,
+    LobbyStateMachine state) : LobbyController(client, ctx, state)
 {
-    internal class GuestController : LobbyController
-    {
-        public GuestController(
-            ClientRuntime client,
-            LobbyContext ctx,
-            LobbyStateMachine state) : base(client, ctx, state) { }
 
-        //加入房间
-        public Task JoinRoom(string ip, int port)
-            => RunAsync(async ct =>
+    //加入房间
+    public Task JoinRoom(string ip, int port)
+        => this.RunAsync(async ct =>
+        {
+            if (!this.State.TryGo(LobbyState.Connecting))
             {
-                if (!State.TryGo(LobbyState.Connecting)) return;
+                return;
+            }
 
-                Ctx.HostIp = ip;
-                Ctx.HostPort = port;
-                Ctx.IsHost = false;
+            this.Ctx.HostIp = ip;
+            this.Ctx.HostPort = port;
+            this.Ctx.IsHost = false;
 
-                await Client.StartGuest(ip, port).WaitAsync(ct);
+            await this.Client.StartGuest(ip, port).WaitAsync(ct);
 
-                var guest = Client.CurrentGuestClient
-                    ?? throw new InvalidOperationException("Guest client not created");
+            var guest = this.Client.CurrentGuestClient
+                ?? throw new InvalidOperationException("Guest client not created");
 
-                Ctx.LocalGuid = guest.Guid;
-                Ctx.Lobby = guest.LobbyInfo;
+            this.Ctx.LocalGuid = guest.Guid;
+            this.Ctx.Lobby = guest.LobbyInfo;
 
-                if (!State.TryGo(LobbyState.InRoom)) return;
-            }, "JoinRoom");
+            if (!this.State.TryGo(LobbyState.InRoom))
+            {
+                return;
+            }
+        }, "JoinRoom");
 
-        //客户端准备
-        public void ToggleReady()
+    //客户端准备
+    public void ToggleReady()
+    {
+        if (this.IsDisposed)
         {
-            if (IsDisposed) return;
-            if (State.Current != LobbyState.InRoom) return;
-
-            var gc = Client.CurrentGuestClient;
-            if (gc == null) return;
-
-            var me = Ctx.Me;
-            if (me == null) return;
-
-            bool newReady = !me.IsReady;
-            gc.SetReady(newReady);
-            me.IsReady = newReady;
+            return;
         }
 
-        //离开
-        public void LeaveRoom()
+        if (this.State.Current != LobbyState.InRoom)
         {
-            Client.CurrentGuestClient?.Quit();
-            Ctx.Reset();
-
-            if (State.CanGo(LobbyState.MainMenu))
-                State.TryGo(LobbyState.MainMenu);
+            return;
         }
 
-        protected override void MyDispose() { }
+        var gc = this.Client.CurrentGuestClient;
+        if (gc == null)
+        {
+            return;
+        }
+
+        var me = this.Ctx.Me;
+        if (me == null)
+        {
+            return;
+        }
+
+        var newReady = !me.IsReady;
+        gc.SetReady(newReady);
+        me.IsReady = newReady;
     }
+
+    //离开
+    public void LeaveRoom()
+    {
+        this.Client.CurrentGuestClient?.Quit();
+        this.Ctx.Reset();
+
+        if (this.State.CanGo(LobbyState.MainMenu))
+        {
+            this.State.TryGo(LobbyState.MainMenu);
+        }
+    }
+
+    protected override void MyDispose() { }
 }

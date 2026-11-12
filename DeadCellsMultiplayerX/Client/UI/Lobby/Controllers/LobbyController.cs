@@ -1,58 +1,52 @@
+namespace DeadCellsMultiplayerX.Client.UI.Lobby.Controllers;
+
 using dc.ui;
-using DeadCellsMultiplayerX.Client.UI.Common;
 using DeadCellsMultiplayerX.Client.Session;
+using DeadCellsMultiplayerX.Client.UI.Common;
 
-namespace DeadCellsMultiplayerX.Client.UI.Lobby.Controllers
+//Controller 基类
+internal abstract class LobbyController(
+    ClientRuntime client,
+    LobbyContext ctx,
+    LobbyStateMachine state,
+    Process? parent = null) : UIProcess(parent)
 {
-    //Controller 基类
-    internal abstract class LobbyController : UIProcess
+    protected ClientRuntime Client { get; } = client;
+    protected LobbyContext Ctx { get; } = ctx;
+    protected LobbyStateMachine State { get; } = state;
+
+    //错误处理
+    protected void Fail(Exception ex, string msg)
     {
-        protected readonly ClientRuntime Client;
-        protected readonly LobbyContext Ctx;
-        protected readonly LobbyStateMachine State;
+        this.Logger.Error(ex, msg);
+        this.Ctx.LastError = $"{msg}: {ex.Message}";
 
-        protected LobbyController(
-            ClientRuntime client,
-            LobbyContext ctx,
-            LobbyStateMachine state,
-            Process? parent = null) : base(parent)
+        if (this.State.CanGo(LobbyState.Error))
         {
-            Client = client;
-            Ctx = ctx;
-            State = state;
+            this.State.TryGo(LobbyState.Error);
         }
+    }
 
-        //错误处理
-        protected void Fail(Exception ex, string msg)
+    //错误提示
+    protected void Fail(string msg)
+    {
+        this.Logger.Error(msg);
+        this.Ctx.LastError = msg;
+    }
+
+    protected async Task RunAsync(Func<CancellationToken, Task> action, string operationName)
+    {
+        try
         {
-            Logger.Error(ex, msg);
-            Ctx.LastError = $"{msg}: {ex.Message}";
-
-            if (State.CanGo(LobbyState.Error))
-                State.TryGo(LobbyState.Error);
+            await action(this.DisposeToken);
         }
-
-        //错误提示
-        protected void Fail(string msg)
+        catch (OperationCanceledException) when (this.IsDisposed)
         {
-            Logger.Error(msg);
-            Ctx.LastError = msg;
+            this.Logger.Information($"{operationName} canceled");
         }
-
-        protected async Task RunAsync(Func<CancellationToken, Task> action, string operationName)
+        catch (Exception ex)
         {
-            try
-            {
-                await action(DisposeToken);
-            }
-            catch (OperationCanceledException) when (IsDisposed)
-            {
-                Logger.Information($"{operationName} canceled");
-            }
-            catch (Exception ex)
-            {
-                Fail(ex, operationName);
-            }
+            this.Fail(ex, operationName);
         }
     }
 }

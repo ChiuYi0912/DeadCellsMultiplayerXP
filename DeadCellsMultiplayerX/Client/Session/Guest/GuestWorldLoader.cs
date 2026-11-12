@@ -1,3 +1,5 @@
+namespace DeadCellsMultiplayerX.Client.Session.Guest;
+
 using System.Diagnostics;
 using System.Text.Json;
 using dc;
@@ -7,95 +9,96 @@ using DeadCellsMultiplayerX.Client.World;
 using ModCore.Utilities;
 using Serilog;
 
-namespace DeadCellsMultiplayerX.Client.Session.Guest
+/// <summary>
+/// Owns the client-side level load: launch from save, wait for the game,
+/// remove locally spawned mobs and replace the replicated world.  It does not
+/// own session RPC, hooks or upload state.
+/// </summary>
+internal sealed class GuestWorldLoader(
+    CancellationToken disposeToken,
+    Func<ClientWorld> replaceWorld,
+    Action resetLocalHeroState,
+    Action<byte[]> saveDataSink,
+    GuestClient client,
+    ILogger logger)
 {
-    /// <summary>
-    /// Owns the client-side level load: launch from save, wait for the game,
-    /// remove locally spawned mobs and replace the replicated world.  It does not
-    /// own session RPC, hooks or upload state.
-    /// </summary>
-    internal sealed class GuestWorldLoader
+    private readonly CancellationToken disposeToken = disposeToken;
+    private readonly Func<ClientWorld> replaceWorld = replaceWorld
+            ?? throw new ArgumentNullException(nameof(replaceWorld));
+    private readonly Action resetLocalHeroState = resetLocalHeroState
+            ?? throw new ArgumentNullException(nameof(resetLocalHeroState));
+    private readonly Action<byte[]> saveDataSink = saveDataSink
+            ?? throw new ArgumentNullException(nameof(saveDataSink));
+    private readonly GuestClient client = client
+            ?? throw new ArgumentNullException(nameof(client));
+    private readonly ILogger logger = logger
+            ?? throw new ArgumentNullException(nameof(logger));
+
+    private static readonly JsonSerializerOptions DebugJsonOptions = new()
     {
-        private readonly CancellationToken disposeToken;
-        private readonly Func<ClientWorld> replaceWorld;
-        private readonly Action resetLocalHeroState;
-        private readonly Action<byte[]> saveDataSink;
-        private readonly GuestClient client;
-        private readonly ILogger logger;
+        WriteIndented = true,
+    };
 
-        public GuestWorldLoader(
-            CancellationToken disposeToken,
-            Func<ClientWorld> replaceWorld,
-            Action resetLocalHeroState,
-            Action<byte[]> saveDataSink,
-            GuestClient client,
-            ILogger logger)
+    public async Task EnterNewLevel(byte[] saveData)
+    {
+        this.saveDataSink(saveData);
+        this.logger.Information("Entering new level...");
+
+        Main.Class.ME.options.disableLoreRooms = true;
+        Main.Class.ME.cleanUser();
+        Main.Class.ME.launchGame(new LaunchMode.LoadSave(), null, null);
+
+        while (true)
         {
-            this.disposeToken = disposeToken;
-            this.replaceWorld = replaceWorld
-                ?? throw new ArgumentNullException(nameof(replaceWorld));
-            this.resetLocalHeroState = resetLocalHeroState
-                ?? throw new ArgumentNullException(nameof(resetLocalHeroState));
-            this.saveDataSink = saveDataSink
-                ?? throw new ArgumentNullException(nameof(saveDataSink));
-            this.client = client
-                ?? throw new ArgumentNullException(nameof(client));
-            this.logger = logger
-                ?? throw new ArgumentNullException(nameof(logger));
-        }
+            await Task.Delay(1);
+            this.disposeToken.ThrowIfCancellationRequested();
 
-        public async Task EnterNewLevel(byte[] saveData)
-        {
-            saveDataSink(saveData);
-            logger.Information("Entering new level...");
-
-            Main.Class.ME.options.disableLoreRooms = true;
-            Main.Class.ME.cleanUser();
-            Main.Class.ME.launchGame(new LaunchMode.LoadSave(), null, null);
-
-            while (true)
+            var game = Game.Class.ME;
+            if (game?.curLevel == null || game.subLevels == null)
             {
-                await Task.Delay(1);
-                disposeToken.ThrowIfCancellationRequested();
-
-                var game = Game.Class.ME;
-                if (game?.curLevel == null || game.subLevels == null)
-                    continue;
-
-                if (!Main.Class.ME.isLoading)
-                    break;
+                continue;
             }
 
-            logger.Information("Clearing entities...");
-            var loadedGame = Game.Class.ME;
-
-            foreach (Level level in loadedGame.subLevels)
+            if (!Main.Class.ME.isLoading)
             {
-                List<Entity> entities = [];
-                foreach (Entity entity in level.entities)
-                {
-                    if (entity is Hero or Interactive)
-                        continue;
+                break;
+            }
+        }
 
-                    if (entity is Mob)
-                        entities.Add(entity);
+        this.logger.Information("Clearing entities...");
+        var loadedGame = Game.Class.ME;
+
+        foreach (Level level in loadedGame.subLevels)
+        {
+            List<Entity> entities = [];
+            foreach (Entity entity in level.entities)
+            {
+                if (entity is Hero or Interactive)
+                {
+                    continue;
                 }
 
-                foreach (var entity in entities)
-                    entity.destroy();
+                if (entity is Mob)
+                {
+                    entities.Add(entity);
+                }
             }
 
+            foreach (var entity in entities)
+            {
+                entity.destroy();
+            }
+        }
+
 #if DEBUG
-            await client.RefreshLobbyInfo();
-            Debug.Assert(client.LobbyInfo != null);
-            var options = new JsonSerializerOptions { WriteIndented = true };
-            logger.Information(
-                "Start New Game Team : {Info}\n",
-                JsonSerializer.Serialize(client.LobbyInfo, options));
+        await this.client.RefreshLobbyInfo();
+        Debug.Assert(this.client.LobbyInfo != null);
+        this.logger.Information(
+            "Start New Game Team : {Info}\n",
+            JsonSerializer.Serialize(this.client.LobbyInfo, DebugJsonOptions));
 #endif
 
-            replaceWorld();
-            resetLocalHeroState();
-        }
+        this.replaceWorld();
+        this.resetLocalHeroState();
     }
 }

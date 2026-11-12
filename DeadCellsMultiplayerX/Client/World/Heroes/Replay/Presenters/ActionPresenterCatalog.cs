@@ -1,23 +1,20 @@
+namespace DeadCellsMultiplayerX.Client.World.Heroes.Replay.Presenters;
+
 using DeadCellsMultiplayerX.Contracts.Actions;
-namespace DeadCellsMultiplayerX.Client.World.Heroes.Replay.Presenters
+
+internal static class ActionPresenterCatalog
 {
-    internal static class ActionPresenterCatalog
+    public static Dictionary<HeroActionKind, IActionPresenter> CreateDefault()
     {
-        public static Dictionary<HeroActionKind, IActionPresenter> CreateDefault()
-        {
-            var presenters = new Dictionary<HeroActionKind, IActionPresenter>();
+        var presenters = new Dictionary<HeroActionKind, IActionPresenter>();
 
-            Add(new SkillActionPresenter());
-            Add(new WeaponActionPresenter());
-            Add(new TalismanActionPresenter());
-            Add(new ShieldActionPresenter());
+        Add(new SkillActionPresenter());
+        Add(new WeaponActionPresenter());
+        Add(new TalismanActionPresenter());
+        Add(new ShieldActionPresenter());
 
-            return presenters;
+        return presenters;
 
-            void Add(IActionPresenter presenter)
-            {
-                presenters.Add(presenter.Kind, presenter);
-            }
-        }
+        void Add(IActionPresenter presenter) => presenters.Add(presenter.Kind, presenter);
     }
 }

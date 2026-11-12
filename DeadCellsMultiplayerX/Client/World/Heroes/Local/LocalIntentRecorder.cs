@@ -1,3 +1,5 @@
+namespace DeadCellsMultiplayerX.Client.World.Heroes.Local;
+
 using dc.en;
 using dc.tool;
 using dc.tool.atk;
@@ -11,397 +13,458 @@ using DeadCellsMultiplayerX.Engine.Hooks.Client;
 using DeadCellsMultiplayerX.Engine.Utilities;
 using Serilog;
 
-namespace DeadCellsMultiplayerX.Client.World.Heroes.Local
+/// <summary>
+/// 本地动作意图记录：从 Hook 捕获技能/武器/项链/盾牌，
+/// 构造 HeroAction 并交给发送通道。
+/// </summary>
+internal sealed class LocalIntentRecorder(
+    GuestClientSession session,
+    LocalActionSender sender,
+    LocalActionDeduper dedupe) : IClientActionHookSink
 {
+    private static readonly ILogger Logger =
+        Log.ForContext("SourceContext", "LocalIntentRecorder");
+
+    private readonly GuestClientSession session = session
+            ?? throw new ArgumentNullException(nameof(session));
+    private readonly LocalActionSender sender = sender
+            ?? throw new ArgumentNullException(nameof(sender));
+    private readonly LocalActionDeduper dedupe = dedupe
+            ?? throw new ArgumentNullException(nameof(dedupe));
+
+    public void Clear() => this.dedupe.Clear();
+
     /// <summary>
-    /// 本地动作意图记录：从 Hook 捕获技能/武器/项链/盾牌，
-    /// 构造 HeroAction 并交给发送通道。
+    /// 上报本地释放的主动技能
     /// </summary>
-    internal sealed class LocalIntentRecorder : IClientActionHookSink
+    public void OnActiveSkill(
+        Hook_HeroActiveSkillsManager.orig_onActiveSkill orig,
+        HeroActiveSkillsManager self,
+        int id,
+        double ratio)
     {
-        private static readonly ILogger Logger =
-            Log.ForContext("SourceContext", "LocalIntentRecorder");
+        var game = GuestClientSession.Game;
+        var hero = self.hero;
+        var isLocal = hero != null && ReferenceEquals(hero, game?.hero);
 
-        private readonly GuestClientSession session;
-        private readonly LocalActionSender sender;
-        private readonly LocalActionDeduper dedupe;
+        int cx = 0, cy = 0, dir = 0;
+        double xr = 0, yr = 0, dx = 0, dy = 0;
 
-        public LocalIntentRecorder(
-            GuestClientSession session,
-            LocalActionSender sender,
-            LocalActionDeduper dedupe)
+        if (isLocal)
         {
-            this.session = session
-                ?? throw new ArgumentNullException(nameof(session));
-            this.sender = sender
-                ?? throw new ArgumentNullException(nameof(sender));
-            this.dedupe = dedupe
-                ?? throw new ArgumentNullException(nameof(dedupe));
+            cx = hero!.cx;
+            cy = hero.cy;
+            xr = hero.xr;
+            yr = hero.yr;
+            dir = hero.dir;
+            dx = hero.dx;
+            dy = hero.dy;
         }
 
-        public void Clear() => dedupe.Clear();
+        orig(self!, id, ratio);
 
-        /// <summary>
-        /// 上报本地释放的主动技能
-        /// </summary>
-        public void OnActiveSkill(
-            Hook_HeroActiveSkillsManager.orig_onActiveSkill orig,
-            HeroActiveSkillsManager self,
-            int id,
-            double ratio)
+        if (!isLocal)
         {
-            var game = session.Game;
-            var hero = self.hero;
-            bool isLocal = hero != null && ReferenceEquals(hero, game?.hero);
-
-            int cx = 0, cy = 0, dir = 0;
-            double xr = 0, yr = 0, dx = 0, dy = 0;
-
-            if (isLocal)
-            {
-                cx = hero!.cx;
-                cy = hero.cy;
-                xr = hero.xr;
-                yr = hero.yr;
-                dir = hero.dir;
-                dx = hero.dx;
-                dy = hero.dy;
-            }
-
-            orig(self!, id, ratio);
-
-            if (!isLocal) return;
-
-            var item = hero?.inventory.getActiveOn(id);
-            if (item == null) return;
-
-            SendHeroAction(
-                hero!, HeroActionKind.ActiveSkill, id, ItemCodec.Collect(item),
-                ratio, 0, cx, cy, xr, yr, dir, dx, dy);
+            return;
         }
 
-        /// <summary>
-        /// 武器命中帧
-        /// </summary>
-        public void OnWeaponExecute(
-            Hook_BeheadedWeaponsManager.orig_onWeaponExecute orig,
-            BeheadedWeaponsManager self,
-            dc.tool.Weapon weapon)
+        var item = hero?.inventory.getActiveOn(id);
+        if (item == null)
         {
-            var game = session.Game;
-            var hero = self?.hero;
-            bool isLocal = hero != null && ReferenceEquals(hero, game?.hero);
-            var item = isLocal ? weapon?.item : null;
-            int slot = item?.posID ?? -1;
-
-            // 背包武器等非主武器槽位的执行不上报
-            if (!isLocal || item == null || slot is < 0 or > 1)
-            {
-                orig(self!, weapon);
-                return;
-            }
-
-            int cx = hero!.cx;
-            int cy = hero.cy;
-            double xr = hero.xr;
-            double yr = hero.yr;
-            int dir = hero.dir;
-            double dx = hero.dx;
-            double dy = hero.dy;
-            int cycle = weapon!.get_cycle();
-
-            int epoch = session.ClientWorld?.Epoch ?? -1;
-            long token = epoch >= 0 ? session.Prediction.BeginWeapon() : 0;
-
-            try
-            {
-                orig(self!, weapon);
-            }
-            finally
-            {
-                if (token != 0)
-                    session.Prediction.EndWeapon();
-            }
-
-            // ActionId 和 epoch 在 orig 之后才确定
-            int sendEpoch = session.ClientWorld?.Epoch ?? -1;
-            long actionId = 0;
-            if (sendEpoch >= 0)
-            {
-                actionId = dedupe.NextActionId();
-
-                if (token != 0)
-                    session.Prediction.CommitWeapon(token, actionId);
-            }
-
-            SendHeroAction(
-                hero, HeroActionKind.Weapon, slot,
-                ItemCodec.Collect(item),
-                1.0, cycle, cx, cy, xr, yr, dir, dx, dy,
-                sendEpoch, actionId);
+            return;
         }
 
-        /// <summary>
-        /// 上报本地切换后的项链
-        /// </summary>
-        public InventItem OnInventoryAdd(
-            Hook_Inventory.orig_add orig,
-            Inventory self,
-            InventItem item)
+        this.SendHeroAction(
+            hero!, HeroActionKind.ActiveSkill, id, ItemCodec.Collect(item),
+            ratio, 0, cx, cy, xr, yr, dir, dx, dy);
+    }
+
+    /// <summary>
+    /// 武器命中帧
+    /// </summary>
+    public void OnWeaponExecute(
+        Hook_BeheadedWeaponsManager.orig_onWeaponExecute orig,
+        BeheadedWeaponsManager self,
+        Weapon weapon)
+    {
+        var game = GuestClientSession.Game;
+        var hero = self?.hero;
+        var isLocal = hero != null && ReferenceEquals(hero, game?.hero);
+        var item = isLocal ? weapon?.item : null;
+        var slot = item?.posID ?? -1;
+
+        // 背包武器等非主武器槽位的执行不上报
+        if (!isLocal || item == null || slot is < 0 or > 1)
         {
-            var game = session.Game;
-            var hero = game?.hero;
+            orig(self!, weapon);
+            return;
+        }
 
-            bool isLocal = hero != null && ReferenceEquals(self, hero.inventory);
+        var cx = hero!.cx;
+        var cy = hero.cy;
+        var xr = hero.xr;
+        var yr = hero.yr;
+        var dir = hero.dir;
+        var dx = hero.dx;
+        var dy = hero.dy;
+        var cycle = weapon!.get_cycle();
 
-            bool isTalisman = isLocal && item?.kind is InventItemKind.Talisman;
+        var epoch = this.session.ClientWorld?.Epoch ?? -1;
+        var token = epoch >= 0 ? this.session.Prediction.BeginWeapon() : 0;
 
-            var result = orig(self, item);
+        try
+        {
+            orig(self!, weapon);
+        }
+        finally
+        {
+            if (token != 0)
+            {
+                this.session.Prediction.EndWeapon();
+            }
+        }
 
-            if (!isTalisman) return result;
+        // ActionId 和 epoch 在 orig 之后才确定
+        var sendEpoch = this.session.ClientWorld?.Epoch ?? -1;
+        long actionId = 0;
+        if (sendEpoch >= 0)
+        {
+            actionId = this.dedupe.NextActionId();
 
-            var talisman = hero!.inventory.hasTalisman()
-                ? hero.inventory.getTalisman()
-                : item;
+            if (token != 0)
+            {
+                this.session.Prediction.CommitWeapon(token, actionId);
+            }
+        }
 
-            if (talisman == null) return result;
+        this.SendHeroAction(
+            hero, HeroActionKind.Weapon, slot,
+            ItemCodec.Collect(item),
+            1.0, cycle, cx, cy, xr, yr, dir, dx, dy,
+            sendEpoch, actionId);
+    }
 
-            SendHeroAction(
-                hero, HeroActionKind.Talisman, 0,
-                ItemCodec.Collect(talisman),
-                1.0, 0,
-                hero.cx, hero.cy, hero.xr, hero.yr,
-                hero.dir, hero.dx, hero.dy);
+    /// <summary>
+    /// 上报本地切换后的项链
+    /// </summary>
+    public InventItem OnInventoryAdd(
+        Hook_Inventory.orig_add orig,
+        Inventory self,
+        InventItem item)
+    {
+        var game = GuestClientSession.Game;
+        var hero = game?.hero;
 
+        var isLocal = hero != null && ReferenceEquals(self, hero.inventory);
+
+        var isTalisman = isLocal && item?.kind is InventItemKind.Talisman;
+
+        var result = orig(self, item);
+
+        if (!isTalisman)
+        {
             return result;
         }
 
-        public void OnShieldChargeStart(
-            Hook_BaseShield.orig_onShieldChargeStart orig, BaseShield self)
+        var talisman = hero!.inventory.hasTalisman()
+            ? hero.inventory.getTalisman()
+            : item;
+
+        if (talisman == null)
         {
-            orig(self);
-            if (!IsLocalShield(self)) return;
-
-            if (!dedupe.TryBeginHold(self)) return;
-
-            SendShieldAction(self, ShieldActionKind.HoldStart);
+            return result;
         }
 
-        public void OnShieldReleased(
-            Hook_BaseShield.orig_onShieldReleased orig, BaseShield self)
-        {
-            orig(self);
-            if (!IsLocalShield(self)) return;
+        this.SendHeroAction(
+            hero, HeroActionKind.Talisman, 0,
+            ItemCodec.Collect(talisman),
+            1.0, 0,
+            hero.cx, hero.cy, hero.xr, hero.yr,
+            hero.dir, hero.dx, hero.dy);
 
-            dedupe.EndHold(self);
-            SendShieldAction(self, ShieldActionKind.HoldEnd);
+        return result;
+    }
+
+    public void OnShieldChargeStart(
+        Hook_BaseShield.orig_onShieldChargeStart orig, BaseShield self)
+    {
+        orig(self);
+        if (!IsLocalShield(self))
+        {
+            return;
         }
 
-        public void OnStartParry(
-            Hook_BaseShield.orig_startParry orig, BaseShield self)
+        if (!this.dedupe.TryBeginHold(self))
         {
-            orig(self);
-            if (!IsLocalShield(self)) return;
-
-            if (!dedupe.TryBeginParry(self)) return;
-
-            SendShieldAction(self, ShieldActionKind.ParryStart);
+            return;
         }
 
-        public void OnShieldEndParry(
-            Hook_BaseShield.orig_onShieldEndParry orig, BaseShield self)
+        this.SendShieldAction(self, ShieldActionKind.HoldStart);
+    }
+
+    public void OnShieldReleased(
+        Hook_BaseShield.orig_onShieldReleased orig, BaseShield self)
+    {
+        orig(self);
+        if (!IsLocalShield(self))
         {
-            orig(self);
-            if (!IsLocalShield(self)) return;
-
-            if (!dedupe.TryEndParry(self)) return;
-
-            SendShieldAction(self, ShieldActionKind.ParryEnd);
+            return;
         }
 
-        public void OnShieldBlock(
-            Hook_BaseShield.orig_onShieldBlock orig,
-            BaseShield self,
-            AttackData sourceAtk,
-            bool fullParry)
-        {
-            orig(self, sourceAtk, fullParry);
-            if (!IsLocalShield(self)) return;
+        this.dedupe.EndHold(self);
+        this.SendShieldAction(self, ShieldActionKind.HoldEnd);
+    }
 
-            SendShieldAction(
-                self, ShieldActionKind.Block, sourceAtk, fullParry);
+    public void OnStartParry(
+        Hook_BaseShield.orig_startParry orig, BaseShield self)
+    {
+        orig(self);
+        if (!IsLocalShield(self))
+        {
+            return;
         }
 
-        public void OnShieldCounterAttack(
-            Hook_BaseShield.orig_shieldCounterAttack orig,
-            BaseShield self,
-            AttackData sourceAtk,
-            bool fullParry)
+        if (!this.dedupe.TryBeginParry(self))
         {
-            orig(self, sourceAtk, fullParry);
-            if (!IsLocalShield(self)) return;
-
-            SendShieldAction(
-                self, ShieldActionKind.Counter, sourceAtk, fullParry);
+            return;
         }
 
-        /// <summary>
-        /// DEBUG:直接向服务端上报指定技能的释放
-        /// </summary>
-        internal void DebugCastSkill(string itemId, int slot)
+        this.SendShieldAction(self, ShieldActionKind.ParryStart);
+    }
+
+    public void OnShieldEndParry(
+        Hook_BaseShield.orig_onShieldEndParry orig, BaseShield self)
+    {
+        orig(self);
+        if (!IsLocalShield(self))
         {
-            var hero = session.Game?.hero;
-            var world = session.ClientWorld;
-            if (hero == null || world == null) return;
-            if (world.Epoch < 0) return;
-
-            SendHeroAction(
-                hero, HeroActionKind.ActiveSkill, slot,
-                new ItemRef
-                {
-                    Kind = (int)dc.tool.InventItemKind.Indexes.Active,
-                    ItemId = itemId,
-                    ItemLevel = 1,
-                    PosID = slot,
-                },
-                1.0, 0,
-                hero.cx, hero.cy, hero.xr, hero.yr, hero.dir, hero.dx, hero.dy);
-
-            Logger.Information(
-                "Debug skill cast sent: item={Item} slot={Slot}", itemId, slot);
+            return;
         }
 
-        /// <summary>
-        /// DEBUG:直接向服务端上报指定武器的使用
-        /// </summary>
-        internal void DebugUseWeapon(string itemId, int slot, int cycle = 0)
+        if (!this.dedupe.TryEndParry(self))
         {
-            var hero = session.Game?.hero;
-            var world = session.ClientWorld;
-            if (hero == null || world == null) return;
-            if (world.Epoch < 0) return;
-
-            SendHeroAction(
-                hero, HeroActionKind.Weapon, slot,
-                new ItemRef
-                {
-                    Kind = (int)dc.tool.InventItemKind.Indexes.Weapon,
-                    ItemId = itemId,
-                    ItemLevel = 1,
-                    PosID = slot,
-                },
-                1.0, cycle,
-                hero.cx, hero.cy, hero.xr, hero.yr, hero.dir, hero.dx, hero.dy);
-
-            Logger.Information(
-                "Debug weapon use sent: item={Item} slot={Slot} cycle={Cycle}",
-                itemId, slot, cycle);
+            return;
         }
 
-        private bool IsLocalShield(BaseShield? shield)
+        this.SendShieldAction(self, ShieldActionKind.ParryEnd);
+    }
+
+    public void OnShieldBlock(
+        Hook_BaseShield.orig_onShieldBlock orig,
+        BaseShield self,
+        AttackData sourceAtk,
+        bool fullParry)
+    {
+        orig(self, sourceAtk, fullParry);
+        if (!IsLocalShield(self))
         {
-            if (shield == null || shield.destroyed)
-                return false;
-
-            var hero = session.Game?.hero;
-            if (hero == null || !ReferenceEquals(shield.owner, hero))
-                return false;
-
-            return shield.item != null && shield.item.posID is >= 0 and <= 1;
+            return;
         }
 
-        private void SendShieldAction(
-            BaseShield shield,
-            ShieldActionKind kind,
-            AttackData? sourceAtk = null,
-            bool fullParry = false)
+        this.SendShieldAction(
+            self, ShieldActionKind.Block, sourceAtk, fullParry);
+    }
+
+    public void OnShieldCounterAttack(
+        Hook_BaseShield.orig_shieldCounterAttack orig,
+        BaseShield self,
+        AttackData sourceAtk,
+        bool fullParry)
+    {
+        orig(self, sourceAtk, fullParry);
+        if (!IsLocalShield(self))
         {
-            var hero = session.Game?.hero;
-            var item = shield.item;
-            if (hero == null || item == null)
-                return;
-
-            int slot = item.posID;
-            if (slot is < 0 or > 1)
-                return;
-
-            SendHeroAction(
-                hero, HeroActionKind.Shield, slot,
-                ItemCodec.Collect(item),
-                1.0, 0,
-                hero.cx, hero.cy, hero.xr, hero.yr,
-                hero.dir, hero.dx, hero.dy,
-                shieldKind: kind,
-                fullParry: fullParry,
-                sourceNetId: ResolveSourceNetId(sourceAtk));
+            return;
         }
 
-        private uint ResolveSourceNetId(AttackData? atk)
+        this.SendShieldAction(
+            self, ShieldActionKind.Counter, sourceAtk, fullParry);
+    }
+
+    /// <summary>
+    /// DEBUG:直接向服务端上报指定技能的释放
+    /// </summary>
+    internal void DebugCastSkill(string itemId, int slot)
+    {
+        var hero = GuestClientSession.Game?.hero;
+        var world = this.session.ClientWorld;
+        if (hero == null || world == null)
         {
-            var attacker = atk?.source as Mob ?? atk?.carrier as Mob;
-            if (attacker != null
-                && session.ClientWorld?.TryGetMobNetId(
-                    attacker, out uint netId) == true)
+            return;
+        }
+
+        if (world.Epoch < 0)
+        {
+            return;
+        }
+
+        this.SendHeroAction(
+            hero, HeroActionKind.ActiveSkill, slot,
+            new ItemRef
             {
-                return netId;
-            }
+                Kind = (int)InventItemKind.Indexes.Active,
+                ItemId = itemId,
+                ItemLevel = 1,
+                PosID = slot,
+            },
+            1.0, 0,
+            hero.cx, hero.cy, hero.xr, hero.yr, hero.dir, hero.dx, hero.dy);
 
-            return 0;
-        }
+        Logger.Information(
+            "Debug skill cast sent: item={Item} slot={Slot}", itemId, slot);
+    }
 
-        private void SendHeroAction(
-            Hero hero,
-            HeroActionKind kind,
-            int slot,
-            ItemRef item,
-            double ratio,
-            int cycle,
-            int cx, int cy,
-            double xr, double yr,
-            int dir,
-            double dx, double dy,
-            int? epoch = null,
-            long? actionId = null,
-            ShieldActionKind shieldKind = ShieldActionKind.HoldStart,
-            bool fullParry = false,
-            uint sourceNetId = 0,
-            long sourceActionId = 0)
+    /// <summary>
+    /// DEBUG:直接向服务端上报指定武器的使用
+    /// </summary>
+    internal void DebugUseWeapon(string itemId, int slot, int cycle = 0)
+    {
+        var hero = GuestClientSession.Game?.hero;
+        var world = this.session.ClientWorld;
+        if (hero == null || world == null)
         {
-            var world = session.ClientWorld;
-            if (world == null) return;
-
-            int currentEpoch = epoch ?? world.Epoch;
-            if (currentEpoch < 0) return;
-
-            var request = new HeroAction
-            {
-                Epoch = currentEpoch,
-                ActionId = actionId ?? dedupe.NextActionId(),
-                Kind = kind,
-                Slot = slot,
-                Item = item,
-                Ratio = ratio,
-                Cycle = cycle,
-                CX = cx,
-                CY = cy,
-                XR = xr,
-                YR = yr,
-                Dir = dir,
-                DX = dx,
-                DY = dy,
-                ClientTimeMs = session.SyncedTimeMs,
-                LevelId = hero._level?.map?.id?.ToString() ?? string.Empty,
-                SubLevelIndex = hero._level?.GetSubLevelIndex() ?? -1,
-                BrutalityTier = hero.brutalityTier,
-                SurvivalTier = hero.survivalTier,
-                TacticTier = hero.tacticTier,
-                ShieldKind = shieldKind,
-                FullParry = fullParry,
-                SourceNetId = sourceNetId,
-                SourceActionId = sourceActionId,
-            };
-
-            sender.Send(request);
+            return;
         }
+
+        if (world.Epoch < 0)
+        {
+            return;
+        }
+
+        this.SendHeroAction(
+            hero, HeroActionKind.Weapon, slot,
+            new ItemRef
+            {
+                Kind = (int)InventItemKind.Indexes.Weapon,
+                ItemId = itemId,
+                ItemLevel = 1,
+                PosID = slot,
+            },
+            1.0, cycle,
+            hero.cx, hero.cy, hero.xr, hero.yr, hero.dir, hero.dx, hero.dy);
+
+        Logger.Information(
+            "Debug weapon use sent: item={Item} slot={Slot} cycle={Cycle}",
+            itemId, slot, cycle);
+    }
+
+    private static bool IsLocalShield(BaseShield? shield)
+    {
+        if (shield == null || shield.destroyed)
+        {
+            return false;
+        }
+
+        var hero = GuestClientSession.Game?.hero;
+        if (hero == null || !ReferenceEquals(shield.owner, hero))
+        {
+            return false;
+        }
+
+        return shield.item != null && shield.item.posID is >= 0 and <= 1;
+    }
+
+    private void SendShieldAction(
+        BaseShield shield,
+        ShieldActionKind kind,
+        AttackData? sourceAtk = null,
+        bool fullParry = false)
+    {
+        var hero = GuestClientSession.Game?.hero;
+        var item = shield.item;
+        if (hero == null || item == null)
+        {
+            return;
+        }
+
+        var slot = item.posID;
+        if (slot is < 0 or > 1)
+        {
+            return;
+        }
+
+        this.SendHeroAction(
+            hero, HeroActionKind.Shield, slot,
+            ItemCodec.Collect(item),
+            1.0, 0,
+            hero.cx, hero.cy, hero.xr, hero.yr,
+            hero.dir, hero.dx, hero.dy,
+            shieldKind: kind,
+            fullParry: fullParry,
+            sourceNetId: this.ResolveSourceNetId(sourceAtk));
+    }
+
+    private uint ResolveSourceNetId(AttackData? atk)
+    {
+        var attacker = atk?.source as Mob ?? atk?.carrier as Mob;
+        if (attacker != null
+            && this.session.ClientWorld?.TryGetMobNetId(
+                attacker, out var netId) == true)
+        {
+            return netId;
+        }
+
+        return 0;
+    }
+
+    private void SendHeroAction(
+        Hero hero,
+        HeroActionKind kind,
+        int slot,
+        ItemRef item,
+        double ratio,
+        int cycle,
+        int cx, int cy,
+        double xr, double yr,
+        int dir,
+        double dx, double dy,
+        int? epoch = null,
+        long? actionId = null,
+        ShieldActionKind shieldKind = ShieldActionKind.HoldStart,
+        bool fullParry = false,
+        uint sourceNetId = 0,
+        long sourceActionId = 0)
+    {
+        var world = this.session.ClientWorld;
+        if (world == null)
+        {
+            return;
+        }
+
+        var currentEpoch = epoch ?? world.Epoch;
+        if (currentEpoch < 0)
+        {
+            return;
+        }
+
+        var request = new HeroAction
+        {
+            Epoch = currentEpoch,
+            ActionId = actionId ?? this.dedupe.NextActionId(),
+            Kind = kind,
+            Slot = slot,
+            Item = item,
+            Ratio = ratio,
+            Cycle = cycle,
+            CX = cx,
+            CY = cy,
+            XR = xr,
+            YR = yr,
+            Dir = dir,
+            DX = dx,
+            DY = dy,
+            ClientTimeMs = this.session.SyncedTimeMs,
+            LevelId = hero._level?.map?.id?.ToString() ?? string.Empty,
+            SubLevelIndex = hero._level?.GetSubLevelIndex() ?? -1,
+            BrutalityTier = hero.brutalityTier,
+            SurvivalTier = hero.survivalTier,
+            TacticTier = hero.tacticTier,
+            ShieldKind = shieldKind,
+            FullParry = fullParry,
+            SourceNetId = sourceNetId,
+            SourceActionId = sourceActionId,
+        };
+
+        this.sender.Send(request);
     }
 }

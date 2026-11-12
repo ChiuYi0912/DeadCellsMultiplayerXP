@@ -1,34 +1,29 @@
-namespace DeadCellsMultiplayerX.Engine.Hooks.Shared
+namespace DeadCellsMultiplayerX.Engine.Hooks.Shared;
+
+/// <summary>
+/// 事件式 Hook 的退订句柄。
+/// Dispose 幂等；用于替代直接丢弃订阅返回值。
+/// </summary>
+internal sealed class HookLease(Action? unsubscribe) : IDisposable
 {
+    private Action? unsubscribe = unsubscribe;
+
     /// <summary>
-    /// 事件式 Hook 的退订句柄。
-    /// Dispose 幂等；用于替代直接丢弃订阅返回值。
+    /// 是否已经退订。
     /// </summary>
-    internal sealed class HookLease : IDisposable
+    public bool IsDisposed { get; private set; }
+
+    /// <inheritdoc />
+    public void Dispose()
     {
-        private Action? unsubscribe;
-        private bool disposed;
-
-        public HookLease(Action? unsubscribe)
+        if (this.IsDisposed)
         {
-            this.unsubscribe = unsubscribe;
+            return;
         }
 
-        /// <summary>
-        /// 是否已经退订。
-        /// </summary>
-        public bool IsDisposed => disposed;
-
-        /// <inheritdoc />
-        public void Dispose()
-        {
-            if (disposed)
-                return;
-
-            disposed = true;
-            Action? action = unsubscribe;
-            unsubscribe = null;
-            action?.Invoke();
-        }
+        this.IsDisposed = true;
+        Action? action = this.unsubscribe;
+        this.unsubscribe = null;
+        action?.Invoke();
     }
 }

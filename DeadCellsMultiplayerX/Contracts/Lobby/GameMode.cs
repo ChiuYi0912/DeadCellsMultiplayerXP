@@ -1,9 +1,8 @@
-namespace DeadCellsMultiplayerX.Contracts.Lobby
+namespace DeadCellsMultiplayerX.Contracts.Lobby;
+
+public enum GameMode : byte
 {
-    public enum GameMode : byte
-    {
-        None = 0,
-        Normal = 1,
-        Race = 2,
-    }
+    None = 0,
+    Normal = 1,
+    Race = 2,
 }

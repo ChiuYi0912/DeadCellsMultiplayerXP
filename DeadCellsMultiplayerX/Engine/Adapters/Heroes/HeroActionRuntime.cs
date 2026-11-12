@@ -1,3 +1,5 @@
+namespace DeadCellsMultiplayerX.Engine.Adapters.Heroes;
+
 using dc.en;
 using dc.tool.atk;
 using dc.tool.hero.activeSkills;
@@ -6,225 +8,224 @@ using DeadCellsMultiplayerX.Contracts.Loadout;
 using DeadCellsMultiplayerX.Simulation.Loadout;
 using Serilog;
 
-namespace DeadCellsMultiplayerX.Engine.Adapters.Heroes
+/// <summary>
+/// Shared Hero loadout/weapon/talisman operations.  The client and server
+/// differ only in the skill endpoint; that endpoint lives in the role runtime
+/// below instead of being a co-located Cast/Replay pair.
+/// </summary>
+internal abstract class HeroActionRuntime : IDisposable
 {
-    /// <summary>
-    /// Shared Hero loadout/weapon/talisman operations.  The client and server
-    /// differ only in the skill endpoint; that endpoint lives in the role runtime
-    /// below instead of being a co-located Cast/Replay pair.
-    /// </summary>
-    internal abstract class HeroActionRuntime : IDisposable
+    private readonly GhostTalismans talismans;
+    private bool disposed;
+
+    protected HeroActionRuntime(Hero hero, string ownerGuid)
     {
-        private readonly GhostSkills skills;
-        private readonly GhostWeapons weapons;
-        private readonly GhostTalismans talismans;
-        private bool disposed;
+        ArgumentNullException.ThrowIfNull(hero);
+        ArgumentException.ThrowIfNullOrWhiteSpace(ownerGuid);
 
-        protected HeroActionRuntime(Hero hero, string ownerGuid)
+        this.Context = new GhostActionContext(hero, ownerGuid);
+        this.Skills = new GhostSkills(this.Context);
+        this.Weapons = new GhostWeapons(this.Context);
+        this.talismans = new GhostTalismans(this.Context);
+    }
+
+    protected GhostActionContext Context { get; }
+    protected GhostSkills Skills { get; }
+    protected GhostWeapons Weapons { get; }
+
+    public bool ApplyLoadout(PlayerLoadout? loadout)
+    {
+        ObjectDisposedException.ThrowIf(this.disposed, this);
+        if (loadout == null)
         {
-            ArgumentNullException.ThrowIfNull(hero);
-            ArgumentException.ThrowIfNullOrWhiteSpace(ownerGuid);
-
-            Context = new GhostActionContext(hero, ownerGuid);
-            skills = new GhostSkills(Context);
-            weapons = new GhostWeapons(Context);
-            talismans = new GhostTalismans(Context);
+            return false;
         }
 
-        protected GhostActionContext Context { get; }
-        protected GhostSkills Skills => skills;
-        protected GhostWeapons Weapons => weapons;
+        var ok = true;
 
-        public bool ApplyLoadout(PlayerLoadout? loadout)
+        for (var i = 0; i < loadout.Weapons.Count && i < 2; i++)
         {
-            ObjectDisposedException.ThrowIf(disposed, this);
-            if (loadout == null) return false;
-
-            bool ok = true;
-
-            for (int i = 0; i < loadout.Weapons.Count && i < 2; i++)
+            var item = LoadoutCodec.ToItemRef(loadout.Weapons[i], i);
+            if (item == null)
             {
-                var item = LoadoutCodec.ToItemRef(loadout.Weapons[i], i);
-                if (item == null) continue;
-                ok &= weapons.Prepare(i, item);
+                continue;
             }
 
-            for (int i = 0; i < loadout.Actives.Count && i < 2; i++)
+            ok &= this.Weapons.Prepare(i, item);
+        }
+
+        for (var i = 0; i < loadout.Actives.Count && i < 2; i++)
+        {
+            var item = LoadoutCodec.ToItemRef(loadout.Actives[i], i);
+            if (item == null)
             {
-                var item = LoadoutCodec.ToItemRef(loadout.Actives[i], i);
-                if (item == null) continue;
-                ok &= skills.Prepare(i, item);
+                continue;
             }
 
-            // null 表示清空项链
-            ok &= talismans.Apply(
-                LoadoutCodec.ToItemRef(loadout.Talisman, 0));
-
-            return ok;
+            ok &= this.Skills.Prepare(i, item);
         }
 
-        public bool PrepareSkill(int slot, ItemRef? snapshot)
+        // null 表示清空项链
+        ok &= this.talismans.Apply(
+            LoadoutCodec.ToItemRef(loadout.Talisman, 0));
+
+        return ok;
+    }
+
+    public bool PrepareSkill(int slot, ItemRef? snapshot)
+    {
+        ObjectDisposedException.ThrowIf(this.disposed, this);
+        return this.Skills.Prepare(slot, snapshot);
+    }
+
+    public bool PrepareWeapon(int slot, ItemRef? snapshot)
+    {
+        ObjectDisposedException.ThrowIf(this.disposed, this);
+        return this.Weapons.Prepare(slot, snapshot);
+    }
+
+    public bool UseWeapon(int slot, int cycle)
+    {
+        ObjectDisposedException.ThrowIf(this.disposed, this);
+        return this.Weapons.Use(slot, cycle);
+    }
+
+    public bool ApplyTalisman(ItemRef? snapshot)
+    {
+        ObjectDisposedException.ThrowIf(this.disposed, this);
+        return this.talismans.Apply(snapshot);
+    }
+
+    /// <summary>
+    /// 部分 Power 构造时会调用 HUD.skillPowers[slot].hideIcon()
+    /// 这里把本地 HUD 对应槽位恢复，避免隐形 Hero 影响玩家 HUD
+    /// </summary>
+    protected static void RestoreHudIcon(int slot)
+    {
+        var hud = dc.ui.HUD.Class.ME;
+        if (hud?.skillPowers == null || slot < 0 || slot >= hud.skillPowers.length)
         {
-            ObjectDisposedException.ThrowIf(disposed, this);
-            return skills.Prepare(slot, snapshot);
+            return;
         }
 
-        public bool PrepareWeapon(int slot, ItemRef? snapshot)
+        if (hud.skillPowers.getDyn(slot) is dc.ui.hud.Skill skill)
         {
-            ObjectDisposedException.ThrowIf(disposed, this);
-            return weapons.Prepare(slot, snapshot);
+            skill.showIcon();
+        }
+    }
+
+    public void Dispose()
+    {
+        if (this.disposed)
+        {
+            return;
         }
 
-        public bool UseWeapon(int slot, int cycle)
+        this.disposed = true;
+
+        try
         {
-            ObjectDisposedException.ThrowIf(disposed, this);
-            return weapons.Use(slot, cycle);
+            this.Skills.Dispose();
         }
-
-        public bool ApplyTalisman(ItemRef? snapshot)
+        finally
         {
-            ObjectDisposedException.ThrowIf(disposed, this);
-            return talismans.Apply(snapshot);
-        }
-
-        /// <summary>
-        /// 部分 Power 构造时会调用 HUD.skillPowers[slot].hideIcon()
-        /// 这里把本地 HUD 对应槽位恢复，避免隐形 Hero 影响玩家 HUD
-        /// </summary>
-        protected static void RestoreHudIcon(int slot)
-        {
-            var hud = dc.ui.HUD.Class.ME;
-            if (hud?.skillPowers == null || slot < 0 || slot >= hud.skillPowers.length)
-                return;
-
-            if (hud.skillPowers.getDyn(slot) is dc.ui.hud.Skill skill)
-                skill.showIcon();
-        }
-
-        public void Dispose()
-        {
-            if (disposed) return;
-            disposed = true;
-
             try
             {
-                skills.Dispose();
+                this.Weapons.Dispose();
             }
             finally
             {
-                try
-                {
-                    weapons.Dispose();
-                }
-                finally
-                {
-                    talismans.Dispose();
-                }
+                this.talismans.Dispose();
             }
         }
     }
+}
 
-    internal sealed class ServerHeroActionRuntime : HeroActionRuntime
+internal sealed class ServerHeroActionRuntime : HeroActionRuntime
+{
+    private readonly GhostShield shield;
+
+    public ServerHeroActionRuntime(Hero hero, string ownerGuid)
+        : base(hero, ownerGuid) => this.shield = new GhostShield(this.Weapons);
+
+    public bool IsSkillReady(int slot)
     {
-        private readonly GhostShield shield;
-
-        public ServerHeroActionRuntime(Hero hero, string ownerGuid)
-            : base(hero, ownerGuid)
-        {
-            shield = new GhostShield(Weapons);
-        }
-
-        public bool IsSkillReady(int slot)
-        {
-            var skill = Skills.GetActive(slot)?.skill;
-            return skill?.isReady() == true;
-        }
-
-        public bool CastSkill(int slot, double ratio)
-        {
-            var manager = Context.Hero.activeSkillsManager;
-
-            var before = Context.Count();
-            manager.onActiveSkill(slot, ratio);
-            RestoreHudIcon(slot);
-            Context.LogActionDelta("cast", slot, before);
-            return true;
-        }
-
-        public bool PrepareShield(int slot, ItemRef? snapshot)
-        {
-            return shield.Prepare(slot, snapshot);
-        }
-
-        public bool UseShield(
-            ShieldActionKind kind,
-            int slot,
-            double ratio,
-            bool fullParry,
-            AttackData? sourceAtk,
-            double elapsedMs)
-        {
-            return shield.Apply(kind, slot, ratio, fullParry, sourceAtk, elapsedMs);
-        }
+        var skill = this.Skills.GetActive(slot)?.skill;
+        return skill?.isReady() == true;
     }
 
-    internal sealed class ClientHeroActionRuntime : HeroActionRuntime
+    public bool CastSkill(int slot, double ratio)
     {
-        private static readonly ILogger Logger =
-            Log.ForContext("SourceContext", "ClientHeroActionRuntime");
+        var manager = this.Context.Hero.activeSkillsManager;
 
-        public ClientHeroActionRuntime(Hero hero, string ownerGuid)
-            : base(hero, ownerGuid)
+        var before = this.Context.Count();
+        manager.onActiveSkill(slot, ratio);
+        RestoreHudIcon(slot);
+        this.Context.LogActionDelta("cast", slot, before);
+        return true;
+    }
+
+    public bool PrepareShield(int slot, ItemRef? snapshot) => this.shield.Prepare(slot, snapshot);
+
+    public bool UseShield(
+        ShieldActionKind kind,
+        int slot,
+        double ratio,
+        bool fullParry,
+        AttackData? sourceAtk,
+        double elapsedMs) => this.shield.Apply(kind, slot, ratio, fullParry, sourceAtk, elapsedMs);
+}
+
+internal sealed class ClientHeroActionRuntime(Hero hero, string ownerGuid) : HeroActionRuntime(hero, ownerGuid)
+{
+    private static readonly ILogger Logger =
+        Log.ForContext("SourceContext", "ClientHeroActionRuntime");
+
+    public bool ReplaySkill(int slot)
+    {
+        if (this.Context.Hero.activeSkillsManager is not BeheadedActiveSkillsManager manager)
         {
+            return false;
         }
 
-        public bool ReplaySkill(int slot)
+        var item = this.Context.Hero.inventory.getActiveOn(slot);
+
+        this.Skills.GetActive(slot)?.useActiveItem(item);
+
+        var data = item._itemData;
+
+        var before = this.Context.Count();
+        switch (data.group)
         {
-            if (Context.Hero.activeSkillsManager is not BeheadedActiveSkillsManager manager)
-                return false;
+            case 0://释放放置技能
+                manager.spawnDeployedTrapSkill(slot, item, data);
+                break;
+            case 1://释放手榴弹技能
+                manager.spawnGrenadeSkill(item, data);
+                break;
+            case 2:
+                LogReplaySkip(slot, "sidekick");
+                return true;
+            case 3://释放能力技能
 
-            var item = Context.Hero.inventory.getActiveOn(slot);
-
-            Skills.GetActive(slot)?.useActiveItem(item);
-
-            var data = item._itemData;
-
-            var before = Context.Count();
-            switch (data.group)
-            {
-                case 0://释放放置技能
-                    manager.spawnDeployedTrapSkill(slot, item, data);
-                    break;
-                case 1://释放手榴弹技能
-                    manager.spawnGrenadeSkill(item, data);
-                    break;
-                case 2:
-                    LogReplaySkip(slot, "sidekick");
+                if (data.props.mob != null)
+                {
+                    LogReplaySkip(slot, "pet");
                     return true;
-                case 3://释放能力技能
+                }
 
-                    if (data.props.mob != null)
-                    {
-                        LogReplaySkip(slot, "pet");
-                        return true;
-                    }
-
-                    manager.spawnPowerSkill(slot, item, data);
-                    break;
-                default:
-                    return false;
-            }
-
-            RestoreHudIcon(slot);
-            Context.LogActionDelta("replay", slot, before);
-            return true;
+                manager.spawnPowerSkill(slot, item, data);
+                break;
+            default:
+                return false;
         }
 
-        private static void LogReplaySkip(int slot, string kind)
-        {
-            Logger.Debug(
-                "GhostHero replay skipped: kind={Kind} slot={Slot}",
-                kind, slot);
-        }
+        RestoreHudIcon(slot);
+        this.Context.LogActionDelta("replay", slot, before);
+        return true;
     }
+
+    private static void LogReplaySkip(int slot, string kind) => Logger.Debug(
+            "GhostHero replay skipped: kind={Kind} slot={Slot}",
+            kind, slot);
 }

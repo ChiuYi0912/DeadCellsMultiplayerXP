@@ -1,95 +1,95 @@
+namespace DeadCellsMultiplayerX.Client.Session.Guest;
+
 using DeadCellsMultiplayerX.Networking.Time;
 using Serilog;
 
-namespace DeadCellsMultiplayerX.Client.Session.Guest
+/// <summary>
+/// Owns the guest's NTP sampling and server-time offset.  It has no game
+/// object references and no RPC plumbing of its own; the session supplies a
+/// read-only clock query and its disposed flag.
+/// </summary>
+internal sealed class GuestClockSync(
+    Func<bool> isDisposed,
+    Func<bool> canRequest,
+    Func<Task<long>> requestServerTime,
+    ILogger logger)
 {
-    /// <summary>
-    /// Owns the guest's NTP sampling and server-time offset.  It has no game
-    /// object references and no RPC plumbing of its own; the session supplies a
-    /// read-only clock query and its disposed flag.
-    /// </summary>
-    internal sealed class GuestClockSync
+    private const long NTP_INTERVAL_MS = 500;
+
+    private readonly ClientTimeSystem timeSystem = new();
+    private readonly Func<bool> isDisposed = isDisposed
+            ?? throw new ArgumentNullException(nameof(isDisposed));
+    private readonly Func<bool> canRequest = canRequest
+            ?? throw new ArgumentNullException(nameof(canRequest));
+    private readonly Func<Task<long>> requestServerTime = requestServerTime
+            ?? throw new ArgumentNullException(nameof(requestServerTime));
+    private readonly ILogger logger = logger
+            ?? throw new ArgumentNullException(nameof(logger));
+
+    private Task? ntpTask;
+    private long lastNtpRequestMs;
+    private long lastServerFrameTimeMs = long.MinValue;
+
+    public bool Ready => this.timeSystem.Ready;
+
+    public long SyncedTimeMs => this.timeSystem.SyncedTime;
+
+    public long RttMs => this.timeSystem.RttMs;
+
+    public long OffsetMs => this.timeSystem.OffsetMs;
+
+    /// <summary>Called once per game frame.</summary>
+    public void Tick()
     {
-        private const long NTP_INTERVAL_MS = 500;
-
-        private readonly ClientTimeSystem timeSystem = new();
-        private readonly Func<bool> isDisposed;
-        private readonly Func<bool> canRequest;
-        private readonly Func<Task<long>> requestServerTime;
-        private readonly ILogger logger;
-
-        private Task? ntpTask;
-        private long lastNtpRequestMs;
-        private long lastServerFrameTimeMs = long.MinValue;
-
-        public GuestClockSync(
-            Func<bool> isDisposed,
-            Func<bool> canRequest,
-            Func<Task<long>> requestServerTime,
-            ILogger logger)
+        if (!this.canRequest() || this.timeSystem.Ready)
         {
-            this.isDisposed = isDisposed
-                ?? throw new ArgumentNullException(nameof(isDisposed));
-            this.canRequest = canRequest
-                ?? throw new ArgumentNullException(nameof(canRequest));
-            this.requestServerTime = requestServerTime
-                ?? throw new ArgumentNullException(nameof(requestServerTime));
-            this.logger = logger
-                ?? throw new ArgumentNullException(nameof(logger));
+            return;
         }
 
-        public bool Ready => timeSystem.Ready;
-
-        public long SyncedTimeMs => timeSystem.SyncedTime;
-
-        public long RttMs => timeSystem.RttMs;
-
-        public long OffsetMs => timeSystem.OffsetMs;
-
-        /// <summary>Called once per game frame.</summary>
-        public void Tick()
+        var now = ClientTimeSystem.NowMs();
+        if (now - this.lastNtpRequestMs < NTP_INTERVAL_MS)
         {
-            if (timeSystem.Ready || !canRequest())
-                return;
-
-            long now = ClientTimeSystem.NowMs();
-            if (now - lastNtpRequestMs < NTP_INTERVAL_MS)
-                return;
-            if (ntpTask != null && !ntpTask.IsCompleted)
-                return;
-
-            lastNtpRequestMs = now;
-            ntpTask = SampleAsync();
+            return;
         }
 
-        /// <summary>Called for every received world frame.</summary>
-        public void ObserveServerTime(long serverTimeMs)
+        if (this.ntpTask != null && !this.ntpTask.IsCompleted)
         {
-            if (serverTimeMs <= lastServerFrameTimeMs)
-                return;
-
-            lastServerFrameTimeMs = serverTimeMs;
-            timeSystem.OnSnapshot(serverTimeMs);
+            return;
         }
 
-        private async Task SampleAsync()
-        {
-            try
-            {
-                long t0 = ClientTimeSystem.NowMs();
-                long serverTime = await requestServerTime().ConfigureAwait(false);
-                long t1 = ClientTimeSystem.NowMs();
+        this.lastNtpRequestMs = now;
+        this.ntpTask = this.SampleAsync();
+    }
 
-                timeSystem.AddSample(t0, t1, serverTime);
-            }
-            catch (Exception) when (isDisposed())
-            {
-                // Session is shutting down; ignore the in-flight sample.
-            }
-            catch (Exception ex)
-            {
-                logger.Error(ex, "NTP sample failed");
-            }
+    /// <summary>Called for every received world frame.</summary>
+    public void ObserveServerTime(long serverTimeMs)
+    {
+        if (serverTimeMs <= this.lastServerFrameTimeMs)
+        {
+            return;
+        }
+
+        this.lastServerFrameTimeMs = serverTimeMs;
+        this.timeSystem.OnSnapshot(serverTimeMs);
+    }
+
+    private async Task SampleAsync()
+    {
+        try
+        {
+            var t0 = ClientTimeSystem.NowMs();
+            var serverTime = await this.requestServerTime().ConfigureAwait(false);
+            var t1 = ClientTimeSystem.NowMs();
+
+            this.timeSystem.AddSample(t0, t1, serverTime);
+        }
+        catch (Exception) when (this.isDisposed())
+        {
+            // Session is shutting down; ignore the in-flight sample.
+        }
+        catch (Exception ex)
+        {
+            this.logger.Error(ex, "NTP sample failed");
         }
     }
 }

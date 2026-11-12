@@ -1,121 +1,130 @@
+namespace DeadCellsMultiplayerX.Server.Replication.Entities;
+
 using DeadCellsMultiplayerX.Contracts.Snapshots;
-namespace DeadCellsMultiplayerX.Server.Replication.Entities
+
+/// <summary>
+/// 历史实体位置
+/// </summary>
+internal readonly record struct EntityPose(
+    double X,
+    double Y,
+    int Dir,
+    double Dx,
+    double Dy);
+
+/// <summary>
+/// 服务端实体位置历史
+/// 每个 20Hz 发布帧记录一次，用于武器命中回退
+/// </summary>
+internal sealed class ServerEntityHistory
 {
-    /// <summary>
-    /// 历史实体位置
-    /// </summary>
-    internal readonly record struct EntityPose(
-        double X,
-        double Y,
-        int Dir,
-        double Dx,
-        double Dy);
+    private const int MAX_FRAMES = 128;
 
-    /// <summary>
-    /// 服务端实体位置历史
-    /// 每个 20Hz 发布帧记录一次，用于武器命中回退
-    /// </summary>
-    internal sealed class ServerEntityHistory
+    private readonly List<HistoryFrame> frames = [];
+
+    public bool TryGetPose(uint netId, long timeMs, out EntityPose pose)
     {
-        private const int MAX_FRAMES = 128;
+        pose = default;
 
-        private readonly List<HistoryFrame> frames = [];
-
-        public bool TryGetPose(uint netId, long timeMs, out EntityPose pose)
+        if (this.frames.Count == 0)
         {
-            pose = default;
+            return false;
+        }
 
-            if (frames.Count == 0)
-                return false;
+        HistoryFrame? previous = null;
+        HistoryFrame? next = null;
 
-            HistoryFrame? previous = null;
-            HistoryFrame? next = null;
+        for (var i = 0; i < this.frames.Count; i++)
+        {
+            var frame = this.frames[i];
 
-            for (int i = 0; i < frames.Count; i++)
+            if (frame.TimeMs <= timeMs)
             {
-                var frame = frames[i];
-
-                if (frame.TimeMs <= timeMs)
-                {
-                    previous = frame;
-                    continue;
-                }
-
-                next = frame;
-                break;
+                previous = frame;
+                continue;
             }
 
-            previous ??= frames[0];
-            next ??= frames[^1];
+            next = frame;
+            break;
+        }
 
-            bool hasPrevious = previous.Poses.TryGetValue(netId, out var previousPose);
-            bool hasNext = next.Poses.TryGetValue(netId, out var nextPose);
+        previous ??= this.frames[0];
+        next ??= this.frames[^1];
 
-            if (!hasPrevious && !hasNext)
-                return false;
+        var hasPrevious = previous.Poses.TryGetValue(netId, out var previousPose);
+        var hasNext = next.Poses.TryGetValue(netId, out var nextPose);
 
-            if (!hasPrevious)
-            {
-                pose = nextPose;
-                return true;
-            }
+        if (!hasPrevious && !hasNext)
+        {
+            return false;
+        }
 
-            if (!hasNext)
-            {
-                pose = previousPose;
-                return true;
-            }
-
-            if (next.TimeMs <= previous.TimeMs)
-            {
-                pose = previousPose;
-                return true;
-            }
-
-            double alpha = (timeMs - previous.TimeMs)
-                / (double)(next.TimeMs - previous.TimeMs);
-
-            alpha = Math.Clamp(alpha, 0.0, 1.0);
-
-            pose = new EntityPose(
-                previousPose.X + (nextPose.X - previousPose.X) * alpha,
-                previousPose.Y + (nextPose.Y - previousPose.Y) * alpha,
-                alpha < 0.5 ? previousPose.Dir : nextPose.Dir,
-                alpha < 0.5 ? previousPose.Dx : nextPose.Dx,
-                alpha < 0.5 ? previousPose.Dy : nextPose.Dy);
-
+        if (!hasPrevious)
+        {
+            pose = nextPose;
             return true;
         }
 
-        public void Record(long serverTimeMs, IReadOnlyList<EntityDynamic> entities)
+        if (!hasNext)
         {
-            var frame = new HistoryFrame { TimeMs = serverTimeMs };
+            pose = previousPose;
+            return true;
+        }
 
-            if (entities != null)
+        if (next.TimeMs <= previous.TimeMs)
+        {
+            pose = previousPose;
+            return true;
+        }
+
+        var alpha = (timeMs - previous.TimeMs)
+            / (double)(next.TimeMs - previous.TimeMs);
+
+        alpha = Math.Clamp(alpha, 0.0, 1.0);
+
+        pose = new EntityPose(
+            previousPose.X + ((nextPose.X - previousPose.X) * alpha),
+            previousPose.Y + ((nextPose.Y - previousPose.Y) * alpha),
+            alpha < 0.5 ? previousPose.Dir : nextPose.Dir,
+            alpha < 0.5 ? previousPose.Dx : nextPose.Dx,
+            alpha < 0.5 ? previousPose.Dy : nextPose.Dy);
+
+        return true;
+    }
+
+    public void Record(long serverTimeMs, IReadOnlyList<EntityDynamic> entities)
+    {
+        var frame = new HistoryFrame { TimeMs = serverTimeMs };
+
+        if (entities != null)
+        {
+            foreach (var entity in entities)
             {
-                foreach (var entity in entities)
+                if (entity?.Pos == null)
                 {
-                    if (entity?.Pos == null) continue;
-
-                    frame.Poses[entity.NetId] = new EntityPose(
-                        entity.Pos.CX + entity.Pos.XR,
-                        entity.Pos.CY + entity.Pos.XY,
-                        entity.Pos.DIR,
-                        entity.Pos.DX,
-                        entity.Pos.DY);
+                    continue;
                 }
+
+                frame.Poses[entity.NetId] = new EntityPose(
+                    entity.Pos.CX + entity.Pos.XR,
+                    entity.Pos.CY + entity.Pos.XY,
+                    entity.Pos.DIR,
+                    entity.Pos.DX,
+                    entity.Pos.DY);
             }
-
-            frames.Add(frame);
-
-            if (frames.Count > MAX_FRAMES)
-                frames.RemoveRange(0, frames.Count - MAX_FRAMES);
         }
 
-        private sealed class HistoryFrame
+        this.frames.Add(frame);
+
+        if (this.frames.Count > MAX_FRAMES)
         {
-            public long TimeMs;
-            public readonly Dictionary<uint, EntityPose> Poses = [];
+            this.frames.RemoveRange(0, this.frames.Count - MAX_FRAMES);
         }
+    }
+
+    private sealed class HistoryFrame
+    {
+        public long TimeMs { get; set; }
+        public Dictionary<uint, EntityPose> Poses { get; } = [];
     }
 }

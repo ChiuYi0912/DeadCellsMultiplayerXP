@@ -1,64 +1,65 @@
+namespace DeadCellsMultiplayerX.Client.World.Mobs.Replication;
+
 using dc.en;
 using DeadCellsMultiplayerX.Client.World.Entities;
 using DeadCellsMultiplayerX.Contracts.Entities;
-namespace DeadCellsMultiplayerX.Client.World.Mobs.Replication
+
+/// <summary>
+/// Mob 类型的客户端门面
+/// 实际映射由通用 ClientEntityStore 维护
+/// </summary>
+internal sealed class ClientMobFrameReceiver(ClientEntityStore store)
 {
-    /// <summary>
-    /// Mob 类型的客户端门面
-    /// 实际映射由通用 ClientEntityStore 维护
-    /// </summary>
-    internal sealed class ClientMobFrameReceiver
+    private readonly ClientEntityStore store = store;
+    private readonly HashSet<Mob> suppressedDeaths = [];
+
+    public IEnumerable<Mob> All
     {
-        private readonly ClientEntityStore store;
-        private readonly HashSet<Mob> suppressedDeaths = [];
-
-        public ClientMobFrameReceiver(ClientEntityStore store)
+        get
         {
-            this.store = store;
-        }
-
-        public IEnumerable<Mob> All
-        {
-            get
+            foreach (var record in this.store.Records)
             {
-                foreach (var record in store.Records)
+                if (record.Kind == EntityKind.Mob && record.Native is Mob mob)
                 {
-                    if (record.Kind == EntityKind.Mob && record.Native is Mob mob)
-                        yield return mob;
+                    yield return mob;
                 }
             }
         }
-
-        public bool IsRemoteMob(Mob mob)
-            => mob != null && store.IsReplicated(mob);
-
-        public bool IsDeathSuppressed(Mob mob)
-            => mob != null && suppressedDeaths.Contains(mob);
-
-        public Mob? Get(uint netId)
-            => store.Get(netId) as Mob;
-
-        public bool TryGetNetId(Mob mob, out uint netId)
-            => store.TryGetNetId(mob, out netId);
-
-        public bool HasOrPending(uint netId)
-            => store.HasOrPending(netId);
-
-        public bool IsMissingOrDestroyed(uint netId)
-            => store.IsMissingOrDestroyed(netId);
-
-        internal void SuppressDeath(Mob mob)
-        {
-            if (mob != null)
-                suppressedDeaths.Add(mob);
-        }
-
-        internal void UnsuppressDeath(Mob mob)
-        {
-            if (mob != null)
-                suppressedDeaths.Remove(mob);
-        }
-
-        internal void ClearSuppressed() => suppressedDeaths.Clear();
     }
+
+    public bool IsRemoteMob(Mob mob)
+        => mob != null && this.store.IsReplicated(mob);
+
+    public bool IsDeathSuppressed(Mob mob)
+        => mob != null && this.suppressedDeaths.Contains(mob);
+
+    public Mob? Get(uint netId)
+        => this.store.Get(netId) as Mob;
+
+    public bool TryGetNetId(Mob mob, out uint netId)
+        => this.store.TryGetNetId(mob, out netId);
+
+    public bool HasOrPending(uint netId)
+        => this.store.HasOrPending(netId);
+
+    public bool IsMissingOrDestroyed(uint netId)
+        => this.store.IsMissingOrDestroyed(netId);
+
+    internal void SuppressDeath(Mob mob)
+    {
+        if (mob != null)
+        {
+            this.suppressedDeaths.Add(mob);
+        }
+    }
+
+    internal void UnsuppressDeath(Mob mob)
+    {
+        if (mob != null)
+        {
+            this.suppressedDeaths.Remove(mob);
+        }
+    }
+
+    internal void ClearSuppressed() => this.suppressedDeaths.Clear();
 }

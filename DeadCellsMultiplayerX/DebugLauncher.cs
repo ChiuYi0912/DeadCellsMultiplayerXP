@@ -1,189 +1,206 @@
+namespace DeadCellsMultiplayerX;
+
 #if DEBUG
 using System.Diagnostics;
 using DeadCellsMultiplayerX.Client.Session;
 using Serilog;
 
-
-namespace DeadCellsMultiplayerX
+internal static class DebugLauncher
 {
-    internal static class DebugLauncher
+    private const string EXE_PATH =
+        @"D:\steam\steamapps\common\Dead Cells\coremod\core\host\startup\DeadCellsModding.exe";
+
+    private static ILogger Logger => field ??= Log.ForContext(nameof(DebugLauncher), nameof(DebugLauncher));
+
+
+    private static string? autoAddr;
+    private static string? playerName;
+
+    public static bool IsTestClient => !string.IsNullOrEmpty(autoAddr);
+
+    public static void Init()
     {
-        private const string EXE_PATH =
-            @"D:\steam\steamapps\common\Dead Cells\coremod\core\host\startup\DeadCellsModding.exe";
+        var addr = Environment.GetEnvironmentVariable("DCMP_AUTOCONNECT");
+        var name = Environment.GetEnvironmentVariable("DCMP_PLAYERNAME");
 
-        private static ILogger? MyLogger;
-        private static ILogger logger => MyLogger ??= Log.ForContext(nameof(DebugLauncher), nameof(DebugLauncher));
-
-
-        private static string? autoAddr;
-        private static string? playerName;
-
-        public static bool IsTestClient => !string.IsNullOrEmpty(autoAddr);
-
-        public static void Init()
+        if (!string.IsNullOrEmpty(addr))
         {
-            var addr = Environment.GetEnvironmentVariable("DCMP_AUTOCONNECT");
-            var name = Environment.GetEnvironmentVariable("DCMP_PLAYERNAME");
-
-            if (!string.IsNullOrEmpty(addr))
-            {
-                autoAddr = addr;
-                logger.Information("auto-connect (env): {autoAddr}", autoAddr);
-            }
-            if (!string.IsNullOrEmpty(name))
-            {
-                playerName = name;
-                logger.Information("player name (env): {playerName}", playerName);
-            }
-
-            foreach (var a in Environment.GetCommandLineArgs())
-            {
-                if (a.StartsWith("--dcmp-autoconnect="))
-                {
-                    autoAddr = a.Substring("--dcmp-autoconnect=".Length);
-                }
-                else if (a.StartsWith("--dcmp-playername="))
-                {
-                    playerName = a.Substring("--dcmp-playername=".Length);
-                }
-            }
+            autoAddr = addr;
+            Logger.Information("auto-connect (env): {autoAddr}", autoAddr);
+        }
+        if (!string.IsNullOrEmpty(name))
+        {
+            playerName = name;
+            Logger.Information("player name (env): {playerName}", playerName);
         }
 
-        public static void StartTest(int clients = 2, string ip = "127.0.0.1", int port = 44567)
+        foreach (var a in Environment.GetCommandLineArgs())
         {
-            HoldAsync(StartTestAsync(clients, ip, port));
+            if (a.StartsWith("--dcmp-autoconnect=", StringComparison.Ordinal))
+            {
+                autoAddr = a["--dcmp-autoconnect=".Length..];
+            }
+            else if (a.StartsWith("--dcmp-playername=", StringComparison.Ordinal))
+            {
+                playerName = a["--dcmp-playername=".Length..];
+            }
+        }
+    }
+
+    public static void StartTest(int clients = 2, string ip = "127.0.0.1", int port = 44567) => HoldAsync(StartTestAsync(clients, ip, port));
+
+    private static async Task StartTestAsync(int clients, string ip, int port)
+    {
+        DebugFlags.ClearViaAnsi();
+
+        Logger.Information("Host starting on {f1}:{f2}", ip, port);
+
+        await ClientRuntime.Instance.StartHost(ip, port);
+
+        await Task.Delay(500);
+
+        var gc = ClientRuntime.Instance.CurrentGuestClient;
+        if (gc == null)
+        {
+            return;
         }
 
-        private static async Task StartTestAsync(int clients, string ip, int port)
+        gc.SetReady(true);
+
+        await Task.Delay(500);
+        for (var i = 0; i < clients; i++)
         {
-            DebugFlags.ClearViaAnsi();
+            LaunchClient(ip, port, i);
+        }
 
-            logger.Information("Host starting on {f1}:{f2}", ip, port);
+        Logger.Information("Launched {f1} clients", clients);
 
-            await ClientRuntime.Instance.StartHost(ip, port);
+        await AutoStartWhenReady(clients, timeoutMs: 120_000);
 
+    }
+
+    private static void LaunchClient(string ip, int port, int idx)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = EXE_PATH,
+            UseShellExecute = false,
+        };
+
+        psi.EnvironmentVariables["DCMP_AUTOCONNECT"] = $"{ip}:{port}";
+        psi.EnvironmentVariables["DCMP_PLAYERNAME"] = $"TestPlayer{idx + 1}";
+
+        psi.EnvironmentVariables.Remove("DCCM_MULTIPLAYER_NO_CLIENT");
+
+
+        var p = Process.Start(psi);
+        Logger.Information("Launched PID={f1} as TestPlayer{f2}", p?.Id, idx + 1);
+    }
+
+
+    private static async Task AutoStartWhenReady(int clientCount, int timeoutMs)
+    {
+        var expected = 1 + clientCount;
+        var sw = Stopwatch.StartNew();
+
+        var lastCount = -1;
+        var lastReady = -1;
+
+        while (sw.ElapsedMilliseconds < timeoutMs)
+        {
             await Task.Delay(500);
 
-            var gc = ClientRuntime.Instance.CurrentGuestClient;
-            if (gc == null) return;
-
-            gc.SetReady(true);
-
-            await Task.Delay(500);
-            for (int i = 0; i < clients; i++)
-                LaunchClient(ip, port, i);
-
-            logger.Information("Launched {f1} clients", clients);
-
-            await AutoStartWhenReady(clients, timeoutMs: 120_000);
-
-        }
-
-        private static void LaunchClient(string ip, int port, int idx)
-        {
-            var psi = new ProcessStartInfo
+            var hc = ClientRuntime.Instance.CurrentHostClient;
+            if (hc == null)
             {
-                FileName = EXE_PATH,
-                UseShellExecute = false,
-            };
+                continue;
+            }
 
-            psi.EnvironmentVariables["DCMP_AUTOCONNECT"] = $"{ip}:{port}";
-            psi.EnvironmentVariables["DCMP_PLAYERNAME"] = $"TestPlayer{idx + 1}";
-
-            psi.EnvironmentVariables.Remove("DCCM_MULTIPLAYER_NO_CLIENT");
-
-
-            var p = Process.Start(psi);
-            logger.Information("Launched PID={f1} as TestPlayer{f2}", p?.Id, idx + 1);
-        }
-
-
-        private static async Task AutoStartWhenReady(int clientCount, int timeoutMs)
-        {
-            int expected = 1 + clientCount;
-            var sw = Stopwatch.StartNew();
-
-            int lastCount = -1;
-            int lastReady = -1;
-
-            while (sw.ElapsedMilliseconds < timeoutMs)
+            var guests = hc.LobbyInfo?.Guests;
+            if (guests == null)
             {
-                await Task.Delay(500);
+                continue;
+            }
 
-                var hc = ClientRuntime.Instance.CurrentHostClient;
-                if (hc == null) continue;
-
-                var guests = hc.LobbyInfo?.Guests;
-                if (guests == null) continue;
-
-                int count = guests.Count;
-                int readyCount = 0;
-                foreach (var kv in guests)
+            var count = guests.Count;
+            var readyCount = 0;
+            foreach (var kv in guests)
+            {
+                if (kv.Value.IsReady)
                 {
-                    if (kv.Value.IsReady) readyCount++;
-                }
-
-                if (count != lastCount || readyCount != lastReady)
-                {
-                    lastCount = count;
-                    lastReady = readyCount;
-                    logger.Information(
-                        "{f1}/{f2} players, {f3} ready, " +
-                        "CanStart={f4}", count, expected, readyCount, hc.CanStartGame);
-                }
-                if (count >= expected && readyCount >= expected && hc.CanStartGame)
-                {
-                    logger.Information("{Source} All ready, starting game...", nameof(DebugLauncher));
-                    await hc.StartGame();
-                    return;
+                    readyCount++;
                 }
             }
-        }
 
-        public static void TriggerAutoJoin()
-        {
-            if (!IsTestClient) return;
-
-            var parts = autoAddr!.Split(':');
-            if (parts.Length < 2) return;
-
-            string ip = parts[0];
-            int port = int.Parse(parts[1]);
-
-            logger.Information(
-                "Auto-joining {f1}:{f2} as {f3}", ip, port, playerName);
-
-            autoAddr = null;
-
-            HoldAsync(JoinAndReadyAsync(ip, port));
-        }
-
-        private static async Task JoinAndReadyAsync(string ip, int port)
-        {
-            logger.Information("Starting guest...");
-            await ClientRuntime.Instance.StartGuest(ip, port);
-
-            await Task.Delay(500);
-
-            var gc = ClientRuntime.Instance.CurrentGuestClient;
-            if (gc == null) return;
-
-            await Task.Delay(2000);
-
-            gc.SetReady(true);
-        }
-
-
-        private static async void HoldAsync(Task task)
-        {
-            try
+            if (count != lastCount || readyCount != lastReady)
             {
-                await task;
+                lastCount = count;
+                lastReady = readyCount;
+                Logger.Information(
+                    "{f1}/{f2} players, {f3} ready, " +
+                    "CanStart={f4}", count, expected, readyCount, hc.CanStartGame);
             }
-            catch (Exception ex)
+            if (count >= expected && readyCount >= expected && hc.CanStartGame)
             {
-                logger.Error(ex, " HoldAsync failed");
+                Logger.Information("{Source} All ready, starting game...", nameof(DebugLauncher));
+                await hc.StartGame();
+                return;
             }
+        }
+    }
+
+    public static void TriggerAutoJoin()
+    {
+        if (!IsTestClient)
+        {
+            return;
+        }
+
+        var parts = autoAddr!.Split(':');
+        if (parts.Length < 2)
+        {
+            return;
+        }
+
+        var ip = parts[0];
+        var port = int.Parse(parts[1], System.Globalization.CultureInfo.InvariantCulture);
+
+        Logger.Information(
+            "Auto-joining {f1}:{f2} as {f3}", ip, port, playerName);
+
+        autoAddr = null;
+
+        HoldAsync(JoinAndReadyAsync(ip, port));
+    }
+
+    private static async Task JoinAndReadyAsync(string ip, int port)
+    {
+        Logger.Information("Starting guest...");
+        await ClientRuntime.Instance.StartGuest(ip, port);
+
+        await Task.Delay(500);
+
+        var gc = ClientRuntime.Instance.CurrentGuestClient;
+        if (gc == null)
+        {
+            return;
+        }
+
+        await Task.Delay(2000);
+
+        gc.SetReady(true);
+    }
+
+
+    private static async void HoldAsync(Task task)
+    {
+        try
+        {
+            await task;
+        }
+        catch (Exception ex)
+        {
+            Logger.Error(ex, " HoldAsync failed");
         }
     }
 }

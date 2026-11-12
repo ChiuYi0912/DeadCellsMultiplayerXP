@@ -1,57 +1,58 @@
+namespace DeadCellsMultiplayerX.Server.World.Mobs.Combat;
+
 using DeadCellsMultiplayerX.Contracts.MobBehavior;
 using DeadCellsMultiplayerX.Server.World.Mobs.Behavior;
-namespace DeadCellsMultiplayerX.Server.World.Mobs.Combat
+
+/// <summary>
+/// 技能事件路由
+/// </summary>
+internal sealed class ServerMobAttackRouter(
+    IServerMobEventOutbox? events = null) : IServerMobAttackRouter
 {
-    /// <summary>
-    /// 技能事件路由
-    /// </summary>
-    internal sealed class ServerMobAttackRouter : IServerMobAttackRouter
+    private readonly IServerMobEventOutbox? events = events;
+    private readonly Queue<MobModifierEvent> pendingSkills = new();
+    private long nextActionId;
+
+    /// <inheritdoc />
+    public void SubmitSkill(MobModifierEvent evt)
     {
-        private readonly IServerMobEventQueue? events;
-        private readonly Queue<MobModifierEvent> pendingSkills = new();
-        private long nextActionId;
-
-        public ServerMobAttackRouter(
-            IServerMobEventQueue? events = null)
+        if (evt == null || evt.NetId == 0)
         {
-            this.events = events;
+            return;
         }
 
-        /// <inheritdoc />
-        public void SubmitSkill(MobModifierEvent evt)
-        {
-            if (evt == null || evt.NetId == 0)
-                return;
+        this.pendingSkills.Enqueue(evt);
+    }
 
-            pendingSkills.Enqueue(evt);
+    /// <inheritdoc />
+    public IReadOnlyList<MobModifierEvent> Tick(long serverTimeMs)
+    {
+        if (this.pendingSkills.Count == 0)
+        {
+            return [];
         }
 
-        /// <inheritdoc />
-        public IReadOnlyList<MobModifierEvent> Tick(long serverTimeMs)
+        var result = new List<MobModifierEvent>();
+
+        while (this.pendingSkills.TryDequeue(out var evt))
         {
-            if (pendingSkills.Count == 0)
-                return [];
-
-            var result = new List<MobModifierEvent>();
-
-            while (pendingSkills.TryDequeue(out var evt))
+            evt.ActionId = ++this.nextActionId;
+            if (evt.ServerTimeMs <= 0)
             {
-                evt.ActionId = ++nextActionId;
-                if (evt.ServerTimeMs <= 0)
-                    evt.ServerTimeMs = serverTimeMs;
-
-                result.Add(evt);
-                events?.Enqueue(evt);
+                evt.ServerTimeMs = serverTimeMs;
             }
 
-            return result;
+            result.Add(evt);
+            this.events?.Enqueue(evt);
         }
 
-        /// <inheritdoc />
-        public void Clear()
-        {
-            pendingSkills.Clear();
-            nextActionId = 0;
-        }
+        return result;
+    }
+
+    /// <inheritdoc />
+    public void Clear()
+    {
+        this.pendingSkills.Clear();
+        this.nextActionId = 0;
     }
 }

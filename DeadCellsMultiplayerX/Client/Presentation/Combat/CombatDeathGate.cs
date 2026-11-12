@@ -1,63 +1,69 @@
+namespace DeadCellsMultiplayerX.Client.Presentation.Combat;
+
 using dc.en;
-namespace DeadCellsMultiplayerX.Client.Presentation.Combat
+
+/// <summary>
+/// 允许指定客户端 mob 执行原生 onDie
+/// 预测致死、Ghost 帧致死、服务端确认死亡时临时打开
+/// </summary>
+internal sealed class CombatDeathGate
 {
-    /// <summary>
-    /// 允许指定客户端 mob 执行原生 onDie
-    /// 预测致死、Ghost 帧致死、服务端确认死亡时临时打开
-    /// </summary>
-    internal sealed class CombatDeathGate
+    private readonly Dictionary<Mob, int> depths = [];
+
+    public bool IsAllowed(Mob mob)
+        => mob != null && this.depths.ContainsKey(mob);
+
+    public IDisposable Allow(Mob mob)
     {
-        private readonly Dictionary<Mob, int> depths = [];
-
-        public bool IsAllowed(Mob mob)
-            => mob != null && depths.ContainsKey(mob);
-
-        public IDisposable Allow(Mob mob)
+        if (mob == null)
         {
-            if (mob == null)
-                return EmptyScope.Instance;
-
-            depths.TryGetValue(mob, out int depth);
-            depths[mob] = depth + 1;
-            return new Scope(this, mob);
+            return EmptyScope.Instance;
         }
 
-        public void Clear() => depths.Clear();
+        this.depths.TryGetValue(mob, out var depth);
+        this.depths[mob] = depth + 1;
+        return new Scope(this, mob);
+    }
 
-        private sealed class Scope : IDisposable
+    public void Clear() => this.depths.Clear();
+
+    private sealed class Scope(CombatDeathGate gate, Mob mob) : IDisposable
+    {
+        private readonly CombatDeathGate gate = gate;
+        private readonly Mob mob = mob;
+        private bool disposed;
+
+        public void Dispose()
         {
-            private readonly CombatDeathGate gate;
-            private readonly Mob mob;
-            private bool disposed;
-
-            public Scope(CombatDeathGate gate, Mob mob)
+            if (this.disposed)
             {
-                this.gate = gate;
-                this.mob = mob;
+                return;
             }
 
-            public void Dispose()
+            this.disposed = true;
+
+            if (!this.gate.depths.TryGetValue(this.mob, out var depth))
             {
-                if (disposed) return;
-                disposed = true;
+                return;
+            }
 
-                if (!gate.depths.TryGetValue(mob, out int depth))
-                    return;
-
-                if (depth <= 1)
-                    gate.depths.Remove(mob);
-                else
-                    gate.depths[mob] = depth - 1;
+            if (depth <= 1)
+            {
+                this.gate.depths.Remove(this.mob);
+            }
+            else
+            {
+                this.gate.depths[this.mob] = depth - 1;
             }
         }
+    }
 
-        private sealed class EmptyScope : IDisposable
+    private sealed class EmptyScope : IDisposable
+    {
+        public static readonly EmptyScope Instance = new();
+
+        public void Dispose()
         {
-            public static readonly EmptyScope Instance = new();
-
-            public void Dispose()
-            {
-            }
         }
     }
 }

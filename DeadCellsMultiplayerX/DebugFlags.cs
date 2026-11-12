@@ -1,26 +1,31 @@
-namespace DeadCellsMultiplayerX
+namespace DeadCellsMultiplayerX;
+
+internal static class DebugFlags
 {
-    internal static class DebugFlags
+    private static readonly HashSet<string> Flags = [];
+
+    public static void Toggle(string key)
     {
-        private static readonly HashSet<string> flags = new();
-
-        public static void Toggle(string key)
+        if (!Flags.Remove(key))
         {
-            if (!flags.Remove(key)) flags.Add(key);
+            Flags.Add(key);
         }
-
-        public static bool Get(string key) => flags.Contains(key);
-
-        public static void Set(string key, bool on)
-        {
-            if (on) flags.Add(key);
-            else flags.Remove(key);
-        }
-
-        public static void ClearViaAnsi()
-        {
-            Console.Write("\x1b[2J\x1b[3J\x1b[H");
-        }
-
     }
+
+    public static bool Get(string key) => Flags.Contains(key);
+
+    public static void Set(string key, bool on)
+    {
+        if (on)
+        {
+            Flags.Add(key);
+        }
+        else
+        {
+            Flags.Remove(key);
+        }
+    }
+
+    public static void ClearViaAnsi() => Console.Write("\x1b[2J\x1b[3J\x1b[H");
+
 }

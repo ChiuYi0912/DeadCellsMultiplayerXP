@@ -1,3 +1,5 @@
+namespace DeadCellsMultiplayerX.Engine.Utilities;
+
 using System.Runtime.CompilerServices;
 using dc;
 using dc.en;
@@ -6,188 +8,198 @@ using dc.libs.heaps.slib._AnimManager;
 using dc.tool;
 using DeadCellsMultiplayerX.Contracts.Loadout;
 using DeadCellsMultiplayerX.Contracts.Snapshots;
+using DeadCellsMultiplayerX.Engine.Adapters.Items;
+using DeadCellsMultiplayerX.Engine.Adapters.Snapshots;
 using DeadCellsMultiplayerX.Engine.Serialization;
+using DeadCellsMultiplayerX.Simulation.Loadout;
 using Hashlink.Virtuals;
 using HaxeProxy.Runtime;
 using ModCore.Utilities;
 
-using DeadCellsMultiplayerX.Simulation.Loadout;
-using DeadCellsMultiplayerX.Engine.Adapters.Items;
-using DeadCellsMultiplayerX.Engine.Adapters.Snapshots;
-namespace DeadCellsMultiplayerX.Engine.Utilities
+/// <summary>
+/// 采集 Hero 的同步信息。
+/// 思路：每次采集同时生成动态状态、外观静态数据与版本化 Loadout；
+/// Loadout 让晚加入/重连能直接恢复装备，而不必等对方第一次出手。
+/// </summary>
+public static class HeroUtils
 {
+    private static readonly ConditionalWeakTable<AnimManager, AnimTracker> AnimStartCache = [];
+
     /// <summary>
-    /// 采集 Hero 的同步信息。
-    /// 思路：每次采集同时生成动态状态、外观静态数据与版本化 Loadout；
-    /// Loadout 让晚加入/重连能直接恢复装备，而不必等对方第一次出手。
+    /// 采集一个 Hero 的同步信息
     /// </summary>
-    public static class HeroUtils
+    public static (HeroSpawn spawn, HeroDynamic dyn) Collect(
+        Entity hero,
+        string clientId,
+        long remoteTime)
     {
-        private static readonly ConditionalWeakTable<AnimManager, AnimTracker> animStartCache = new();
+        var spawn = new HeroSpawn { GUID = clientId };
+        var dyn = new HeroDynamic { GUID = clientId, ChangeMask = HeroDynamic.BitAll };
 
-        /// <summary>
-        /// 采集一个 Hero 的同步信息
-        /// </summary>
-        public static (HeroSpawn spawn, HeroDynamic dyn) Collect(
-            Entity hero,
-            string guid,
-            long remoteTime)
+        FillAll(hero, spawn, dyn, remoteTime);
+        return (spawn, dyn);
+    }
+
+    public static void FillAll(
+        Entity e,
+        HeroSpawn spawn,
+        HeroDynamic dyn,
+        long remoteTime)
+    {
+        //spawn.TypeName = e.GetType().FullName ?? string.Empty;
+
+        if (!e.initDone)
         {
-            var spawn = new HeroSpawn { GUID = guid };
-            var dyn = new HeroDynamic { GUID = guid, ChangeMask = HeroDynamic.BIT_ALL };
-
-            FillAll(hero, spawn, dyn, remoteTime);
-            return (spawn, dyn);
+            return;
         }
 
-        public static void FillAll(
-            Entity e,
-            HeroSpawn spawn,
-            HeroDynamic dyn,
-            long remoteTime)
+        dyn.Life = e.life;
+        dyn.MaxLife = e.maxLife;
+        dyn.IsDead = e.destroyed || e.life <= 0;
+
+        spawn.SubLevelId = e._level.GetSubLevelIndex();
+        dyn.Affects = AffectCodec.Collect(
+            (Hero)e,
+            remoteTime / 1000.0,
+            e.cd.baseFps);
+
+        spawn.LevelId = e._level.map?.id?.ToString() ?? string.Empty;
+        dyn.LevelId = spawn.LevelId;
+        dyn.SubLevelIndex = e._level.GetSubLevelIndex();
+        dyn.ChangeMask |= HeroDynamic.BitLevel;
+
+        var hero = (Hero)e;
+        var inventory = hero.inventory;
+
+        var loadout = new PlayerLoadout
         {
-            //spawn.TypeName = e.GetType().FullName ?? string.Empty;
+            Weapons =
+            [
+                CreateSlot(inventory.getEquippedWeaponOn(0)),
+                CreateSlot(inventory.getEquippedWeaponOn(1)),
+            ],
+            Actives =
+            [
+                CreateSlot(inventory.getActiveOn(0)),
+                CreateSlot(inventory.getActiveOn(1)),
+            ],
+            Talisman = inventory.hasTalisman()
+                ? CreateSlot(inventory.getTalisman())
+                : null,
+            BrutalityTier = hero.brutalityTier,
+            SurvivalTier = hero.survivalTier,
+            TacticTier = hero.tacticTier,
+        };
 
-            if (!e.initDone) return;
+        loadout.Version = LoadoutCodec.ComputeVersion(loadout);
+        spawn.Loadout = loadout;
+        spawn.Talisman = null;
 
-            dyn.Life = e.life;
-            dyn.MaxLife = e.maxLife;
-            dyn.IsDead = e.destroyed || e.life <= 0;
+        if (e.spr != null)
+        {
+            dyn.Pos = new PosVector(
+                e.cx, e.cy, e.xr, e.yr, e.dir,
+                e.dx, e.dy, e.bdx, e.bdy);
 
-            spawn.SubLevelId = e._level.GetSubLevelIndex();
-            dyn.Affects = AffectCodec.Collect(
-                (Hero)e,
-                remoteTime / 1000.0,
-                e.cd.baseFps);
+            FillSkinInfo((Hero)e, spawn);
+            FillAnimInfo(dyn, e.spr, remoteTime);
+            FillGlowData(e, spawn);
+        }
+    }
 
-            spawn.LevelId = e._level.map?.id?.ToString() ?? string.Empty;
-            dyn.LevelId = spawn.LevelId;
-            dyn.SubLevelIndex = e._level.GetSubLevelIndex();
-            dyn.ChangeMask |= HeroDynamic.BIT_LEVEL;
+    private static EquipmentSlot CreateSlot(InventItem? item)
+        => LoadoutCodec.CreateSlot(
+            item == null ? null : ItemCodec.Collect(item));
 
-            var hero = (Hero)e;
-            var inventory = hero.inventory;
+    public static void FillSkinInfo(Hero hero, HeroSpawn spawn)
+    {
+        var skin = hero.getSkinInfo();
+        spawn.ColorMapModel = skin.model.ToString();
+        spawn.ColorMapSkin = skin.colorMap.ToString();
 
-            var loadout = new PlayerLoadout
-            {
-                Weapons =
-                [
-                    CreateSlot(inventory.getEquippedWeaponOn(0)),
-                    CreateSlot(inventory.getEquippedWeaponOn(1)),
-                ],
-                Actives =
-                [
-                    CreateSlot(inventory.getActiveOn(0)),
-                    CreateSlot(inventory.getActiveOn(1)),
-                ],
-                Talisman = inventory.hasTalisman()
-                    ? CreateSlot(inventory.getTalisman())
-                    : null,
-                BrutalityTier = hero.brutalityTier,
-                SurvivalTier = hero.survivalTier,
-                TacticTier = hero.tacticTier,
-            };
+        spawn.MainSprite ??= new SpriteInfo();
+        spawn.MainSprite.AtlasName = "atlas/" + spawn.ColorMapModel + ".atlas";
+        spawn.MainSprite.GroupName = hero.spr.groupName.ToString();
+        spawn.MainSprite.PivotData = DCMXSerializers.MessagePack.Serialize(hero.spr?.pivot);
+        spawn.MainSprite.Parent = spawn.GUID;
+    }
 
-            loadout.Version = LoadoutCodec.ComputeVersion(loadout);
-            spawn.Loadout = loadout;
-            spawn.Talisman = null;
-
-            if (e.spr != null)
-            {
-                dyn.Pos = new PosVector(
-                    e.cx, e.cy, e.xr, e.yr, e.dir,
-                    e.dx, e.dy, e.bdx, e.bdy);
-
-                FillSkinInfo((Hero)e, spawn);
-                FillAnimInfo(dyn, e.spr, remoteTime);
-                FillGlowData(e, spawn);
-            }
+    public static void FillGlowData(Entity e, HeroSpawn spawn)
+    {
+        if (spawn.GlowData.Count > 0)
+        {
+            return;
         }
 
-        private static EquipmentSlot CreateSlot(InventItem? item)
-            => LoadoutCodec.CreateSlot(
-                item == null ? null : ItemCodec.Collect(item));
-
-        public static void FillSkinInfo(Hero hero, HeroSpawn spawn)
+        var glow = (dc.shader.GlowKey)e.spr.getShader(dc.shader.GlowKey.Class);
+        if (glow == null)
         {
-            var skin = hero.getSkinInfo();
-            spawn.ColorMapModel = skin.model.ToString();
-            spawn.ColorMapSkin = skin.colorMap.ToString();
-
-            spawn.MainSprite ??= new SpriteInfo();
-            spawn.MainSprite.AtlasName = "atlas/" + spawn.ColorMapModel + ".atlas";
-            spawn.MainSprite.GroupName = hero.spr.groupName.ToString();
-            spawn.MainSprite.PivotData = DCMXSerializers.MessagePack.Serialize(hero.spr?.pivot);
-            spawn.MainSprite.Parent = spawn.GUID;
+            return;
         }
 
-        public static void FillGlowData(Entity e, HeroSpawn spawn)
+        var array = glow.getGlowDatas();
+        for (var i = 0; i < array.length; i++)
         {
-            if (spawn.GlowData.Count > 0) return;
+            var data = array.getDyn(i);
+            var virtuals = ((HaxeProxyBase)data)
+                .ToVirtual<virtual_animationIntensity_animationScale_animationSpeed_animationTextureMask_inner_key_outer_power_>();
+            spawn.GlowData.Add(i, DCMXSerializers.MessagePack.Serialize(virtuals));
+        }
+    }
 
-            var glow = (dc.shader.GlowKey)e.spr.getShader(dc.shader.GlowKey.Class);
-            if (glow == null) return;
-
-            var array = glow.getGlowDatas();
-            for (int i = 0; i < array.length; i++)
-            {
-                var data = array.getDyn(i);
-                var virtuals = ((HaxeProxyBase)data)
-                    .ToVirtual<virtual_animationIntensity_animationScale_animationSpeed_animationTextureMask_inner_key_outer_power_>();
-                spawn.GlowData.Add(i, DCMXSerializers.MessagePack.Serialize(virtuals));
-            }
+    public static void FillAnimInfo(HeroDynamic dyn, HSprite spr, long remoteTime)
+    {
+        var anim = spr.get_anim();
+        if (anim == null || anim.destroyed || anim.stack == null || anim.stack.length == 0)
+        {
+            return;
         }
 
-        public static void FillAnimInfo(HeroDynamic dyn, HSprite spr, long remoteTime)
+        if (anim.stack.getDyn(0) is not AnimInstance current)
         {
-            var anim = spr.get_anim();
-            if (anim == null || anim.destroyed || anim.stack == null || anim.stack.length == 0)
-                return;
+            return;
+        }
 
-            var current = anim.stack.getDyn(0) as AnimInstance;
-            if (current == null) return;
+        var groupName = spr.groupName?.ToString() ?? string.Empty;
 
-            string groupName = spr.groupName?.ToString() ?? string.Empty;
+        if (!AnimStartCache.TryGetValue(anim, out var tracker))
+        {
+            tracker = new AnimTracker { LastGroup = "", StartTime = remoteTime };
+            AnimStartCache.Add(anim, tracker);
+        }
 
-            if (!animStartCache.TryGetValue(anim, out var tracker))
+        if (tracker.LastGroup != groupName)
+        {
+            tracker.LastGroup = groupName;
+            tracker.StartTime = remoteTime;
+        }
+
+        dyn.Anim = new AnimInfo
+        {
+            Speed = current.speed,
+            Paused = current.paused,
+            Frame = spr.frame,
+            Plays = current.plays,
+            PlayDuration = current.playDuration,
+            GroupName = groupName,
+            StartTime = tracker.StartTime,
+        };
+
+        var transitions = anim.transitions;
+        if (transitions != null
+            && dyn.Anim.AnimTransitions.Count == 0
+            && transitions.length > 0)
+        {
+            foreach (Transition data in transitions)
             {
-                tracker = new AnimTracker { LastGroup = "", StartTime = remoteTime };
-                animStartCache.Add(anim, tracker);
-            }
-
-            if (tracker.LastGroup != groupName)
-            {
-                tracker.LastGroup = groupName;
-                tracker.StartTime = remoteTime;
-            }
-
-            dyn.Anim = new AnimInfo
-            {
-                Speed = current.speed,
-                Paused = current.paused,
-                Frame = spr.frame,
-                Plays = current.plays,
-                playDuration = current.playDuration,
-                GroupName = groupName,
-                StartTime = tracker.StartTime,
-            };
-
-            var transitions = anim.transitions;
-            if (transitions != null
-                && dyn.Anim.AnimTransitions.Count == 0
-                && transitions.length > 0)
-            {
-                foreach (Transition data in transitions)
+                dyn.Anim.AnimTransitions.Add(new AnimTransitions
                 {
-                    dyn.Anim.AnimTransitions.Add(new AnimTransitions
-                    {
-                        Anim = data.anim.ToString(),
-                        From = data.from.ToString(),
-                        To = data.to.ToString(),
-                        reverse = data.reverse,
-                        speed = data.spd,
-                    });
-                }
+                    Anim = data.anim.ToString(),
+                    From = data.from.ToString(),
+                    To = data.to.ToString(),
+                    Reverse = data.reverse,
+                    Speed = data.spd,
+                });
             }
         }
     }

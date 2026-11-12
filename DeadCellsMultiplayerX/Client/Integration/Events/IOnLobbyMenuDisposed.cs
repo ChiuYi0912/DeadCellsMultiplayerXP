@@ -1,11 +1,11 @@
+namespace DeadCellsMultiplayerX.Client.Integration.Events;
+
 
 
 using ModCore.Events;
-namespace DeadCellsMultiplayerX.Client.Integration.Events
+
+[Event]
+public interface IOnLobbyMenuDisposed
 {
-    [Event]
-    public interface IOnLobbyMenuDisposed
-    {
-        void OnLobbyMenuDisposed();
-    }
+    public void OnLobbyMenuDisposed();
 }
