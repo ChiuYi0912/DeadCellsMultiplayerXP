@@ -68,10 +68,10 @@ internal sealed class GuestWorldLoader(
         this.logger.Information("Clearing entities...");
         var loadedGame = Game.Class.ME;
 
-        foreach (Level level in loadedGame.subLevels)
+        foreach (var level in loadedGame.subLevels)
         {
             List<Entity> entities = [];
-            foreach (Entity entity in level.entities)
+            foreach (var entity in level.entities)
             {
                 if (entity is Hero or Interactive)
                 {

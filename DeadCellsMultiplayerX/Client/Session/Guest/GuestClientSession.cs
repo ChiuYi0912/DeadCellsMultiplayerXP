@@ -20,9 +20,7 @@ using PolyType.SourceGenerator;
 using StreamJsonRpc;
 
 /// <summary>
-/// 访客的客户端会话。
-/// 思路：负责连接、协议握手、时间同步、本地采集上传与世界帧分发；
-/// 远端动作的表现由 ClientWorld/ClientReplayProxyManager 的 presenter 链处理，本类不直接做动作分发。
+/// 访客的客户端会话
 /// </summary>
 internal sealed partial class GuestClientSession(GuestClient client, Stream serverStream) : ClientSession,
     IGuestRPC,
@@ -31,39 +29,37 @@ internal sealed partial class GuestClientSession(GuestClient client, Stream serv
     IOnLocalHeroInitDone,
     IHeroActionSink
 {
+    /// <summary>
+    /// 仅用于统计世界帧序列化大小
+    /// </summary>
+    private static readonly MessagePackSerializer FrameSizeSerializer = new();
+
     private JsonRpc? rpc;
     private IServerRPC server = null!;
     private byte[]? saveData;
     private GuestHookSession? hookSession;
 
+    private LocalActionCapture? localCapture;
+    private LocalCombatPrediction? prediction;
+    private CombatDeathGate? deathGate;
+
+    private volatile bool serverDrivenTransition;
+
+    /// <summary>
+    /// 受击表现调用深度 防止 Mob.onDamage 内部再次触发命中时递归
+    /// </summary>
+    private int replayVisualDepth;
+
+    public static dc.pr.Game Game => dc.pr.Game.Class.ME;
+
+    public IServerRPC Server => this.server ?? throw new InvalidOperationException();
+
+    public GuestClient Client { get; private set; } = null!;
 
     /// <summary>
     /// 上传通道是否已判定为断开
     /// </summary>
     public bool UploadBroken => this.Uploader.UploadBroken;
-
-    public IServerRPC Server => this.server ?? throw new InvalidOperationException();
-    private bool IsReady => this.server != null;
-    public static dc.pr.Game Game => dc.pr.Game.Class.ME;
-    public GuestClient Client { get; private set; } = null!;
-
-    internal ClientWorld? ClientWorld { get; private set; }
-
-    private LocalActionCapture? localCapture;
-    private LocalCombatPrediction? prediction;
-    private CombatDeathGate? deathGate;
-
-    /// <summary>
-    /// 本地武器命中预测
-    /// </summary>
-    internal LocalCombatPrediction Prediction => this.prediction ?? throw new InvalidOperationException();
-
-    /// <summary>
-    /// 允许客户端 mob 执行死亡的闸门
-    /// </summary>
-    internal CombatDeathGate DeathGate => this.deathGate ?? throw new InvalidOperationException();
-
-    private volatile bool serverDrivenTransition;
 
     public bool ServerDrivenTransition
     {
@@ -72,27 +68,36 @@ internal sealed partial class GuestClientSession(GuestClient client, Stream serv
     }
 
     /// <summary>
-    /// 受击表现调用深度 防止 Mob.onDamage 内部再次触发命中时递归
+    /// 最近一帧世界帧的 MessagePack 负载字节数
     /// </summary>
-    private int replayVisualDepth;
+    public int LastWorldFrameBytes { get; private set; }
 
-    private GuestFrameUploader Uploader
-    => field ??= new GuestFrameUploader(
-        () => this.IsDisposed,
-        () => this.Client.Guid,
+    internal ClientWorld? ClientWorld { get; private set; }
+
+    /// <summary>
+    /// 本地武器命中预测
+    /// </summary>
+    internal LocalCombatPrediction Prediction
+        => this.prediction ?? throw new InvalidOperationException();
+
+    internal CombatDeathGate DeathGate
+        => this.deathGate ?? throw new InvalidOperationException();
+
+    private bool IsReady => this.server != null;
+
+    private GuestFrameUploader Uploader => field ??= new GuestFrameUploader(
+        this.Client.Guid,
         () => this.SyncedTimeMs,
         frame => this.server?.UploadClientWorldFrame(frame) ?? Task.CompletedTask,
         this.Logger);
 
-    /// <summary>
-    /// 仅用于统计世界帧序列化大小
-    /// </summary>
-    private static readonly MessagePackSerializer FrameSizeSerializer = new();
-
-    /// <summary>
-    /// 最近一帧世界帧的 MessagePack 负载字节数
-    /// </summary>
-    public int LastWorldFrameBytes { get; private set; }
+    private GuestWorldLoader WorldLoader => field ??= new GuestWorldLoader(
+        this.DisposeToken,
+        this.ReplaceWorld,
+        this.Uploader.ResetLocalHeroState,
+        data => this.saveData = data,
+        client,
+        this.Logger);
 
     public override async Task Init()
     {
@@ -123,16 +128,9 @@ internal sealed partial class GuestClientSession(GuestClient client, Stream serv
         this.rpc = handshake.Rpc;
         this.server = handshake.Server;
         this.Client = client;
-    }
 
-    private GuestWorldLoader WorldLoader
-        => field ??= new GuestWorldLoader(
-            this.DisposeToken,
-            this.ReplaceWorld,
-            this.Uploader.ResetLocalHeroState,
-            data => this.saveData = data,
-            client,
-            this.Logger);
+        this.Uploader.SetReady(true);
+    }
 
     /// <summary>
     /// 载入新 level 并初始化
@@ -141,30 +139,6 @@ internal sealed partial class GuestClientSession(GuestClient client, Stream serv
     /// <returns></returns>
     public Task EnterNewLevel(byte[] saveData)
         => this.WorldLoader.EnterNewLevel(saveData);
-
-    private ClientWorld ReplaceWorld()
-    {
-        this.prediction?.Clear();
-        this.deathGate?.Clear();
-        this.ClientWorld?.Dispose();
-        this.ClientWorld = new ClientWorld(this, client.Guid);
-        return this.ClientWorld;
-    }
-
-
-    void IOnFrameUpdate.OnFrameUpdate(double dt)
-    {
-        if (this.server == null)
-        {
-            return;
-        }
-
-        // 同步 TimeStamp
-        this.TickTimeSystem();
-
-        // 世界帧 NACK 调度/超时
-        this.ClientWorld?.Tick(this.SyncedTimeMs);
-    }
 
     /// <summary>
     /// 服务端调用,用于通知当前客户切换关卡
@@ -185,10 +159,6 @@ internal sealed partial class GuestClientSession(GuestClient client, Stream serv
         }
         return Task.CompletedTask;
     }
-
-    void IOnLocalHeroPostUpdate.OnPostUpdate(Hero hero) => this.Uploader.CaptureAndUpload(hero);
-
-    private void TickTimeSystem() => this.Clock.Tick();
 
     /// <summary>
     /// 服务端每 tick 推送完整世界帧
@@ -219,19 +189,6 @@ internal sealed partial class GuestClientSession(GuestClient client, Stream serv
     }
 
     /// <summary>
-    /// 统计世界帧的 MessagePack 负载大小
-    /// </summary>
-    private void MeasureWorldFrame(WorldFrame frame)
-    {
-        var shape = TypeShapeProvider_DeadCellsMultiplayerX.Default
-            .GetTypeShapeOrThrow<WorldFrame>();
-
-        this.LastWorldFrameBytes = FrameSizeSerializer
-            .Serialize(frame, shape)
-            .Length;
-    }
-
-    /// <summary>
     /// 服务端请求补发本地上传帧
     /// </summary>
     public Task<ClientFrameBundle> RequestClientFrames(ClientFrameRangeRequest request)
@@ -240,37 +197,6 @@ internal sealed partial class GuestClientSession(GuestClient client, Stream serv
     internal void ObserveWorldEpoch(int epoch) => this.Uploader.SetEpoch(epoch);
 
     internal void ObserveServerTime(long serverTimeMs) => this.Clock.ObserveServerTime(serverTimeMs);
-
-    void IOnLocalHeroInitDone.OnHeroInitDone(Hero hero) => this.Uploader.ResetLocalHeroState();
-
-    Task IHeroActionSink.SubmitHeroAction(HeroAction action) => this.server.SubmitHeroAction(action);
-
-    /// <summary>
-    /// 创建会话级 Hook 适配器；适配器只拿到完成工作所需的窄接口。
-    /// </summary>
-    private void InitHooks(CombatDeathGate deathGate)
-    {
-        var sink = new GuestSessionHookSink(
-            new GuestCombatHookAdapter(
-                mob => this.ClientWorld?.IsRemoteMob(mob) == true,
-                () => this.ClientWorld?.IsApplyingServerAreaAffect == true,
-                this.PlayHitVisual),
-            new GuestMobHookAdapter(
-                () => this.ClientWorld?.MobModifiers,
-                mob => this.ClientWorld?.IsRemoteMob(mob) == true,
-                mob => this.ClientWorld?.IsDeathSuppressed(mob) == true,
-                () => this.SyncedTimeMs,
-                deathGate),
-            new GuestSaveHookAdapter(
-                () => this.saveData),
-            new GuestGameHookAdapter(
-                this.Logger,
-                () => ClientRuntime.Instance.CurrentGuestClient,
-                client.Quit,
-                this.Dispose));
-
-        this.hookSession = new GuestHookSession(sink);
-    }
 
     /// <summary>
     /// 播放远端 mob 的受击表现，避免 Mob.onDamage 内部递归
@@ -324,4 +250,75 @@ internal sealed partial class GuestClientSession(GuestClient client, Stream serv
 
     internal void DebugUseWeapon(string itemId, int slot, int cycle = 0)
         => this.localCapture?.DebugUseWeapon(itemId, slot, cycle);
+
+    void IOnFrameUpdate.OnFrameUpdate(double dt)
+    {
+        if (this.server == null)
+        {
+            return;
+        }
+
+        // 同步 TimeStamp
+        this.TickTimeSystem();
+
+        // 世界帧 NACK 调度/超时
+        this.ClientWorld?.Tick(this.SyncedTimeMs);
+    }
+
+    void IOnLocalHeroPostUpdate.OnPostUpdate(Hero hero) => this.Uploader.CaptureAndUpload(hero);
+
+    void IOnLocalHeroInitDone.OnHeroInitDone(Hero hero) => this.Uploader.ResetLocalHeroState();
+
+    Task IHeroActionSink.SubmitHeroAction(HeroAction action) => this.server.SubmitHeroAction(action);
+
+    private ClientWorld ReplaceWorld()
+    {
+        this.prediction?.Clear();
+        this.deathGate?.Clear();
+        this.ClientWorld?.Dispose();
+        this.ClientWorld = new ClientWorld(this, client.Guid);
+        return this.ClientWorld;
+    }
+
+    private void TickTimeSystem() => this.Clock.Tick();
+
+    /// <summary>
+    /// 统计世界帧的 MessagePack 负载大小
+    /// </summary>
+    private void MeasureWorldFrame(WorldFrame frame)
+    {
+        var shape = TypeShapeProvider_DeadCellsMultiplayerX.Default
+            .GetTypeShapeOrThrow<WorldFrame>();
+
+        this.LastWorldFrameBytes = FrameSizeSerializer
+            .Serialize(frame, shape)
+            .Length;
+    }
+
+    /// <summary>
+    /// 创建会话级 Hook 适配器；适配器只拿到完成工作所需的窄接口。
+    /// </summary>
+    private void InitHooks(CombatDeathGate deathGate)
+    {
+        var sink = new GuestSessionHookSink(
+            new GuestCombatHookAdapter(
+                mob => this.ClientWorld?.IsRemoteMob(mob) == true,
+                () => this.ClientWorld?.IsApplyingServerAreaAffect == true,
+                this.PlayHitVisual),
+            new GuestMobHookAdapter(
+                () => this.ClientWorld?.MobModifiers,
+                mob => this.ClientWorld?.IsRemoteMob(mob) == true,
+                mob => this.ClientWorld?.IsDeathSuppressed(mob) == true,
+                () => this.SyncedTimeMs,
+                deathGate),
+            new GuestSaveHookAdapter(
+                () => this.saveData),
+            new GuestGameHookAdapter(
+                this.Logger,
+                () => ClientRuntime.Instance.CurrentGuestClient,
+                client.Quit,
+                this.Dispose));
+
+        this.hookSession = new GuestHookSession(sink);
+    }
 }

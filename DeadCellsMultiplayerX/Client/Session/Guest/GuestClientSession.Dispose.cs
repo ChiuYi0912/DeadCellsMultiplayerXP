@@ -31,6 +31,7 @@ internal sealed partial class GuestClientSession
 
         this.prediction = null;
         this.deathGate = null;
+        this.Uploader.MarkDisposed();
         this.Uploader.Clear();
 
         DebugHUD.DisposeInstance();

@@ -11,16 +11,15 @@ using Serilog;
 /// not know about hooks, world state or timing.
 /// </summary>
 internal sealed class GuestFrameUploader(
-    Func<bool> isDisposed,
-    Func<string> guid,
+    string guid,
     Func<long> syncedTimeMs,
     Func<ClientWorldFrame, Task> upload,
     ILogger logger)
 {
+
     private readonly ClientFrameSendBuffer sendBuffer = new();
-    private readonly Func<bool> isDisposed = isDisposed
-            ?? throw new ArgumentNullException(nameof(isDisposed));
-    private readonly Func<string> guid = guid
+
+    private readonly string guid = guid
             ?? throw new ArgumentNullException(nameof(guid));
     private readonly Func<long> syncedTimeMs = syncedTimeMs
             ?? throw new ArgumentNullException(nameof(syncedTimeMs));
@@ -31,13 +30,18 @@ internal sealed class GuestFrameUploader(
 
     private Task? uploadTask;
     private long lastUploadErrorLogMs;
-
+    private volatile bool disposed;
+    private volatile bool ready;
     public bool UploadBroken { get; private set; }
+
+    public void SetReady(bool value) => this.ready = value;
+    public void MarkDisposed() => this.disposed = true;
+
 
     /// <summary>Captures the local hero and sends at most one in-flight frame.</summary>
     public void CaptureAndUpload(Hero hero)
     {
-        if (this.isDisposed() || this.UploadBroken)
+        if (!this.ready || this.disposed || this.UploadBroken)
         {
             return;
         }
@@ -48,7 +52,7 @@ internal sealed class GuestFrameUploader(
             return;
         }
 
-        if (!this.sendBuffer.Capture(hero, this.guid(), this.syncedTimeMs()))
+        if (!this.sendBuffer.Capture(hero, this.guid, this.syncedTimeMs()))
         {
             return;
         }
@@ -71,12 +75,22 @@ internal sealed class GuestFrameUploader(
         }
 #endif
 
+        this.uploadTask = this.RunUploadAsync(frame);
+    }
+
+    public ClientFrameBundle BuildBundle(ClientFrameRangeRequest request)
+        => this.sendBuffer.BuildBundle(request);
+
+    public void SetEpoch(int epoch) => this.sendBuffer.SetEpoch(epoch);
+    public void ResetLocalHeroState() => this.sendBuffer.ResetLocalHeroState();
+
+    public void Clear() => this.sendBuffer.Clear();
+
+    private async Task RunUploadAsync(ClientWorldFrame frame)
+    {
         try
         {
-            this.uploadTask = this.upload(frame);
-            _ = this.uploadTask.ContinueWith(
-                this.OnUploadFaulted,
-                TaskContinuationOptions.OnlyOnFaulted);
+            await this.upload(frame).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -84,26 +98,13 @@ internal sealed class GuestFrameUploader(
         }
     }
 
-    public ClientFrameBundle BuildBundle(ClientFrameRangeRequest request)
-        => this.sendBuffer.BuildBundle(request);
-
-    public void SetEpoch(int epoch) => this.sendBuffer.SetEpoch(epoch);
-
-    public void ResetLocalHeroState() => this.sendBuffer.ResetLocalHeroState();
-
-    public void Clear() => this.sendBuffer.Clear();
-
-    private void OnUploadFaulted(Task task)
-        => this.HandleUploadFailure(task.Exception?.GetBaseException());
-
     private void HandleUploadFailure(Exception? ex)
     {
-        if (this.isDisposed())
+        if (this.disposed)
         {
             return;
         }
 
-        // 连接已经断开时,等待 Rpc_Disconnected 清理
         if (ex is StreamJsonRpc.ConnectionLostException
             or OperationCanceledException)
         {

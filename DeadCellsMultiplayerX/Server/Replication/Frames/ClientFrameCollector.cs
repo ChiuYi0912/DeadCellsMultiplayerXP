@@ -198,6 +198,11 @@ internal sealed class ClientFrameCollector
             return;
         }
 
+        if (!channel.Sequencer.HasBaseline)
+        {
+            channel.Sequencer.AdoptBaseline(frame.Sequence - 1);
+        }
+
         channel.Sequencer.Receive(frame);
     }
 
