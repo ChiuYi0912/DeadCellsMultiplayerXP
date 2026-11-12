@@ -1,15 +1,11 @@
-using System;
-using System.Collections.Generic;
 using CoreLibrary.Utilities;
 using dc;
 using dc.h2d;
 using dc.hxd;
-using dc.pr;
 using dc.ui;
 using DeadCellsMultiplayerX.Client.UI.Common;
 using HaxeProxy.Runtime;
 using ModCore.Utilities;
-using DeadCellsMultiplayerX.Client.Core;
 
 namespace DeadCellsMultiplayerX.Client.UI.Lobby.Views
 {
@@ -45,9 +41,12 @@ namespace DeadCellsMultiplayerX.Client.UI.Lobby.Views
 
             AddDebugToggle(content, "显示网络统计", () => ToggleFlag("netstat"));
             AddDebugToggle(content, "显示实体调试标签", () => ToggleFlag("entityLabels"));
+#if DEBUG
+            // DebugLauncher is compiled only under DEBUG (see its file-level #if).
             AddDebugBtn(content, "本地2人测试", () => DebugLauncher.StartTest(1));
             AddDebugBtn(content, "本地3人测试", () => DebugLauncher.StartTest(2));
             AddDebugBtn(content, "本地4人测试", () => DebugLauncher.StartTest(3));
+#endif
 
             AddDivider(content);
 

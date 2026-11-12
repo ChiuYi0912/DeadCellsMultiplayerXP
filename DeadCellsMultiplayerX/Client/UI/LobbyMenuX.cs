@@ -1,10 +1,7 @@
-using System;
-using System.Threading.Tasks;
 using dc.pr;
-using dc.ui;
 using DeadCellsMultiplayerX.Client.UI.Common;
 using DeadCellsMultiplayerX.Client.UI.Lobby;
-using DeadCellsMultiplayerX.Client.Core;
+using DeadCellsMultiplayerX.Client.Session;
 
 namespace DeadCellsMultiplayerX.Client.UI
 {
@@ -12,7 +9,7 @@ namespace DeadCellsMultiplayerX.Client.UI
     {
         private readonly LobbyUI lobby;
 
-        public LobbyMenuX(ClientMain client, TitleScreen titleScreen) : base(titleScreen, dc.Const.Class.ROOT_DP_MENU)
+        public LobbyMenuX(ClientRuntime client, TitleScreen titleScreen) : base(titleScreen, dc.Const.Class.ROOT_DP_MENU)
         {
             lobby = new LobbyUI(client, titleScreen, this);
             lobby.OnCloseRequested += OnLobbyCloseRequested;
@@ -25,7 +22,7 @@ namespace DeadCellsMultiplayerX.Client.UI
 
         private void OnLobbyCloseRequested()
         {
-            Dispose(); 
+            Dispose();
         }
 
         protected override void MyDispose()

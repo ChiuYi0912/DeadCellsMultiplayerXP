@@ -1,9 +1,10 @@
-using System;
-using DeadCellsMultiplayerX.Client.Core;
-using DeadCellsMultiplayerX.Client.Guest;
-using DeadCellsMultiplayerX.Utils;
+using DeadCellsMultiplayerX.Client.Session;
+using DeadCellsMultiplayerX.Client.Session.Guest;
+using DeadCellsMultiplayerX.Client.World;
 
-namespace DeadCellsMultiplayerX.Client.UI.DebugTools
+
+using DeadCellsMultiplayerX.Foundation.Versioning;
+namespace DeadCellsMultiplayerX.Client.UI.DebugTools.Stats
 {
     internal readonly record struct ClientNetSnapshot(
         bool HasSession,
@@ -76,7 +77,7 @@ namespace DeadCellsMultiplayerX.Client.UI.DebugTools
                     UploadBroken: false);
             }
 
-            var main = ClientMain.Instance;
+            var main = ClientRuntime.Instance;
             var guest = main.CurrentGuestClient;
             var lobby = guest?.LobbyInfo;
 
@@ -84,24 +85,25 @@ namespace DeadCellsMultiplayerX.Client.UI.DebugTools
             string role = main.CurrentHostClient != null ? "Host" : "Guest";
             string header = $"DCMX Version:{version} Role:{role} Players Count:{players}";
 
-            var world = session.RemoteWorld;
+            var world = session.ClientWorld;
             string guid = guest?.Guid ?? "--";
             string shortGuid = guid.Length > 8 ? guid[..8] : guid;
 
             string level = "--";
             string hero = "none";
+            ClientWorldStats stats = default;
 
             if (world != null)
             {
-                var ctx = world.LocalHero.Context;
-                if (!string.IsNullOrEmpty(ctx.CurrentLevelId))
+                stats = world.CaptureStats();
+                if (!string.IsNullOrEmpty(stats.LevelId))
                 {
-                    level = ctx.SubLevelIndex >= 0
-                        ? $"{ctx.CurrentLevelId}#{ctx.SubLevelIndex}"
-                        : ctx.CurrentLevelId;
+                    level = stats.SubLevelIndex >= 0
+                        ? $"{stats.LevelId}#{stats.SubLevelIndex}"
+                        : stats.LevelId;
                 }
 
-                hero = !ctx.HasHero ? "none" : ctx.IsAlive ? "alive" : "dead";
+                hero = !stats.HasHero ? "none" : stats.IsAlive ? "alive" : "dead";
             }
 
             string identity = $"PlayersID:{shortGuid} Level:{level} HeroStats={hero}";
@@ -140,36 +142,19 @@ namespace DeadCellsMultiplayerX.Client.UI.DebugTools
                     UploadBroken: session.UploadBroken);
             }
 
-            var frames = world.Frames;
-            long ageMs = frames.LastFrameAppliedAtMs < 0
+            long ageMs = stats.LastFrameAppliedAtMs < 0
                 ? -1
-                : Environment.TickCount64 - frames.LastFrameAppliedAtMs;
+                : Environment.TickCount64 - stats.LastFrameAppliedAtMs;
 
             int hz = ageMs > 1000
                 ? 0
-                : (int)Math.Round(frames.AppliedFramesPerSecond);
+                : (int)Math.Round(stats.AppliedFramesPerSecond);
 
-            if (!frames.HasBaseline)
+            if (!stats.HasBaseline)
                 identity += " Base=Wait";
 
             if (session.UploadBroken)
                 identity += " | Up=Broken";
-
-            int mobs = 0;
-            foreach (var mob in world.Mobs.Receiver.All)
-                if (!mob.destroyed) mobs++;
-
-            int heroes = 0;
-            foreach (var _ in world.Heros.All)
-                heroes++;
-
-            int entities = 0;
-            int pendingSpawns = 0;
-            foreach (var record in world.EntityStore.Records)
-            {
-                entities++;
-                if (!record.Created) pendingSpawns++;
-            }
 
             return new ClientNetSnapshot(
                 HasSession: true,
@@ -177,28 +162,28 @@ namespace DeadCellsMultiplayerX.Client.UI.DebugTools
                 Header: header,
                 Identity: identity,
                 Players: players,
-                Epoch: frames.Epoch,
-                Sequence: frames.LastDeliveredSequence,
+                Epoch: stats.Epoch,
+                Sequence: stats.LastDeliveredSequence,
                 Hz: hz,
                 AgeMs: ageMs,
                 FrameBytes: session.LastWorldFrameBytes,
-                HasBaseline: frames.HasBaseline,
-                Pending: frames.PendingCount,
-                BufferedFrames: frames.BufferedFrames,
-                Gap: frames.GapCount,
-                Nack: frames.NackSent,
-                Bundle: frames.BundleReceived,
-                Resync: frames.ResyncCount,
-                Skip: frames.SkippedFrames,
-                Drop: frames.DroppedOld,
-                Overflow: frames.PendingOverflow,
+                HasBaseline: stats.HasBaseline,
+                Pending: stats.PendingCount,
+                BufferedFrames: stats.BufferedFrames,
+                Gap: stats.GapCount,
+                Nack: stats.NackSent,
+                Bundle: stats.BundleReceived,
+                Resync: stats.ResyncCount,
+                Skip: stats.SkippedFrames,
+                Drop: stats.DroppedOld,
+                Overflow: stats.PendingOverflow,
                 RttMs: session.ServerRttMs,
                 OffsetMs: session.ServerClockOffsetMs,
-                Mobs: mobs,
-                Ghosts: world.Ghosts.Count,
-                Heroes: heroes,
-                Entities: entities,
-                PendingSpawns: pendingSpawns,
+                Mobs: stats.Mobs,
+                Ghosts: stats.Ghosts,
+                Heroes: stats.Heroes,
+                Entities: stats.Entities,
+                PendingSpawns: stats.PendingSpawns,
                 Pred: session.Prediction.PendingMobCount,
                 UploadBroken: session.UploadBroken);
         }

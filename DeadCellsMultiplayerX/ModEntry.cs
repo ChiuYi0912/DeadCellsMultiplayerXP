@@ -1,18 +1,11 @@
-﻿using dc;
-using dc.pr;
-using dc.tool.log;
-using DeadCellsMultiplayerX.Client.Core;
-using DeadCellsMultiplayerX.Utils;
+using dc;
+using DeadCellsMultiplayerX.Composition;
+using DeadCellsMultiplayerX.Tools;
 using ModCore.Events.Interfaces;
 using ModCore.Mods;
 using ModCore.Modules;
 using ModCore.Utilities;
-using ModCore.Native;
-using System;
-using System.Collections.Generic;
 using System.Runtime.ExceptionServices;
-using System.Text;
-
 namespace DeadCellsMultiplayerX
 {
     internal class ModEntry(ModInfo info) : ModBase(info), IOnAfterLoadingAssets
@@ -36,7 +29,7 @@ namespace DeadCellsMultiplayerX
 
             Environment.SetEnvironmentVariable("DCCM_MULTIPLAYER_NO_CLIENT", "1");
 
-            new ClientMain().Init();
+            ClientCompositionRoot.Start();
 
             GetText.Instance.RegisterMod("DeadCellsMultiplayerX");
 
@@ -71,6 +64,14 @@ namespace DeadCellsMultiplayerX
         {
             var res = Info.ModRoot!.GetFilePath("res.pak");
             FsPak.Instance.FileSystem.loadPak(res.AsHaxeString());
+
+#if DEBUG
+            // Phase 0: 游戏内完整协议基线。设置 DCMX_PROTOCOL_BASELINE_OUTPUT 后生成并退出。
+            if (ProtocolBaseline.TryRunFromEnvironment())
+            {
+                Environment.Exit(0);
+            }
+#endif
         }
     }
 }

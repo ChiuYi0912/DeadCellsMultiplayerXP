@@ -1,5 +1,5 @@
 #if DEBUG
-using DeadCellsMultiplayerX.Client.Snapshot;
+using DeadCellsMultiplayerX.Client.World.Frames;
 
 namespace DeadCellsMultiplayerX
 {
@@ -11,7 +11,7 @@ namespace DeadCellsMultiplayerX
         public static int DropServerFrames;
         public static int SkipClientUploads;
         public static bool ForceResync;
-        public static WorldFrameManager? ClientManager;
+        public static WorldFrameTimeline? ClientManager;
 
         public static bool ConsumeDropServerFrame()
         {

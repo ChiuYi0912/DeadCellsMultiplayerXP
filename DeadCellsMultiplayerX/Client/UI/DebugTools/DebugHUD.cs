@@ -1,5 +1,3 @@
-using System;
-using System.Collections.Generic;
 using dc;
 using dc.h2d;
 using dc.haxe.ds;
@@ -13,26 +11,29 @@ using dc.ui.debug;
 using Hashlink.Virtuals;
 using ModCore.Events;
 using ModCore.Utilities;
-using DeadCellsMultiplayerX.Client.Core;
+using DeadCellsMultiplayerX.Client.Session;
+using DeadCellsMultiplayerX.Engine.Hooks.Client;
+using DeadCellsMultiplayerX.Engine.Hooks.Shared;
 using dc.hl.types;
 using Hashlink.Proxy.Clousre;
 using Hashlink.Proxy.Objects;
 using HaxeProxy.Runtime;
-using ModCore.Modules;
 
+using DeadCellsMultiplayerX.Client.UI.DebugTools.Stats;
 namespace DeadCellsMultiplayerX.Client.UI.DebugTools
 {
     /// <summary>
     /// 左上角联机状态面板
     /// </summary>
-    public class DebugHUD : IEventReceiver
+    public partial class DebugHUD : IEventReceiver, IClientDebugHookSink, IDisposable
     {
-        private const long StatsRefreshIntervalMs = 200;
+        private const long STATS_REFRESH_INTERVAL_MS = 200;
 
         private static readonly Serilog.ILogger Logger = Serilog.Log.ForContext("SourceContext", "DebugHUD");
 
         private static DebugHUD? instance;
 
+        private HookGroup? hookGroup;
         private bool? lastNetstatVisible;
 
         private readonly List<MetricBinding> metrics = [];
@@ -45,7 +46,7 @@ namespace DeadCellsMultiplayerX.Client.UI.DebugTools
 
         private long lastStatsRefreshMs;
 
-        private const int MetricUpper = 1_000_000_000;
+        private const int METRIC_UPPER = 1_000_000_000;
 
         private int metricGreen;
         private int metricRed;
@@ -110,12 +111,26 @@ namespace DeadCellsMultiplayerX.Client.UI.DebugTools
 
         public DebugHUD()
         {
-            Hook_DebugHud.postUpdate += Hook_DebugHud_postUpdate;
-            Hook__DebugHud.__constructor__ += Hook_DebugHud_initialize;
-            Hook_DebugHud.initLogsUi += Hook_DebugHud_initlogui;
-            Hook_Game.onDispose += hook_Game_onDispose;
-            Hook__LevelDisp.__constructor__ += Hook_LevelDisp_init;
-            HashlinkHooks.Instance.CreateHook("ui.$Console", "__constructor__", Hook_Console_ctor).Enable();
+            hookGroup = new HookGroup();
+            hookGroup.Add(ClientDebugHookBinding.Install(this));
+        }
+
+        /// <summary>
+        /// 释放当前调试 HUD；会话结束时调用。
+        /// </summary>
+        public static void DisposeInstance()
+        {
+            instance?.Dispose();
+        }
+
+        /// <inheritdoc />
+        public void Dispose()
+        {
+            hookGroup?.Dispose();
+            hookGroup = null;
+
+            if (ReferenceEquals(instance, this))
+                instance = null;
         }
 
 
@@ -210,7 +225,7 @@ namespace DeadCellsMultiplayerX.Client.UI.DebugTools
             int yellow = dc.ui.DebugHud.Class.colorYellow;
             int red = dc.ui.DebugHud.Class.colorRed;
             int neutral = DebugThresholdValueText.Class.DEFAULT_COLOR;
-            const int Upper = MetricUpper;
+            const int Upper = METRIC_UPPER;
 
             metricGreen = green;
             metricRed = red;
@@ -368,12 +383,12 @@ namespace DeadCellsMultiplayerX.Client.UI.DebugTools
                 return;
 
             long now = Environment.TickCount64;
-            if (now - lastStatsRefreshMs < StatsRefreshIntervalMs)
+            if (now - lastStatsRefreshMs < STATS_REFRESH_INTERVAL_MS)
                 return;
 
             lastStatsRefreshMs = now;
 
-            var session = ClientMain.Instance.CurrentGuestClient?.Session;
+            var session = ClientRuntime.Instance.CurrentGuestClient?.Session;
             var snapshot = ClientNetStats.Collect(session);
 
             SetText(headerText, snapshot.Header, ref headerCached);
@@ -413,7 +428,7 @@ namespace DeadCellsMultiplayerX.Client.UI.DebugTools
 
                 binding.Map.clear();
                 binding.Map.set(expected + 1, metricGreen);
-                binding.Map.set(MetricUpper, metricRed);
+                binding.Map.set(METRIC_UPPER, metricRed);
 
                 binding.Widget.updateColor();
             }

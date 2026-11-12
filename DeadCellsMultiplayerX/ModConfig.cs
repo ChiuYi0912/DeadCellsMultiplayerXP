@@ -1,7 +1,4 @@
-﻿using ModCore.Storage;
-using System;
-using System.Collections.Generic;
-using System.Text;
+using ModCore.Storage;
 
 namespace DeadCellsMultiplayerX
 {
@@ -19,6 +16,6 @@ namespace DeadCellsMultiplayerX
         /// </summary>
         public Dictionary<int, CoreLibrary.Utilities.ContorlLbleKeyConfig> ControlKeys { get; set; } = new();
 
-        public int currentMode { get; set; } =0;
+        public int CurrentMode { get; set; } = 0;
     }
 }

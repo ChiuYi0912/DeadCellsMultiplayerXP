@@ -1,18 +1,11 @@
-﻿using dc.en;
 using dc.en.inter;
-using dc.en.mob;
 using dc.tool;
-using DeadCellsMultiplayerX.Client.Core;
-using DeadCellsMultiplayerX.Common.Data.Ghosts;
-using DeadCellsMultiplayerX.Common.Ghosts;
-using DeadCellsMultiplayerX.Server.Core;
+using DeadCellsMultiplayerX.Client.Session;
+using DeadCellsMultiplayerX.Tools;
 using HaxeProxy.Runtime;
 using IngameDebugConsole;
 using ModCore.Utilities;
 using Serilog;
-using System;
-using System.Collections.Generic;
-using System.Text;
 
 namespace DeadCellsMultiplayerX
 {
@@ -33,25 +26,25 @@ namespace DeadCellsMultiplayerX
         [ConsoleMethod("dcmp-start-host", "启动 Host")]
         public static void StartHost(TextWriter writer, string ip = "127.0.0.1", int port = 44567)
         {
-            HoldAsync(ClientMain.Instance.StartHost(ip, port));
+            HoldAsync(ClientRuntime.Instance.StartHost(ip, port));
         }
 
         [ConsoleMethod("dcmp-start-guest", "启动 Guest")]
         public static void ConnectLobby(TextWriter writer, string ip, int port)
         {
-            HoldAsync(ClientMain.Instance.StartGuest(ip, port));
+            HoldAsync(ClientRuntime.Instance.StartGuest(ip, port));
         }
 
         [ConsoleMethod("dcmp-quit-lobby", "离开房间")]
         public static void QuitLobby(TextWriter writer)
         {
-            ClientMain.Instance.CurrentGuestClient!.Quit();
+            ClientRuntime.Instance.CurrentGuestClient!.Quit();
         }
 
         [ConsoleMethod("dcmp-set-name", "修改玩家名称")]
         public static void SetName(TextWriter writer, string name)
         {
-            ClientMain.Instance.CurrentGuestClient!.SetName(name);
+            ClientRuntime.Instance.CurrentGuestClient!.SetName(name);
         }
 
 #if DEBUG
@@ -76,13 +69,38 @@ namespace DeadCellsMultiplayerX
             writer.WriteLine("World resync will be requested on next tick.");
         }
 
+        [ConsoleMethod("dcmp-next-level", "请求切换关卡（Guest，用于换关 smoke）")]
+        public static void NextLevel(TextWriter writer, string levelid)
+        {
+            var guest = ClientRuntime.Instance.CurrentGuestClient;
+            if (guest == null)
+            {
+                writer.WriteLine("No guest client.");
+                return;
+            }
+
+            HoldAsync(guest.SelectNextLevel(levelid));
+            writer.WriteLine($"Requested next level: {levelid}");
+        }
+
+        [ConsoleMethod("dcmp-protocol-baseline", "生成协议基线（完整 serializer + RPC 回环）")]
+        public static void RunProtocolBaseline(TextWriter writer, string path = "")
+        {
+            if (string.IsNullOrWhiteSpace(path))
+                path = System.IO.Path.Combine(
+                    Environment.CurrentDirectory, "protocol-baseline-full.json");
+
+            ProtocolBaseline.Run(path);
+            writer.WriteLine($"Protocol baseline written: {path}");
+        }
+
         [ConsoleMethod("dcmp-worldframe-stats", "打印客户端世界帧统计")]
         public static void WorldFrameStats(TextWriter writer)
         {
             var manager = WorldFrameDebug.ClientManager;
             if (manager == null)
             {
-                writer.WriteLine("WorldFrameManager not available.");
+                writer.WriteLine("WorldFrameTimeline not available.");
                 return;
             }
 

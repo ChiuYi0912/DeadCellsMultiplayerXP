@@ -1,15 +1,12 @@
 using dc;
-using dc.h2d;
 using dc.h3d;
 using dc.h3d.mat;
-using dc.h3d.shader;
 using dc.hxd;
 using dc.libs.heaps.slib;
 using dc.shader;
 using Hashlink.Virtuals;
 using HaxeProxy.Runtime;
 using ModCore.Utilities;
-using DeadCellsMultiplayerX.Client.Core;
 
 namespace DeadCellsMultiplayerX.Client.UI
 {

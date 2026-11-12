@@ -1,14 +1,11 @@
-using System;
-using System.Linq;
-using System.Threading.Tasks;
-using DeadCellsMultiplayerX.Client.Core;
+using DeadCellsMultiplayerX.Client.Session;
 
 namespace DeadCellsMultiplayerX.Client.UI.Lobby.Controllers
 {
     internal class HostController : LobbyController
     {
         public HostController(
-            ClientMain client,
+            ClientRuntime client,
             LobbyContext ctx,
             LobbyStateMachine state) : base(client, ctx, state) { }
 

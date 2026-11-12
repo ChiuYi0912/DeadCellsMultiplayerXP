@@ -3,13 +3,11 @@ using dc.h2d;
 using dc.libs.heaps.slib;
 using dc.tool;
 using dc.ui;
-using DeadCellsMultiplayerX.Client.Core.Event;
 using DeadCellsMultiplayerX.Client.UI.Common;
-using DeadCellsMultiplayerX.Common.Core;
-using HaxeProxy.Runtime;
 using ModCore.Utilities;
 using Serilog;
-using DeadCellsMultiplayerX.Client.Core;
+
+using DeadCellsMultiplayerX.Contracts.Lobby;
 
 namespace DeadCellsMultiplayerX.Client.UI.Lobby.Views
 {
@@ -187,7 +185,7 @@ namespace DeadCellsMultiplayerX.Client.UI.Lobby.Views
 
     internal class PlayerSlotPanel : UIProcess
     {
-        private const int MaxSlots = 4;
+        private const int MAX_SLOTS = 4;
 
         public Flow Root { get; private set; }
         public Flow Container { get; private set; }
@@ -229,8 +227,8 @@ namespace DeadCellsMultiplayerX.Client.UI.Lobby.Views
             Container.set_horizontalSpacing(host.Pixel(20));
 
             //创建4个卡槽
-            Slots = new PlayerSlotUI[MaxSlots];
-            for (int i = 0; i < MaxSlots; i++)
+            Slots = new PlayerSlotUI[MAX_SLOTS];
+            for (int i = 0; i < MAX_SLOTS; i++)
             {
                 Slots[i] = new PlayerSlotUI(Container, host);
                 Slots[i].OnChanged += OnSlotChanged;
@@ -245,10 +243,10 @@ namespace DeadCellsMultiplayerX.Client.UI.Lobby.Views
 
         public void Refresh(IEnumerable<GuestInfo>? guests)
         {
-            var list = guests?.Take(MaxSlots).ToList() ?? new List<GuestInfo>();
+            var list = guests?.Take(MAX_SLOTS).ToList() ?? new List<GuestInfo>();
 
             //移除已离开的
-            for (int i = 0; i < MaxSlots; i++)
+            for (int i = 0; i < MAX_SLOTS; i++)
             {
                 var g = Slots[i].Guest;
                 if (g != null && !list.Any(x => x.Guid == g.Guid))
@@ -272,13 +270,8 @@ namespace DeadCellsMultiplayerX.Client.UI.Lobby.Views
             }
 
             //多余槽清空
-            for (int i = list.Count; i < MaxSlots; i++)
+            for (int i = list.Count; i < MAX_SLOTS; i++)
                 Slots[i].Clear();
-        }
-
-        public void RefreshStatuses()
-        {
-            foreach (var s in Slots) s.RefreshStatus();
         }
 
         private void ApplyLayout()
@@ -297,8 +290,8 @@ namespace DeadCellsMultiplayerX.Client.UI.Lobby.Views
             Container.set_minWidth(host.CardW);
             Container.set_maxWidth(host.CardW);
 
-            int totalSpacing = spacing * (MaxSlots - 1);
-            int slotW = (host.CardW - totalSpacing) / MaxSlots;
+            int totalSpacing = spacing * (MAX_SLOTS - 1);
+            int slotW = (host.CardW - totalSpacing) / MAX_SLOTS;
 
             foreach (var s in Slots)
             {

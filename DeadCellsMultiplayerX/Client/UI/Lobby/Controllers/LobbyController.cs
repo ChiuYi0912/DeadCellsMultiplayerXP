@@ -1,20 +1,18 @@
-using System;
-using System.Threading.Tasks;
 using dc.ui;
 using DeadCellsMultiplayerX.Client.UI.Common;
-using DeadCellsMultiplayerX.Client.Core;
+using DeadCellsMultiplayerX.Client.Session;
 
 namespace DeadCellsMultiplayerX.Client.UI.Lobby.Controllers
 {
     //Controller 基类
     internal abstract class LobbyController : UIProcess
     {
-        protected readonly ClientMain Client;
+        protected readonly ClientRuntime Client;
         protected readonly LobbyContext Ctx;
         protected readonly LobbyStateMachine State;
 
         protected LobbyController(
-            ClientMain client,
+            ClientRuntime client,
             LobbyContext ctx,
             LobbyStateMachine state,
             Process? parent = null) : base(parent)

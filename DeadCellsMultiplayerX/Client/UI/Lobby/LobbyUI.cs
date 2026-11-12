@@ -1,19 +1,17 @@
-using System;
-using System.Threading.Tasks;
 using dc.pr;
 using dc.ui;
-using DeadCellsMultiplayerX.Client.Guest;
+using DeadCellsMultiplayerX.Client.Session.Guest;
 using DeadCellsMultiplayerX.Client.UI.Common;
 using DeadCellsMultiplayerX.Client.UI.Lobby.Controllers;
 using DeadCellsMultiplayerX.Client.UI.Lobby.Views;
-using DeadCellsMultiplayerX.Client.Core;
+using DeadCellsMultiplayerX.Client.Session;
 
 namespace DeadCellsMultiplayerX.Client.UI.Lobby
 {
     //入口
     internal class LobbyUI : UIProcess
     {
-        private readonly ClientMain client;
+        private readonly ClientRuntime client;
         private readonly LobbyContext ctx = new();
         private readonly LobbyStateMachine state = new();
         public event Action? OnCloseRequested;
@@ -27,9 +25,9 @@ namespace DeadCellsMultiplayerX.Client.UI.Lobby
 
         private double latencyTimer;
         private bool latencyInFlight;
-        private const double LatencyIntervalSec = 2.0;
+        private const double LATENCY_INTERVAL_SEC = 2.0;
 
-        public LobbyUI(ClientMain client, TitleScreen titleScreen, Process? parent = null)
+        public LobbyUI(ClientRuntime client, TitleScreen titleScreen, Process? parent = null)
             : base(parent)
         {
             this.client = client;
@@ -78,7 +76,7 @@ namespace DeadCellsMultiplayerX.Client.UI.Lobby
             if (latencyInFlight) return;
 
             latencyTimer += 1.0 / 60.0;
-            if (latencyTimer < LatencyIntervalSec) return;
+            if (latencyTimer < LATENCY_INTERVAL_SEC) return;
             latencyTimer = 0;
 
             var gc = client.CurrentGuestClient;

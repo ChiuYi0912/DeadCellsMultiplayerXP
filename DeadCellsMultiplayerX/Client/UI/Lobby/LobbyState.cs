@@ -1,9 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
-using DeadCellsMultiplayerX.Client.Core;
-
 namespace DeadCellsMultiplayerX.Client.UI.Lobby
 {
     //状态
@@ -17,7 +11,7 @@ namespace DeadCellsMultiplayerX.Client.UI.Lobby
         StartingGame,   //开始游戏
         InGame,     //已开始游戏
         Error,      //报错
-        Debug 
+        Debug
     }
 
 }

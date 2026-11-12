@@ -1,16 +1,13 @@
-using System;
-using System.Collections.Generic;
 using dc.h2d;
 using dc.ui;
 using DeadCellsMultiplayerX.Client.UI.Common;
 using static DeadCellsMultiplayerX.Client.UI.Lobby.Views.LobbyView;
-using DeadCellsMultiplayerX.Client.Core;
 
 namespace DeadCellsMultiplayerX.Client.UI.Lobby.Views
 {
     internal class MainMenuView : UIProcess
     {
-        
+
         private readonly LobbyView host;
         private readonly List<Flow> cards = new();
         private Flow? footerRow;

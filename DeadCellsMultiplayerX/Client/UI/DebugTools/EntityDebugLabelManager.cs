@@ -1,16 +1,15 @@
-using System.Collections.Generic;
 using dc;
 using HaxeProxy.Runtime;
 using ModCore.Utilities;
-using DeadCellsMultiplayerX.Client.Replication.Entities;
-using DeadCellsMultiplayerX.Common.Data.Entities;
-using DeadCellsMultiplayerX.Common.EntityEvents;
+using DeadCellsMultiplayerX.Client.World.Entities;
+using DeadCellsMultiplayerX.Contracts.Entities;
+using DeadCellsMultiplayerX.Contracts.EntityEvents;
 
 namespace DeadCellsMultiplayerX.Client.UI.DebugTools
 {
     internal sealed class EntityDebugLabelManager
     {
-        private const long UpdateIntervalMs = 150;
+        private const long UPDATE_INTERVAL_MS = 150;
 
         private readonly Dictionary<EntityKind, IEntityDebugTextProvider> providers = [];
         private readonly Dictionary<uint, Entry> active = [];
@@ -79,7 +78,7 @@ namespace DeadCellsMultiplayerX.Client.UI.DebugTools
                 provider.Reset();
         }
 
-        public void Tick(ClientEntityContext ctx, long nowMs)
+        public void Tick(long nowMs)
         {
             bool show = DebugFlags.Get("entityLabels");
             if (show != visible)
@@ -92,7 +91,7 @@ namespace DeadCellsMultiplayerX.Client.UI.DebugTools
             if (!show)
                 return;
 
-            if (nowMs - lastUpdateMs < UpdateIntervalMs)
+            if (nowMs - lastUpdateMs < UPDATE_INTERVAL_MS)
                 return;
 
             lastUpdateMs = nowMs;
@@ -108,7 +107,7 @@ namespace DeadCellsMultiplayerX.Client.UI.DebugTools
                 }
 
                 string? text = entry.Provider.GetText(
-                    netId, entry.Native, ctx, nowMs);
+                    netId, entry.Native, nowMs);
 
                 if (string.IsNullOrEmpty(text))
                 {

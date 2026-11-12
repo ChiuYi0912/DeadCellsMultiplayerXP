@@ -1,11 +1,8 @@
-using System;
-using System.Threading;
 using dc;
 using dc.ui;
 using Microsoft;
 using ModCore.Events;
 using Serilog;
-using DeadCellsMultiplayerX.Client.Core;
 
 namespace DeadCellsMultiplayerX.Client.UI.Common
 {

@@ -1,15 +1,8 @@
-using System;
-using System.Collections.Generic;
-using CoreLibrary.Utilities;
-using dc;
 using dc.h2d;
-using dc.hxd;
 using dc.ui;
 using DeadCellsMultiplayerX.Client.UI.Common;
-using HaxeProxy.Runtime;
 using ModCore.Utilities;
 using static DeadCellsMultiplayerX.Client.UI.Lobby.Views.LobbyView;
-using DeadCellsMultiplayerX.Client.Core;
 
 namespace DeadCellsMultiplayerX.Client.UI.Lobby.Views
 {

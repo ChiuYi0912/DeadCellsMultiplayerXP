@@ -1,10 +1,8 @@
-using System.Collections.Generic;
 using dc.en;
-using DeadCellsMultiplayerX.Client.Guest;
-using DeadCellsMultiplayerX.Client.Replication.Entities;
-using DeadCellsMultiplayerX.Common.Data.Entities;
-using DeadCellsMultiplayerX.Common.EntityEvents;
-using DeadCellsMultiplayerX.Common.MobAI.Events;
+using DeadCellsMultiplayerX.Client.Session.Guest;
+using DeadCellsMultiplayerX.Contracts.Entities;
+using DeadCellsMultiplayerX.Contracts.EntityEvents;
+using DeadCellsMultiplayerX.Contracts.MobBehavior;
 
 namespace DeadCellsMultiplayerX.Client.UI.DebugTools
 {
@@ -50,8 +48,7 @@ namespace DeadCellsMultiplayerX.Client.UI.DebugTools
             state.Event = mobEvt.Kind;
         }
 
-        public string? GetText(
-            uint netId, object native, ClientEntityContext ctx, long nowMs)
+        public string? GetText(uint netId, object native, long nowMs)
         {
             if (native is not Mob mob || mob.destroyed)
                 return null;

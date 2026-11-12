@@ -1,6 +1,5 @@
-using DeadCellsMultiplayerX.Client.Replication.Entities;
-using DeadCellsMultiplayerX.Common.Data.Entities;
-using DeadCellsMultiplayerX.Common.EntityEvents;
+using DeadCellsMultiplayerX.Contracts.Entities;
+using DeadCellsMultiplayerX.Contracts.EntityEvents;
 
 namespace DeadCellsMultiplayerX.Client.UI.DebugTools
 {
@@ -22,8 +21,7 @@ namespace DeadCellsMultiplayerX.Client.UI.DebugTools
         void OnEvent(EntityEvent evt) { }
 
 
-        string? GetText(
-            uint netId, object native, ClientEntityContext ctx, long nowMs);
+        string? GetText(uint netId, object native, long nowMs);
 
         void Reset() { }
     }

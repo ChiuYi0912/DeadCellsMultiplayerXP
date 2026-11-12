@@ -1,14 +1,14 @@
 #if DEBUG
 using System.Diagnostics;
-using System.Runtime.InteropServices;
-using DeadCellsMultiplayerX.Client.Core;
+using DeadCellsMultiplayerX.Client.Session;
 using Serilog;
+
 
 namespace DeadCellsMultiplayerX
 {
     internal static class DebugLauncher
     {
-        private const string ExePath =
+        private const string EXE_PATH =
             @"D:\steam\steamapps\common\Dead Cells\coremod\core\host\startup\DeadCellsModding.exe";
 
         private static ILogger? MyLogger;
@@ -60,11 +60,11 @@ namespace DeadCellsMultiplayerX
 
             logger.Information("Host starting on {f1}:{f2}", ip, port);
 
-            await ClientMain.Instance.StartHost(ip, port);
+            await ClientRuntime.Instance.StartHost(ip, port);
 
             await Task.Delay(500);
 
-            var gc = ClientMain.Instance.CurrentGuestClient;
+            var gc = ClientRuntime.Instance.CurrentGuestClient;
             if (gc == null) return;
 
             gc.SetReady(true);
@@ -83,7 +83,7 @@ namespace DeadCellsMultiplayerX
         {
             var psi = new ProcessStartInfo
             {
-                FileName = ExePath,
+                FileName = EXE_PATH,
                 UseShellExecute = false,
             };
 
@@ -110,7 +110,7 @@ namespace DeadCellsMultiplayerX
             {
                 await Task.Delay(500);
 
-                var hc = ClientMain.Instance.CurrentHostClient;
+                var hc = ClientRuntime.Instance.CurrentHostClient;
                 if (hc == null) continue;
 
                 var guests = hc.LobbyInfo?.Guests;
@@ -161,11 +161,11 @@ namespace DeadCellsMultiplayerX
         private static async Task JoinAndReadyAsync(string ip, int port)
         {
             logger.Information("Starting guest...");
-            await ClientMain.Instance.StartGuest(ip, port);
+            await ClientRuntime.Instance.StartGuest(ip, port);
 
             await Task.Delay(500);
 
-            var gc = ClientMain.Instance.CurrentGuestClient;
+            var gc = ClientRuntime.Instance.CurrentGuestClient;
             if (gc == null) return;
 
             await Task.Delay(2000);
