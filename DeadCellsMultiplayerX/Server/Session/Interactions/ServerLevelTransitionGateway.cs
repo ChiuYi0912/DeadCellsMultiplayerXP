@@ -59,6 +59,18 @@ internal sealed class ServerLevelTransitionGateway
     }
 
 
+    /// <summary>
+    /// 调试，强制服务端切换关卡并广播
+    /// </summary>
+    public async ValueTask ForceLevelAsync(
+        string levelId,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(levelId);
+        this.logger.Warning("Forcing level transition: {Level}", levelId);
+        await this.transition.ForceAsync(levelId, cancellationToken);
+    }
+
     private async ValueTask<InteractionDispatch> SubmitAsync(
         string actor,
         string? levelId)

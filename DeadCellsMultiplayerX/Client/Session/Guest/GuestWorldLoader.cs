@@ -6,7 +6,6 @@ using dc;
 using dc.en;
 using dc.pr;
 using DeadCellsMultiplayerX.Client.World;
-using ModCore.Utilities;
 using Serilog;
 
 /// <summary>

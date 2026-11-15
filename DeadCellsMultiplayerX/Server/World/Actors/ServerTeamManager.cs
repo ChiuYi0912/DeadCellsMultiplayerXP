@@ -28,7 +28,7 @@ internal sealed class ServerTeamManager(
     /// </summary>
     private readonly Func<Game?> gameProvider = gameProvider;
 
-    private readonly ServerHeroSpawner spawner = new ServerHeroSpawner(world, spawns, gameProvider);
+    private readonly ServerHeroSpawner spawner = new(world, spawns, gameProvider);
     private readonly ServerCombatViewUpdater views = new();
 
     /// <summary>

@@ -73,7 +73,7 @@ internal sealed class ServerActorManager : IServerEntityEventSource
     /// <summary>
     /// 每个游戏 tick 同步 Ghost 位置/队伍并推进仇恨协调
     /// </summary>
-    public void Tick(double dt, long nowMs, IReadOnlyCollection<string> guests)
+    public void Tick(long nowMs, IReadOnlyCollection<string> guests)
     {
         this.teams.Sync(guests, nowMs);
         this.Aggro.Tick(nowMs);
@@ -82,26 +82,24 @@ internal sealed class ServerActorManager : IServerEntityEventSource
     }
 
     /// <summary>
-    /// 通过底层 Hero 查找可战斗 Ghost
+    /// 查找可战斗 Ghost
     /// </summary>
     public bool TryGetCombatant(Entity entity, out ServerHeroCombatView combatant)
         => this.teams.TryGet(entity, out combatant);
 
     /// <summary>
-    /// 世界重置,写入新 epoch 并清空 Ghost 状态
+    /// 世界重置
     /// </summary>
     public void BeginEpoch(int value)
     {
         this.world.BeginEpoch(value);
         this.teams.Clear();
 
-        // A new level epoch invalidates every per-mob modifier binding.
         this.Mobs.Clear();
         this.mobEvents.Clear();
         this.mobAttacks.Clear();
 
-        Logger.Information(
-            "Ghost action epoch begin: {Epoch}", value);
+        Logger.Information("Ghost action epoch begin: {Epoch}", value);
     }
 
     /// <summary>
@@ -117,7 +115,7 @@ internal sealed class ServerActorManager : IServerEntityEventSource
     }
 
     /// <summary>
-    /// 客户端断线时清理它的 Ghost 与准入状态
+    /// 客户端断线时清理
     /// </summary>
     public void RemoveGuest(string guid)
     {

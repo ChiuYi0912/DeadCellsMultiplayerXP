@@ -133,7 +133,6 @@ internal sealed class ServerCombatViewUpdater
                 return existing;
             }
 
-            // 切关卡会重建 GhostHero，旧实体不能继续留在查询表里
             this.byHero.Remove(existing.Ghost.Hero);
             existing.Ghost.SetCombatEnabled(false);
         }

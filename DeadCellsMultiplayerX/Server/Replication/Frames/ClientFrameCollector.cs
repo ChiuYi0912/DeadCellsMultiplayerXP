@@ -407,7 +407,7 @@ internal sealed class ClientFrameCollector
     /// <summary>
     /// 复制动态状态 避免历史帧与收集器共享可变字段
     /// </summary>
-    private static HeroDynamic CopyDynamic(HeroDynamic source) => new HeroDynamic
+    private static HeroDynamic CopyDynamic(HeroDynamic source) => new()
     {
         GUID = source.GUID,
         ChangeMask = source.ChangeMask,

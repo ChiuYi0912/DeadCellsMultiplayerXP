@@ -14,7 +14,7 @@ internal sealed class ExecutionStage(
     {
         var request = context.Request!;
 
-        IDisposable? scope = request.Kind == HeroActionKind.Weapon
+        var scope = request.Kind == HeroActionKind.Weapon
             ? this.rewind.Begin(
                 context.Level!,
                 request.ClientTimeMs,

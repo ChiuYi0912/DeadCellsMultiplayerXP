@@ -34,7 +34,6 @@ internal sealed class ServerAggroManager(
 
     /// <summary>
     /// 在 mob 原版 AI 已经锁定 Ghost 时，临时把 game.hero 指向该 Ghost
-    /// 没有目标的 mob 保持原版 AI，不因附近是否存在 Ghost 改变行为
     /// </summary>
     public void RunAsMobHero(Mob mob, Action body) => this.RunAsHero(this.ResolveMobHero(mob), body);
 

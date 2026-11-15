@@ -121,6 +121,31 @@ internal abstract class ServerInteraction<TIntent, TDecision>
         return InteractionDispatch.Resolved;
     }
 
+
+    public async ValueTask ForceAsync(
+        TDecision decision,
+        CancellationToken cancellationToken)
+    {
+        if (this.Status != InteractionStatus.Idle)
+        {
+            throw new InvalidOperationException(
+                "Cannot force a decision while an interaction round is active.");
+        }
+
+        this.Status = InteractionStatus.Resolving;
+
+        try
+        {
+            await this.CommitAsync(decision, cancellationToken);
+            await this.PublishAsync(decision, cancellationToken);
+        }
+        finally
+        {
+            this.intents.Clear();
+            this.Status = InteractionStatus.Idle;
+        }
+    }
+
     /// <summary>
     /// 准入校验
     /// </summary>

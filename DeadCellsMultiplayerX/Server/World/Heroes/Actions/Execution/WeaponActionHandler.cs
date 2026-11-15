@@ -37,9 +37,3 @@ internal sealed class WeaponActionHandler : IServerActionModule
     }
 }
 
-/// <summary>
-/// 服务端装备项链模块。
-/// 思路：保留独立的项链动作作为兼容路径，重复应用由 GhostTalismans 的签名去重兜底；
-/// 后续 Loadout 版本化同步会成为项链的唯一主通道。
-/// </summary>
-

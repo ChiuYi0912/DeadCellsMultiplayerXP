@@ -5,13 +5,10 @@ using dc.tool.skill;
 using DeadCellsMultiplayerX.Contracts.MobBehavior;
 using DeadCellsMultiplayerX.Engine.Adapters.Mobs.Behavior;
 using ModCore.Utilities;
-using Serilog;
 using GameZombie = dc.en.mob.Zombie;
 
 internal sealed class ZombieClientModifier : MobModifierBase<GameZombie>
 {
-    private static readonly ILogger Logger = Log.ForContext("SourceContext", "ZombieClientModifier");
-
     /// <inheritdoc />
     public override void InitHook(IMobHookRegistry hooks)
     {

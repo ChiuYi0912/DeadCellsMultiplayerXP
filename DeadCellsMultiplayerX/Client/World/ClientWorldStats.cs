@@ -1,8 +1,5 @@
 namespace DeadCellsMultiplayerX.Client.World;
 
-/// <summary>
-/// 客户端世界的只读诊断快照；供调试 UI 使用，避免直接访问各子系统。
-/// </summary>
 internal readonly record struct ClientWorldStats(
     int Epoch,
     long LastFrameAppliedAtMs,

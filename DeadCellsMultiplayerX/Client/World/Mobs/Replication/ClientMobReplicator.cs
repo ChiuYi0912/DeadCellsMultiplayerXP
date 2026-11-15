@@ -33,7 +33,7 @@ internal sealed class ClientMobReplicator(
     private readonly ClientMobModifierRegistry mobModifiers = mobModifiers;
     private readonly WorldFrameTimeline frames = frames;
     private readonly ClientEntityStore store = store;
-    private readonly ClientMobAffectState affectState = new ClientMobAffectState();
+    private readonly ClientMobAffectState affectState = new();
 
     private readonly HashSet<LevelKey> authoritativeLevels = [];
 
@@ -67,7 +67,7 @@ internal sealed class ClientMobReplicator(
             return false;
         }
 
-        LevelKey levelKey = LevelKey.Make(spawn.LevelId, spawn.SubLevelIndex);
+        var levelKey = LevelKey.Make(spawn.LevelId, spawn.SubLevelIndex);
         var needsCleanup = !this.authoritativeLevels.Contains(levelKey);
 
         if (needsCleanup)
@@ -75,7 +75,7 @@ internal sealed class ClientMobReplicator(
             this.ClearLocalLevelMobs(level);
         }
 
-        LevelMob? descriptor =
+        var descriptor =
             DCMXSerializers.MessagePack.Deserialize<LevelMob>(spawn.EntityData);
 
         if (descriptor == null)
@@ -83,7 +83,7 @@ internal sealed class ClientMobReplicator(
             return false;
         }
 
-        Mob? mob = level.attachMob(descriptor);
+        var mob = level.attachMob(descriptor);
         if (mob == null)
         {
             return false;

@@ -44,9 +44,4 @@ internal sealed class SkillActionHandler : IServerActionModule
     }
 }
 
-/// <summary>
-/// 服务端使用武器模块。
-/// 思路：Prepare -> Use，只负责在服务端 Ghost 上执行一次武器；
-/// 延迟补偿（MobRewind）由 ExecutionStage 统一包裹，模块本身不处理时钟回退。
-/// </summary>
 

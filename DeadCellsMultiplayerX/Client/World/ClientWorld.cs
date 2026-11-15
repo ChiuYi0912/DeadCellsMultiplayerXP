@@ -15,9 +15,7 @@ using DeadCellsMultiplayerX.Contracts.Snapshots;
 using DeadCellsMultiplayerX.Foundation.Lifecycle;
 
 /// <summary>
-/// 客户端世界组合根。
-/// 负责创建并拥有子系统，对外只暴露帧路由、Tick 与少量只读查询；
-/// 子系统之间通过构造参数获得各自的窄依赖，不再接收整个世界。
+/// 客户端世界组合根
 /// </summary>
 internal sealed class ClientWorld : DisposableEventReceiver
 {
@@ -66,7 +64,6 @@ internal sealed class ClientWorld : DisposableEventReceiver
         this.frames = new WorldFrameTimeline(session, localGuid);
         this.entityStore = new ClientEntityStore();
 
-        // Ghost 代理与可见 Hero 互相引用；先创建代理，再创建 Hero 后绑定查询。
         this.ghosts = new ClientReplayProxyManager(session, localGuid);
         this.MobModifiers = new ClientMobModifierRegistry(
             session, this.entityStore, this.ghosts);

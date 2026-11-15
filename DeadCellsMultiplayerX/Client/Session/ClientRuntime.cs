@@ -20,12 +20,12 @@ using ModCore.Utilities;
 internal sealed partial class ClientRuntime : Module<ClientRuntime>, IClientLifecycleHookSink
 {
     /// <summary>
-    /// 服务端 Worker 启动器；由 Composition 注入。
+    /// 服务端 Worker 启动器；由 Composition 注入
     /// </summary>
     private IServerProcessLauncher? serverProcessLauncher;
 
     /// <summary>
-    /// 进程级 Hook 的租约。
+    /// 进程级 Hook 的租约
     /// </summary>
     private ClientHookBootstrap? hookBootstrap;
 

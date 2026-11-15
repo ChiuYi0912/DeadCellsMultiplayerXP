@@ -58,8 +58,7 @@ internal sealed class ServerSession : DisposableEventReceiver,
         this.EntityHandlers.Register(new ServerMobEntityHandler(this.Entities));
         this.EntityPublisher = new EntityFrameBuilder(this.Entities, this.EntityHandlers);
         this.Ghosts = new ServerActorManager(this);
-        this.Broadcaster = new WorldFramePublisher(
-            this.ClientFrames, this.EntityPublisher, this.Ghosts, this.AreaAffects);
+        this.Broadcaster = new WorldFramePublisher(this.ClientFrames, this.EntityPublisher, this.Ghosts, this.AreaAffects);
 
         this.LevelTransitions = new ServerLevelTransitionGateway(this, this.Logger);
     }
@@ -231,7 +230,7 @@ internal sealed class ServerSession : DisposableEventReceiver,
         try
         {
             this.ClientFrames.Tick(this.CurrentTimeStamp);
-            this.Ghosts.Tick(dt, this.CurrentTimeStamp, this.ConnectedGuestIds);
+            this.Ghosts.Tick(this.CurrentTimeStamp, this.ConnectedGuestIds);
             this.Broadcaster.Tick(dt, this.CurrentTimeStamp, [.. this.guests.Values]);
         }
         catch (Exception ex)

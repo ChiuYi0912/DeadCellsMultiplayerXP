@@ -9,10 +9,5 @@ using DeadCellsMultiplayerX.Foundation.Lifecycle;
 /// </summary>
 public abstract class ClientSession : DisposableEventReceiver
 {
-
-
-    public virtual Task Init()
-    {
-        return Task.CompletedTask;
-    }
+    public virtual Task Init() => Task.CompletedTask;
 }
