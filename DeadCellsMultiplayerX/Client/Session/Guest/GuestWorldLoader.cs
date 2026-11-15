@@ -2,7 +2,6 @@ namespace DeadCellsMultiplayerX.Client.Session.Guest;
 
 using System.Diagnostics;
 using System.Text.Json;
-using CoreLibrary.Core.Extensions;
 using dc;
 using dc.en;
 using dc.pr;
@@ -69,30 +68,29 @@ internal sealed class GuestWorldLoader(
         this.logger.Information("Clearing entities...");
         var loadedGame = Game.Class.ME;
 
-        foreach (var level in (IEnumerable<Level>)loadedGame.subLevels)
-        {
-            List<Entity> entities = [];
-            foreach (var entity in (IEnumerable<Entity>)level.entities)
-            {
-                if (entity is Hero or Interactive)
-                {
-                    continue;
-                }
+        List<Entity> entities = [];
 
+        for (var i = 0; i < loadedGame.subLevels.length; i++)
+        {
+
+            Level level = loadedGame.subLevels.getDyn(i);
+
+            for (var j = 0; j < level.entities.length; j++)
+            {
+                Entity entity = level.entities.getDyn(j);
                 if (entity is Mob)
                 {
                     entities.Add(entity);
                 }
             }
-
             foreach (var entity in entities)
             {
                 entity.destroy();
             }
+            entities.Clear();
         }
 
 #if DEBUG
-        await this.client.RefreshLobbyInfo();
         Debug.Assert(this.client.LobbyInfo != null);
         this.logger.Information(
             "Start New Game Team : {Info}\n",

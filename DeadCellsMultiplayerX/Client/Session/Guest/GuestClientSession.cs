@@ -87,7 +87,7 @@ internal sealed partial class GuestClientSession(GuestClient client, Stream serv
     private bool IsReady => this.server != null;
 
     private GuestFrameUploader Uploader => field ??= new GuestFrameUploader(
-        this.Client.Guid,
+        client.Guid,
         () => this.SyncedTimeMs,
         frame => this.server?.UploadClientWorldFrame(frame) ?? Task.CompletedTask,
         this.Logger);
@@ -102,6 +102,7 @@ internal sealed partial class GuestClientSession(GuestClient client, Stream serv
 
     public override async Task Init()
     {
+        this.Client = client;
         this.deathGate = new CombatDeathGate();
         this.prediction = new LocalCombatPrediction(this);
         this.localCapture = new LocalActionCapture(this, this);
@@ -118,7 +119,8 @@ internal sealed partial class GuestClientSession(GuestClient client, Stream serv
             serverStream,
             client,
             this.Rpc_Disconnected,
-            this.Logger);
+            this.Logger
+        );
 
         if (handshake == null)
         {
@@ -128,7 +130,6 @@ internal sealed partial class GuestClientSession(GuestClient client, Stream serv
 
         this.rpc = handshake.Rpc;
         this.server = handshake.Server;
-        this.Client = client;
 
         this.Uploader.SetServerReady(true);
     }
@@ -139,7 +140,21 @@ internal sealed partial class GuestClientSession(GuestClient client, Stream serv
     /// <param name="saveData"></param>
     /// <returns></returns>
     public async Task EnterNewLevel(byte[] saveData)
-        => await this.WorldLoader.EnterNewLevel(saveData);
+    {
+        try
+        {
+            await this.WorldLoader.EnterNewLevel(saveData);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            this.Logger.Error(ex, "EnterNewLevel failed: guid={Guid}", client.Guid);
+            throw;
+        }
+    }
 
     /// <summary>
     /// 服务端调用,用于通知当前客户切换关卡
