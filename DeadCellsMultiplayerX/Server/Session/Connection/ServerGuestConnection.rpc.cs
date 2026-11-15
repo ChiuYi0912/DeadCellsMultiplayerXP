@@ -209,109 +209,15 @@ internal sealed partial class ServerGuestConnection : IServerRPC
     public Task<long> GetTimeStamp() => Task.FromResult(this.Session.CurrentTimeStamp);
 
 
-    public async Task GusetEnterNextLevel(string plyerid, string levelid)
-    {
-        if (string.IsNullOrWhiteSpace(plyerid)
-            || string.IsNullOrWhiteSpace(levelid)
-            || !this.Session.GuestsGameInfo.TryGetValue(plyerid, out var vote))
-        {
-            this.Logger.Warning(
-                "Level transition request rejected: guid={Guid} level={Level}",
-                plyerid, levelid);
-            return;
-        }
-
-        if (vote.LevelSelected)
-        {
-            return;
-        }
-
-        vote.NextLevelID = levelid;
-        vote.LevelSelected = true;
-
-        if (!this.Session.TryBeginLevelTransition())
-        {
-            return;
-        }
-
-        // The gate now covers the vote wait as well: every exception path
-        // must release it, otherwise all future transitions are locked.
-        try
-        {
-            var deadline = Environment.TickCount64 + 10_000;
-            while (!this.Session.GuestsGameInfo.All(e => e.Value.LevelSelected))
-            {
-                if (Environment.TickCount64 >= deadline)
-                {
-                    this.Logger.Warning(
-                        "Level transition aborted: vote timeout after {TimeoutMs}ms",
-                        10_000);
-                    this.ResetLevelSelection();
-                    return;
-                }
-
-                await Task.Delay(100);
-            }
-
-            var selectedLevelIds = this.Session.GuestsGameInfo
-                .Select(e => e.Value.NextLevelID)
-                .Where(id => !string.IsNullOrEmpty(id))
-                .Distinct()
-                .ToList();
-
-            if (selectedLevelIds.Count == 0)
-            {
-                this.Logger.Warning("Level transition aborted: no selected level id");
-                this.ResetLevelSelection();
-                return;
-            }
-
-            var resultLevelId = selectedLevelIds.Count == 1
-                ? selectedLevelIds[0]
-                : selectedLevelIds[Random.Shared.Next(selectedLevelIds.Count)];
-
-            // The server world must follow the guests.  The client path
-            // (IGuestRPC.EnterNextLevel) runs its own LevelTransition.goto;
-            // the server deliberately does not re-send the initial save file.
-            try
-            {
-                await this.Main.EnterNextLevel(resultLevelId);
-            }
-            catch (Exception ex)
-            {
-                this.Logger.Error(
-                    ex,
-                    "Server level transition failed: level={Level}; resetting votes",
-                    resultLevelId);
-                this.ResetLevelSelection();
-                return;
-            }
-
-            // The server game has loaded the new level.  Start the new world
-            // epoch before telling guests to run their local transition, so
-            // frames from the old level cannot be mistaken for the new one.
-            this.Session.BeginLevelEpoch();
-            await this.Session.NoticeGuestsEnterNextLevel(resultLevelId);
-        }
-        finally
-        {
-            this.Session.EndLevelTransition();
-        }
-    }
-
-    private void ResetLevelSelection()
-    {
-        foreach (var vote in this.Session.GuestsGameInfo.Values)
-        {
-            vote.LevelSelected = false;
-        }
-    }
+    public Task GusetEnterNextLevel(string plyerid, string levelid)
+        => this.Session.LevelTransitions
+            .GusetEnterNextLevelAsync(this.ConnectionGuid, plyerid, levelid)
+            .AsTask();
 
     public Task SubmitLevelVote(LevelVote info)
-    {
-        this.Session.GuestsGameInfo[info.PlyerID] = info;
-        return Task.CompletedTask;
-    }
+        => this.Session.LevelTransitions
+            .SubmitLevelVoteAsync(this.ConnectionGuid, info)
+            .AsTask();
 
     public Task Ping() => Task.CompletedTask;
 

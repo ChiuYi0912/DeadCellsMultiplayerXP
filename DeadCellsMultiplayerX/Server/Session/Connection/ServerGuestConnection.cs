@@ -22,15 +22,23 @@ internal sealed partial class ServerGuestConnection :
 
     private readonly JsonRpc rpc;
     public override ILogger Logger { get; }
+
+    /// <summary>
+    /// 连接层身份。来自握手 GUID，不随后续客户端消息变化。
+    /// </summary>
+    public string ConnectionGuid { get; }
+
     public GuestInfo GuestInfo { get; set; } = new();
     public ServerSession Session { get; }
     public ServerMainThread Main => this.Session.Main;
     public IGuestRPC Guest { get; private set; } = null!;
 
-    public ServerGuestConnection(ServerSession session, Stream connection)
+    public ServerGuestConnection(ServerSession session, Stream connection, string connectionGuid)
     {
         this.Session = session;
-        this.Logger = Log.ForContext("SourceContext", "Server-Guest-" + this.GuestInfo.Guid);
+        this.ConnectionGuid = connectionGuid
+            ?? throw new ArgumentNullException(nameof(connectionGuid));
+        this.Logger = Log.ForContext("SourceContext", "Server-Guest-" + this.ConnectionGuid);
 
         this.rpc = connection.CreateJsonRpc("server-guest", NetLogSession.CreateJsonRpcFailureListener("server-guest"));
 

@@ -1,0 +1,163 @@
+namespace DeadCellsMultiplayerX.Server.Session.Interactions;
+
+using DeadCellsMultiplayerX.Contracts.Lobby;
+using DeadCellsMultiplayerX.Server.Interactions;
+using Serilog;
+
+
+internal sealed class ServerLevelTransitionGateway
+{
+    private readonly ServerSession session;
+    private readonly ILogger logger;
+    private readonly LevelTransitionInteraction transition;
+
+    public ServerLevelTransitionGateway(ServerSession session, ILogger logger)
+    {
+        this.session = session ?? throw new ArgumentNullException(nameof(session));
+        this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
+
+        this.transition = new LevelTransitionInteraction(
+            serverEnterLevel: this.EnterLevelAsync,
+            beginEpoch: this.session.BeginLevelEpoch,
+            guestsEnterLevel: this.NotifyGuestsAsync);
+    }
+
+    public ValueTask<InteractionDispatch> GusetEnterNextLevelAsync(
+        string connectionGuid,
+        string? payloadPlayerId,
+        string? levelId)
+    {
+        if (!TryResolveActor(
+                connectionGuid,
+                payloadPlayerId,
+                requirePayloadIdentity: true,
+                out var reason))
+        {
+            this.logger.Warning("Level transition rejected: {Reason}", reason);
+            return new ValueTask<InteractionDispatch>(InteractionDispatch.Rejected(reason));
+        }
+
+        return this.SubmitAsync(connectionGuid, levelId);
+    }
+
+
+    public ValueTask<InteractionDispatch> SubmitLevelVoteAsync(
+        string connectionGuid,
+        LevelVote vote)
+    {
+        if (!TryResolveActor(
+                connectionGuid,
+                vote.PlyerID,
+                requirePayloadIdentity: false,
+                out var reason))
+        {
+            this.logger.Warning("Level transition rejected: {Reason}", reason);
+            return new ValueTask<InteractionDispatch>(InteractionDispatch.Rejected(reason));
+        }
+
+        return this.SubmitAsync(connectionGuid, vote.NextLevelID);
+    }
+
+
+    private async ValueTask<InteractionDispatch> SubmitAsync(
+        string actor,
+        string? levelId)
+    {
+        var dispatch = await this.transition.SubmitAsync(
+            actor,
+            levelId ?? string.Empty,
+            this.Participants(),
+            CancellationToken.None);
+
+        this.LogDispatch(dispatch);
+        return dispatch;
+    }
+
+    private string[] Participants() => [.. this.session.ConnectedGuestIds];
+
+    private ValueTask EnterLevelAsync(
+        string levelId,
+        CancellationToken cancellationToken)
+    {
+        _ = cancellationToken;
+        return new ValueTask(this.session.Main.EnterNextLevel(levelId));
+    }
+
+    private ValueTask NotifyGuestsAsync(string levelId)
+    {
+        foreach (var guest in this.session.ConnectedGuests)
+        {
+            try
+            {
+                _ = guest.Guest.EnterNextLevel(levelId)
+                    .ContinueWith(
+                        t => this.logger.Warning(
+                            t.Exception,
+                            "EnterNextLevel RPC failed: {Guid}",
+                            guest.ConnectionGuid),
+                        TaskContinuationOptions.OnlyOnFaulted);
+            }
+            catch (Exception ex)
+            {
+                this.logger.Warning(
+                    ex,
+                    "EnterNextLevel dispatch failed: {Guid}",
+                    guest.ConnectionGuid);
+            }
+        }
+
+        return ValueTask.CompletedTask;
+    }
+
+    private void LogDispatch(InteractionDispatch dispatch)
+    {
+        switch (dispatch.Status)
+        {
+            case InteractionDispatchStatus.Resolved:
+                this.logger.Information("Level transition committed and published.");
+                break;
+            case InteractionDispatchStatus.Duplicate:
+                this.logger.Debug("Level transition duplicate ignored: {Reason}", dispatch.Reason);
+                break;
+            case InteractionDispatchStatus.Rejected:
+                this.logger.Warning("Level transition rejected: {Reason}", dispatch.Reason);
+                break;
+            case InteractionDispatchStatus.Aborted:
+                this.logger.Warning("Level transition aborted: {Reason}", dispatch.Reason);
+                break;
+            case InteractionDispatchStatus.Accepted:
+                break;
+            default:
+                break;
+        }
+    }
+
+    private static bool TryResolveActor(
+        string? connectionGuid,
+        string? payloadPlayerId,
+        bool requirePayloadIdentity,
+        out string reason)
+    {
+        if (string.IsNullOrWhiteSpace(connectionGuid))
+        {
+            reason = InteractionReasons.MissingConnectionId;
+            return false;
+        }
+
+        if (requirePayloadIdentity && string.IsNullOrWhiteSpace(payloadPlayerId))
+        {
+            reason = InteractionReasons.MissingPlayerId;
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(payloadPlayerId)
+            && !string.Equals(payloadPlayerId, connectionGuid, StringComparison.Ordinal))
+        {
+            reason = InteractionReasons.PlayerIdMismatch;
+            return false;
+        }
+
+        reason = string.Empty;
+        return true;
+    }
+}

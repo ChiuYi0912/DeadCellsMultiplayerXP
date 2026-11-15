@@ -74,7 +74,7 @@ internal sealed class GuestGameHookAdapter(
             return;
         }
 
-        GuestClient? current = this.currentGuest();
+        var current = this.currentGuest();
 
         if (current == null)
         {
@@ -82,7 +82,7 @@ internal sealed class GuestGameHookAdapter(
             return;
         }
 
-        Hero hero = Game.Class.ME.hero;
+        var hero = Game.Class.ME.hero;
 
         if (current.IsServerDrivenTransition)
         {
@@ -96,7 +96,7 @@ internal sealed class GuestGameHookAdapter(
             return;
         }
 
-        _ = current.SelectNextLevel(levelid);
+        _ = current.SubmitLevelVote(levelid);
 
         if (hero != null && !hero.destroyed)
         {

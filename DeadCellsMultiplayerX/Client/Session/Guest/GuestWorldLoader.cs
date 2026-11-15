@@ -2,6 +2,7 @@ namespace DeadCellsMultiplayerX.Client.Session.Guest;
 
 using System.Diagnostics;
 using System.Text.Json;
+using CoreLibrary.Core.Extensions;
 using dc;
 using dc.en;
 using dc.pr;
@@ -68,10 +69,10 @@ internal sealed class GuestWorldLoader(
         this.logger.Information("Clearing entities...");
         var loadedGame = Game.Class.ME;
 
-        foreach (var level in loadedGame.subLevels)
+        foreach (var level in (IEnumerable<Level>)loadedGame.subLevels)
         {
             List<Entity> entities = [];
-            foreach (var entity in level.entities)
+            foreach (var entity in (IEnumerable<Entity>)level.entities)
             {
                 if (entity is Hero or Interactive)
                 {

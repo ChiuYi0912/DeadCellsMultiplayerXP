@@ -31,17 +31,17 @@ internal sealed class GuestFrameUploader(
     private Task? uploadTask;
     private long lastUploadErrorLogMs;
     private volatile bool disposed;
-    private volatile bool ready;
+    private volatile bool serverReady;
     public bool UploadBroken { get; private set; }
 
-    public void SetReady(bool value) => this.ready = value;
+    public void SetServerReady(bool value) => this.serverReady = value;
     public void MarkDisposed() => this.disposed = true;
 
 
     /// <summary>Captures the local hero and sends at most one in-flight frame.</summary>
     public void CaptureAndUpload(Hero hero)
     {
-        if (!this.ready || this.disposed || this.UploadBroken)
+        if (!this.serverReady || this.disposed || this.UploadBroken)
         {
             return;
         }

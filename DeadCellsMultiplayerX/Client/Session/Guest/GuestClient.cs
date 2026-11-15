@@ -240,13 +240,17 @@ internal sealed class GuestClient(BaseNetworkConnection connection) : ClientBase
 
     public async Task RefreshLobbyInfo() => this.LobbyInfo = await this.Host.GetLobbyInfo();
 
-    public async Task SelectNextLevel(string levelId)
+    public async Task SubmitLevelVote(string levelId)
     {
         var current = this.Session ?? throw new InvalidOperationException(
             "The guest server session is not initialized.");
-
-        await current.Server.GusetEnterNextLevel(
-            current.Client.Guid, levelId);
+        var vote = new LevelVote()
+        {
+            PlyerID = current.Client.Guid,
+            NextLevelID = levelId,
+            LevelSelected = true
+        };
+        await current.Server.SubmitLevelVote(vote);
     }
 
     public void Quit()

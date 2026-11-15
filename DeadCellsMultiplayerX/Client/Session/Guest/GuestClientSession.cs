@@ -1,5 +1,6 @@
 namespace DeadCellsMultiplayerX.Client.Session.Guest;
 
+using System.Diagnostics;
 using dc.cine;
 using dc.en;
 using dc.tool.atk;
@@ -129,7 +130,7 @@ internal sealed partial class GuestClientSession(GuestClient client, Stream serv
         this.server = handshake.Server;
         this.Client = client;
 
-        this.Uploader.SetReady(true);
+        this.Uploader.SetServerReady(true);
     }
 
     /// <summary>
@@ -137,8 +138,8 @@ internal sealed partial class GuestClientSession(GuestClient client, Stream serv
     /// </summary>
     /// <param name="saveData"></param>
     /// <returns></returns>
-    public Task EnterNewLevel(byte[] saveData)
-        => this.WorldLoader.EnterNewLevel(saveData);
+    public async Task EnterNewLevel(byte[] saveData)
+        => await this.WorldLoader.EnterNewLevel(saveData);
 
     /// <summary>
     /// 服务端调用,用于通知当前客户切换关卡

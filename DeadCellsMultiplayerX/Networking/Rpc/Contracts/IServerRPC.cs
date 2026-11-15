@@ -56,14 +56,6 @@ internal partial interface IServerRPC
     public Task SubmitLevelVote(LevelVote vote);
 
     /// <summary>
-    /// 客户端告诉服务端,选择的下一个关卡
-    /// </summary>
-    /// <param name="plyerid"></param>
-    /// <param name="levelid"></param>
-    /// <returns></returns>
-    public Task GusetEnterNextLevel(string plyerid, string levelid);
-
-    /// <summary>
     /// 获取服务器时间
     /// </summary>
     /// <returns></returns>

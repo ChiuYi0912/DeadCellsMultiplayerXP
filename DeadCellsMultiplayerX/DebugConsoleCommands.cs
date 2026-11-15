@@ -3,7 +3,6 @@ namespace DeadCellsMultiplayerX;
 using dc.en.inter;
 using dc.tool;
 using DeadCellsMultiplayerX.Client.Session;
-using DeadCellsMultiplayerX.Tools;
 using HaxeProxy.Runtime;
 using IngameDebugConsole;
 using ModCore.Utilities;
@@ -67,22 +66,10 @@ internal static class DebugConsoleCommands
             return;
         }
 
-        HoldAsync(guest.SelectNextLevel(levelid));
+        HoldAsync(guest.SubmitLevelVote(levelid));
         writer.WriteLine($"Requested next level: {levelid}");
     }
 
-    [ConsoleMethod("dcmp-protocol-baseline", "生成协议基线（完整 serializer + RPC 回环）")]
-    public static void RunProtocolBaseline(TextWriter writer, string path = "")
-    {
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            path = System.IO.Path.Combine(
-                Environment.CurrentDirectory, "protocol-baseline-full.json");
-        }
-
-        ProtocolBaseline.Run(path);
-        writer.WriteLine($"Protocol baseline written: {path}");
-    }
 
     [ConsoleMethod("dcmp-worldframe-stats", "打印客户端世界帧统计")]
     public static void WorldFrameStats(TextWriter writer)

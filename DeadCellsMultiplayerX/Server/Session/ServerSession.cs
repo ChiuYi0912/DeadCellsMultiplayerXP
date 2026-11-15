@@ -2,7 +2,6 @@ namespace DeadCellsMultiplayerX.Server.Session;
 
 using System.IO.Pipes;
 using DeadCellsMultiplayerX.Contracts.Actions;
-using DeadCellsMultiplayerX.Contracts.Lobby;
 using DeadCellsMultiplayerX.Foundation.Lifecycle;
 using DeadCellsMultiplayerX.Networking.Time;
 using DeadCellsMultiplayerX.Networking.Transport;
@@ -12,6 +11,7 @@ using DeadCellsMultiplayerX.Server.Replication.Entities;
 using DeadCellsMultiplayerX.Server.Replication.Entities.Mobs;
 using DeadCellsMultiplayerX.Server.Replication.Frames;
 using DeadCellsMultiplayerX.Server.Session.Connection;
+using DeadCellsMultiplayerX.Server.Session.Interactions;
 using DeadCellsMultiplayerX.Server.World.Actors;
 using Microsoft.VisualStudio.Threading;
 using ModCore.Events.Interfaces.Game;
@@ -29,16 +29,22 @@ internal sealed class ServerSession : DisposableEventReceiver,
     private Stream? mainChannelReader;
     private ServerMainThread? mainThread;
     private readonly ServerTimeSystem timeSystem = new();
-    private readonly List<ServerGuestConnection> guests = [];
-    public Dictionary<string, LevelVote> GuestsGameInfo { get; } = [];
-
-    /// <summary>
-    /// One coordinator per session, not per guest connection.  A per-guest
-    /// gate lets every voter run the transition simultaneously.
-    /// </summary>
-    private int levelTransitionGate;
+    private readonly Dictionary<string, ServerGuestConnection> guests = [];
 
     public long CurrentTimeStamp => this.timeSystem.Now;
+
+    /// <summary>
+    /// 当前已连接玩家。作为交互名册与 Ghost tick 的唯一来源。
+    /// </summary>
+    public IReadOnlyCollection<string> ConnectedGuestIds => this.guests.Keys;
+
+    public IReadOnlyCollection<ServerGuestConnection> ConnectedGuests => this.guests.Values;
+
+    /// <summary>
+    /// 关卡投票/切换的网络边界与交互入口。
+    /// </summary>
+    internal ServerLevelTransitionGateway LevelTransitions { get; }
+
     public ClientFrameCollector ClientFrames { get; } = new();
     public ServerEntityRegistry Entities { get; } = new();
     public ServerEntityHandlerRegistry EntityHandlers { get; } = new();
@@ -54,6 +60,8 @@ internal sealed class ServerSession : DisposableEventReceiver,
         this.Ghosts = new ServerActorManager(this);
         this.Broadcaster = new WorldFramePublisher(
             this.ClientFrames, this.EntityPublisher, this.Ghosts, this.AreaAffects);
+
+        this.LevelTransitions = new ServerLevelTransitionGateway(this, this.Logger);
     }
 
     /// <summary>
@@ -176,20 +184,17 @@ internal sealed class ServerSession : DisposableEventReceiver,
         }
 
         if (string.IsNullOrWhiteSpace(guestGuid)
-            || this.guests.Any(g => string.Equals(
-                g.GuestInfo.Guid, guestGuid, StringComparison.Ordinal))
-            || this.GuestsGameInfo.ContainsKey(guestGuid))
+            || this.guests.ContainsKey(guestGuid))
         {
             this.Logger.Warning("Duplicate or empty guest GUID rejected: {guid}", guestGuid);
             stream.Dispose();
             return;
         }
 
-        var sguest = new ServerGuestConnection(this, stream);
+        var sguest = new ServerGuestConnection(this, stream, guestGuid);
         sguest.GuestInfo.Guid = guestGuid;
 
-        this.guests.Add(sguest);
-        this.GuestsGameInfo.Add(guestGuid, new LevelVote { PlyerID = guestGuid });
+        this.guests.Add(guestGuid, sguest);
         this.ClientFrames.Register(guestGuid, sguest.RequestClientFrames);
 
         this.Logger.Information("Client Enter : {guid}", guestGuid);
@@ -197,70 +202,10 @@ internal sealed class ServerSession : DisposableEventReceiver,
 
 
     /// <summary>
-    /// Claims the single server-side level transition coordinator role.
-    /// </summary>
-    public bool TryBeginLevelTransition()
-        => Interlocked.CompareExchange(ref this.levelTransitionGate, 1, 0) == 0;
-
-    /// <summary>
-    /// Releases the coordinator role in every exit path.
-    /// </summary>
-    public void EndLevelTransition()
-        => Interlocked.Exchange(ref this.levelTransitionGate, 0);
-
-    /// <summary>
-    /// 通知所有客户端切换关卡
-    /// </summary>
-    /// <param name="levelid"></param>
-    /// <returns></returns>
-    public Task NoticeGuestsEnterNextLevel(string levelid)
-    {
-        foreach (var sGuest in this.guests)
-        {
-            try
-            {
-                _ = sGuest.Guest.EnterNextLevel(levelid)
-                    .ContinueWith(
-                        t => this.Logger.Warning(
-                            t.Exception,
-                            "EnterNextLevel RPC failed: {Guid}",
-                            sGuest.GuestInfo.Guid),
-                        TaskContinuationOptions.OnlyOnFaulted);
-            }
-            catch (Exception ex)
-            {
-                this.Logger.Warning(
-                    ex,
-                    "EnterNextLevel dispatch failed: {Guid}",
-                    sGuest.GuestInfo.Guid);
-            }
-        }
-
-        foreach (var guest in this.GuestsGameInfo)
-        {
-            guest.Value.LevelSelected = false;
-        }
-
-        return Task.CompletedTask;
-    }
-
-    /// <summary>
-    /// 按 GUID 查找客户端连接
+    /// 按连接 GUID 查找客户端连接
     /// </summary>
     public bool TryGetGuest(string guid, out ServerGuestConnection guest)
-    {
-        foreach (var item in this.guests)
-        {
-            if (string.Equals(item.GuestInfo.Guid, guid, StringComparison.Ordinal))
-            {
-                guest = item;
-                return true;
-            }
-        }
-
-        guest = null!;
-        return false;
-    }
+        => this.guests.TryGetValue(guid, out guest!);
 
     public void RemoveGuest(ServerGuestConnection guest)
     {
@@ -269,15 +214,12 @@ internal sealed class ServerSession : DisposableEventReceiver,
             return;
         }
 
-        this.guests.Remove(guest);
-
-        var guid = guest.GuestInfo.Guid;
-        if (string.IsNullOrEmpty(guid))
+        var guid = guest.ConnectionGuid;
+        if (!this.guests.Remove(guid))
         {
             return;
         }
 
-        this.GuestsGameInfo.Remove(guid);
         this.ClientFrames.Unregister(guid);
         this.Ghosts.RemoveGuest(guid);
     }
@@ -289,8 +231,8 @@ internal sealed class ServerSession : DisposableEventReceiver,
         try
         {
             this.ClientFrames.Tick(this.CurrentTimeStamp);
-            this.Ghosts.Tick(dt, this.CurrentTimeStamp, this.GuestsGameInfo.Keys);
-            this.Broadcaster.Tick(dt, this.CurrentTimeStamp, this.guests.ToArray());
+            this.Ghosts.Tick(dt, this.CurrentTimeStamp, this.ConnectedGuestIds);
+            this.Broadcaster.Tick(dt, this.CurrentTimeStamp, [.. this.guests.Values]);
         }
         catch (Exception ex)
         {
@@ -322,14 +264,13 @@ internal sealed class ServerSession : DisposableEventReceiver,
         this.Ghosts.Clear();
 
         // Guests own their RPC + per-guest channel.  Dispose before the
-        // transport is torn down; RemoveGuest mutates the list, so iterate a copy.
-        foreach (var guest in this.guests.ToArray())
+        // transport is torn down; RemoveGuest mutates the map, so iterate a copy.
+        foreach (var guest in this.guests.Values.ToArray())
         {
             this.DisposeSafely(guest, "ServerGuestConnection");
         }
 
         this.guests.Clear();
-        this.GuestsGameInfo.Clear();
 
         this.DisposeSafely(this.mainThread, "ServerMainThread");
         this.mainThread = null;
