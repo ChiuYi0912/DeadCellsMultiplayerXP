@@ -5,18 +5,20 @@ using dc.pr;
 using DeadCellsMultiplayerX.Server.Replication.Frames;
 
 /// <summary>
-/// 服务端 Ghost 队伍同步入口：编排生成、状态镜像与战斗视图更新。
+/// 服务端 Hero 队伍同步入口：编排生成、状态镜像与战斗状态更新。
 /// </summary>
 internal sealed class ServerTeamManager(
     WorldState world,
     ClientFrameCollector frames,
-    SpawnSynchronizer spawns,
+    ServerHeroSpawner spawner,
     Func<Game?> gameProvider)
 {
     /// <summary>
     /// 客户端停止上传状态多久后视为离线，关闭该 Ghost 的战斗状态
     /// </summary>
     private const long STALE_STATE_MS = 2000;
+
+    private readonly WorldState world = world;
 
     /// <summary>
     /// 客户端上传的帧数据，提供每个 guid 的英雄状态
@@ -28,17 +30,14 @@ internal sealed class ServerTeamManager(
     /// </summary>
     private readonly Func<Game?> gameProvider = gameProvider;
 
-    private readonly ServerHeroSpawner spawner = new(world, spawns, gameProvider);
-    private readonly ServerCombatViewUpdater views = new();
-
     /// <summary>
-    /// 当前可战斗 Ghost
+    /// 当前可战斗 Hero
     /// </summary>
-    public IReadOnlyCollection<ServerHeroCombatView> Combatants
-        => this.views.Combatants;
+    public IReadOnlyCollection<ServerHero> Combatants
+        => this.world.Actors;
 
     /// <summary>
-    /// 用客户端最新上传状态同步所有 Ghost
+    /// 用客户端最新上传状态同步所有 Hero
     /// </summary>
     public void Sync(IReadOnlyCollection<string> guests, long nowMs)
     {
@@ -49,7 +48,7 @@ internal sealed class ServerTeamManager(
         }
 
         // 服务端自己的 Hero 没有玩家控制，不能参与 mob 仇恨
-        this.views.NeutralizeServerHero(game);
+        this.NeutralizeServerHero(game);
 
         foreach (var guid in guests)
         {
@@ -61,11 +60,11 @@ internal sealed class ServerTeamManager(
             if (!this.frames.TryGetHeroState(guid, out var state))
             {
                 // 本地 Hero 死亡后客户端停止上传，服务端要把目标关闭
-                if (this.views.TryGet(guid, out var stale)
+                if (this.world.Find(guid) is { } stale
                     && stale.LastStateMs > 0
                     && nowMs - stale.LastStateMs > STALE_STATE_MS)
                 {
-                    this.views.Disable(guid);
+                    stale.DisableCombat();
                 }
 
                 continue;
@@ -76,40 +75,97 @@ internal sealed class ServerTeamManager(
                 continue;
             }
 
-            var actor = this.spawner.Ensure(game, guid, state, out var level);
-            if (actor?.Ghost == null || level == null)
+            var hero = spawner.Ensure(game, guid, state, out var level);
+            if (hero?.Ghost == null || level == null)
             {
-                this.views.Disable(guid);
+                this.world.Find(guid)?.DisableCombat();
                 continue;
             }
 
-            var combat = ServerHeroStateMirror.Apply(actor.Ghost, state);
-            this.views.Update(
-                guid, actor.Ghost, level, state, combat, nowMs);
+            var combat = ServerHeroStateMirror.Apply(hero.Ghost, state);
+            hero.UpdateCombat(
+                level,
+                state.Life,
+                state.MaxLife,
+                state.IsDead,
+                combat,
+                nowMs);
         }
     }
 
     /// <summary>
-    /// 按 GUID 获取可战斗 Ghost
+    /// 按 GUID 获取 Hero
     /// </summary>
-    public bool TryGet(string guid, out ServerHeroCombatView combatant)
-        => this.views.TryGet(guid, out combatant);
+    public bool TryGet(string guid, out ServerHero hero)
+    {
+        var found = this.world.Find(guid);
+        if (found != null)
+        {
+            hero = found;
+            return true;
+        }
+
+        hero = null!;
+        return false;
+    }
 
     /// <summary>
-    /// 通过底层 Hero 反查可战斗 Ghost
+    /// 通过底层 Hero 反查
     /// </summary>
-    public bool TryGet(Entity entity, out ServerHeroCombatView combatant)
-        => this.views.TryGet(entity, out combatant);
+    public bool TryGet(Entity entity, out ServerHero hero)
+    {
+        var found = this.world.FindByHero(entity);
+        if (found != null)
+        {
+            hero = found;
+            return true;
+        }
+
+        hero = null!;
+        return false;
+    }
 
     /// <summary>
     /// 断线清理
     /// </summary>
     public void Forget(string guid)
-        => this.views.Forget(guid);
+        => this.world.Find(guid)?.DisableCombat();
 
     /// <summary>
     /// 世界重置
     /// </summary>
     public void Clear()
-        => this.views.Clear();
+    {
+        foreach (var hero in this.world.Actors)
+        {
+            hero.DisableCombat();
+        }
+    }
+
+    /// <summary>
+    /// 将服务端的 Hero 设置为不可攻击状态。
+    /// </summary>
+    private void NeutralizeServerHero(Game game)
+    {
+        var hero = game?.hero;
+        if (hero == null || hero.destroyed)
+        {
+            return;
+        }
+
+        if (this.world.FindByHero(hero) != null)
+        {
+            return;
+        }
+
+        if (hero._targetable)
+        {
+            hero.set_targetable(false);
+        }
+
+        if (!hero.ignoreDetection)
+        {
+            hero.ignoreDetection = true;
+        }
+    }
 }

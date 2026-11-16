@@ -3,7 +3,7 @@ namespace DeadCellsMultiplayerX.Client.World.Heroes.Local;
 using dc.tool.weap;
 
 /// <summary>
-/// 本地动作的单调 ActionId 与盾牌姿态去重。
+/// 本地动作的单调 CommandId 与盾牌姿态去重。
 /// </summary>
 internal sealed class LocalActionDeduper
 {
@@ -13,18 +13,11 @@ internal sealed class LocalActionDeduper
         public bool Parrying { get; set; }
     }
 
-    private long nextActionId;
-
     /// <summary>
     /// 每个本地盾牌当前的姿态，用于抑制重复的起止事件。
     /// </summary>
     private readonly Dictionary<BaseShield, ShieldState> shieldStates =
         [with(ReferenceEqualityComparer.Instance)];
-
-    /// <summary>
-    /// 取得下一个单调 ActionId。
-    /// </summary>
-    public long NextActionId() => ++this.nextActionId;
 
     /// <summary>
     /// 返回 false 表示已经在蓄力中，不应重复上报 HoldStart。

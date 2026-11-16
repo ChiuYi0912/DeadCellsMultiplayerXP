@@ -1,7 +1,6 @@
 namespace DeadCellsMultiplayerX.Server.Session;
 
 using System.IO.Pipes;
-using DeadCellsMultiplayerX.Contracts.Actions;
 using DeadCellsMultiplayerX.Foundation.Lifecycle;
 using DeadCellsMultiplayerX.Networking.Time;
 using DeadCellsMultiplayerX.Networking.Transport;
@@ -58,15 +57,11 @@ internal sealed class ServerSession : DisposableEventReceiver,
         this.EntityHandlers.Register(new ServerMobEntityHandler(this.Entities));
         this.EntityPublisher = new EntityFrameBuilder(this.Entities, this.EntityHandlers);
         this.Ghosts = new ServerActorManager(this);
+        this.ClientFrames.CommandsReceived += this.Ghosts.HandleCommands;
         this.Broadcaster = new WorldFramePublisher(this.ClientFrames, this.EntityPublisher, this.Ghosts, this.AreaAffects);
 
         this.LevelTransitions = new ServerLevelTransitionGateway(this, this.Logger);
     }
-
-    /// <summary>
-    /// 处理客户端上报的英雄动作
-    /// </summary>
-    public void HandleHeroAction(string senderGuid, HeroAction? request) => this.Ghosts.HandleAction(senderGuid, request);
 
     public ServerMainThread Main => this.mainThread ?? throw new InvalidOperationException();
 
@@ -192,6 +187,10 @@ internal sealed class ServerSession : DisposableEventReceiver,
 
         var sguest = new ServerGuestConnection(this, stream, guestGuid);
         sguest.GuestInfo.Guid = guestGuid;
+
+        System.Diagnostics.Debug.Assert(
+            string.Equals(sguest.GuestInfo.Guid, guestGuid, StringComparison.Ordinal),
+            "GuestInfo.Guid must match the connection GUID.");
 
         this.guests.Add(guestGuid, sguest);
         this.ClientFrames.Register(guestGuid, sguest.RequestClientFrames);

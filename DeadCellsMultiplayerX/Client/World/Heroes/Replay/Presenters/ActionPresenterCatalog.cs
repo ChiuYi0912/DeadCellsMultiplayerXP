@@ -10,7 +10,6 @@ internal static class ActionPresenterCatalog
 
         Add(new SkillActionPresenter());
         Add(new WeaponActionPresenter());
-        Add(new TalismanActionPresenter());
         Add(new ShieldActionPresenter());
 
         return presenters;

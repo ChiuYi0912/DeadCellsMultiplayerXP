@@ -9,10 +9,7 @@ using dc.tool.weap;
 using DeadCellsMultiplayerX.Client.World.Heroes.Remote;
 using DeadCellsMultiplayerX.Engine.Adapters.Heroes;
 
-/// <summary>
-/// 会话战斗 Hook：只处理命中表现、区域效果门控、盾反手雷与 Power 清理。
-/// 世界通过委托按需查询，适配器不持有会话。
-/// </summary>
+
 internal sealed class GuestCombatHookAdapter(
     Func<Mob, bool> isRemoteMob,
     Func<bool> isApplyingServerAreaAffect,
@@ -39,6 +36,19 @@ internal sealed class GuestCombatHookAdapter(
         AttackData atk,
         Entity target)
     {
+        // 客户端动作重放显式进入只表现作用域；作用域内任何目标都不进入权威伤害路径。
+        if (HitPresentationScope.IsActive)
+        {
+            if (target is Mob presentationMob
+                && atk != null
+                && atk.isSuccess())
+            {
+                this.playHitVisual(atk, presentationMob);
+            }
+
+            return;
+        }
+
         if (target is Mob mob && this.isRemoteMob(mob))
         {
             if (atk != null && atk.isSuccess())

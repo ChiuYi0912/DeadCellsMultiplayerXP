@@ -1,15 +1,14 @@
 namespace DeadCellsMultiplayerX;
 
-using dc.en.mob;
 #if DEBUG
 
 using DeadCellsMultiplayerX.Client.Session;
-using DeadCellsMultiplayerX.Engine.Native;
+using DeadCellsMultiplayerX.Engine.Utilities;
 using DeadCellsMultiplayerX.Server.Core;
-using DeadCellsMultiplayerX.Tools;
 using IngameDebugConsole;
 using ModCore.Utilities;
 using Serilog;
+using dc.en.mob;
 
 internal static class DebugConsoleCommands
 {
@@ -105,6 +104,19 @@ internal static class DebugConsoleCommands
         writer.WriteLine($"Server forced level: {levelid}");
     }
 
+
+    [ConsoleMethod("dcmp-hero-journal", "打印服务端动作处理日志")]
+    public static void HeroJournal(TextWriter writer, int count = 32)
+    {
+        var session = ServerMain.Instance?.Session;
+        if (session == null)
+        {
+            writer.WriteLine("Server session is not available in this process.");
+            return;
+        }
+
+        session.Ghosts.Journal.Dump(writer, count);
+    }
 
     [ConsoleMethod("dcmp-worldframe-stats", "打印客户端世界帧统计")]
     public static void WorldFrameStats(TextWriter writer)

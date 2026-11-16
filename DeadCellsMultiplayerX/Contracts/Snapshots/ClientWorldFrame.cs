@@ -1,5 +1,6 @@
 namespace DeadCellsMultiplayerX.Contracts.Snapshots;
 
+using DeadCellsMultiplayerX.Contracts.Actions;
 using MessagePack;
 
 /// <summary>
@@ -33,4 +34,9 @@ public class ClientWorldFrame
     /// 收到的其他客户端实体
     /// </summary>
     [Key(4)] public List<HeroUpload> Heroes { get; set; } = [];
+
+    /// <summary>
+    /// 给服务端发送的动作数据
+    /// </summary>
+    [Key(5)] public List<HeroCommand> Commands { get; set; } = [];
 }

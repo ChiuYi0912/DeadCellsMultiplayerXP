@@ -254,7 +254,7 @@ internal sealed class WorldFramePublisher
             Entities = entities.Entities,
             SpawnedEntities = entities.Spawned,
             DespawnedEntities = entities.Despawned,
-            Actions = this.ghosts.DrainActions(),
+            HeroOutcomes = this.ghosts.DrainOutcomes(),
             AreaAffects = this.areaAffects.Collect(serverTimeMs),
             EntityEvents = this.DrainEntityEvents(),
         };

@@ -1,6 +1,5 @@
 namespace DeadCellsMultiplayerX.Contracts.Snapshots;
 
-using DeadCellsMultiplayerX.Contracts.Actions;
 using DeadCellsMultiplayerX.Contracts.Loadout;
 using MessagePack;
 
@@ -51,11 +50,6 @@ public class HeroSpawn
     /// 服务端分配,静态数据变化时递增
     /// </summary>
     [Key(8)] public uint Version { get; set; }
-
-    /// <summary>
-    /// 当前项链（旧字段，保留用于兼容过渡；新逻辑使用 <see cref="Loadout"/>）
-    /// </summary>
-    [Key(9)] public ItemRef? Talisman { get; set; }
 
     /// <summary>
     /// 完整装备快照；晚加入/重连依赖它恢复武器、技能与项链。

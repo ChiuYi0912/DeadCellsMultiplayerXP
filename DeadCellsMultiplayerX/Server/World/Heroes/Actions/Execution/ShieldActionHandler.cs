@@ -1,99 +1,85 @@
 namespace DeadCellsMultiplayerX.Server.World.Heroes.Actions.Execution;
 
-using dc;
-using dc.tool.atk;
 using DeadCellsMultiplayerX.Contracts.Actions;
-using DeadCellsMultiplayerX.Server.Replication.Entities;
-using DeadCellsMultiplayerX.Server.World.Actors;
+using DeadCellsMultiplayerX.Server.World.Heroes.Actions.Commands;
 using DeadCellsMultiplayerX.Server.World.Heroes.Actions.Modules;
 using DeadCellsMultiplayerX.Simulation.Actions;
 using Serilog;
 
 internal sealed class ShieldActionHandler(
-    ServerEntityRegistry entities,
-    Func<long> clock) : IServerActionModule
+    Func<long> clock) : IHeroActionModule
 {
-    private const long COUNTER_DEDUPE_MS = 250;
-
     private static readonly ILogger Logger =
-        Log.ForContext("SourceContext", "ServerActorManager");
+        Log.ForContext("SourceContext", "ShieldActionHandler");
 
-    private readonly ServerEntityRegistry entities = entities;
     private readonly Func<long> clock = clock;
-    private readonly Dictionary<(string Guid, uint NetId), long> lastCounters = [];
 
-    public ActionDescriptor Descriptor { get; } =
+    public HeroActionRules Rules { get; } =
         new(HeroActionKind.Shield, SlotPolicy.Weapon);
 
-    public bool TryExecute(
-        ServerHeroCombatProxy ghost,
-        HeroAction request,
-        double ratio)
+    public HeroRejection Validate(
+        HeroCommandContext context,
+        ItemRef item)
     {
-        if (!ghost.Actions.PrepareShield(request.Slot, request.Item))
+        if (context.Ghost == null)
+        {
+            return HeroRejection.GhostUnavailable;
+        }
+
+        var intent = context.Command.Intent;
+        if (intent == null
+            || intent.ShieldKind > ShieldIntentKind.ParryEnd)
+        {
+            return HeroRejection.InvalidRequest;
+        }
+
+        return context.Ghost.ShieldPhases[context.Command.Slot]
+            .CanTransition(intent.ShieldKind, context.ServerTimeMs)
+                ? HeroRejection.None
+                : HeroRejection.InvalidRequest;
+    }
+
+    public HeroRejection Execute(
+        HeroCommandContext context,
+        ItemRef item)
+    {
+        var ghost = context.Ghost!;
+        var command = context.Command;
+        var intent = command.Intent!;
+
+        if (!ghost.Actions.PrepareShield(command.Slot, item))
         {
             Logger.Warning(
                 "Shield rejected: guid={Guid} slot={Slot} item={Item} " +
-                "action={ActionId}",
-                ghost.OwnerGuid, request.Slot,
-                request.Item?.ItemId, request.ActionId);
-            return false;
+                "cmd={CommandId} reason=prepare",
+                ghost.OwnerGuid, command.Slot, item.ItemId,
+                command.CommandId);
+            return HeroRejection.ExecutionFailed;
         }
 
-        AttackData? sourceAtk = null;
-
-        if (request.ShieldKind == ShieldActionKind.Counter)
-        {
-            if (request.SourceNetId == 0
-                || !this.entities.TryGetMob(request.SourceNetId, out var mob)
-                || mob == null
-                || mob.destroyed)
-            {
-                Logger.Warning(
-                    "Shield counter rejected: guid={Guid} source={Source} " +
-                    "action={ActionId}",
-                    ghost.OwnerGuid, request.SourceNetId, request.ActionId);
-                return false;
-            }
-
-            var key = (ghost.OwnerGuid, request.SourceNetId);
-            var now = Environment.TickCount64;
-            if (this.lastCounters.TryGetValue(key, out var last)
-                && now - last < COUNTER_DEDUPE_MS)
-            {
-                return false;
-            }
-
-            this.lastCounters[key] = now;
-
-            sourceAtk = new AttackData
-            {
-                source = mob,
-                hitResult = new HitResult.Normal()
-            };
-        }
-
-        double elapsedMs = System.Math.Max(
-            0, this.clock() - request.ClientTimeMs);
+        var elapsedMs = System.Math.Max(
+            0, this.clock() - command.ClientTimeMs);
 
         if (!ghost.Actions.UseShield(
-                request.ShieldKind, request.Slot, ratio,
-                request.FullParry, sourceAtk, elapsedMs))
+                intent.ShieldKind, command.Slot, elapsedMs))
         {
             Logger.Warning(
-                "Shield action rejected: guid={Guid} kind={Kind} slot={Slot} " +
-                "action={ActionId}",
-                ghost.OwnerGuid, request.ShieldKind,
-                request.Slot, request.ActionId);
-            return false;
+                "Shield rejected: guid={Guid} kind={Kind} slot={Slot} " +
+                "cmd={CommandId} reason=phase",
+                ghost.OwnerGuid, intent.ShieldKind, command.Slot,
+                command.CommandId);
+            return HeroRejection.ExecutionFailed;
         }
 
-        Logger.Information(
-            "Shield action accepted: guid={Guid} kind={Kind} slot={Slot} " +
-            "fullParry={FullParry} source={Source} action={ActionId}",
-            ghost.OwnerGuid, request.ShieldKind, request.Slot,
-            request.FullParry, request.SourceNetId, request.ActionId);
+        ghost.ShieldPhases[command.Slot].Commit(
+            intent.ShieldKind, context.ServerTimeMs);
 
-        return true;
+        Logger.Information(
+            "Shield phase accepted: guid={Guid} kind={Kind} slot={Slot} " +
+            "cmd={CommandId}",
+            ghost.OwnerGuid, intent.ShieldKind, command.Slot,
+            command.CommandId);
+
+        return HeroRejection.None;
     }
 }

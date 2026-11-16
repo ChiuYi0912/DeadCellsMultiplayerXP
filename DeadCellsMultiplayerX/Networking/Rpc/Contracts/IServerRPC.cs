@@ -1,6 +1,5 @@
 namespace DeadCellsMultiplayerX.Networking.Rpc.Contracts;
 
-using DeadCellsMultiplayerX.Contracts.Actions;
 using DeadCellsMultiplayerX.Contracts.Lobby;
 using DeadCellsMultiplayerX.Contracts.Protocol;
 using DeadCellsMultiplayerX.Contracts.Snapshots;
@@ -80,8 +79,4 @@ internal partial interface IServerRPC
     /// </summary>
     public Task<WorldResync> RequestWorldResync(int knownEpoch);
 
-    /// <summary>
-    /// 客户端上报一次英雄动作（主动技能或武器）
-    /// </summary>
-    public Task SubmitHeroAction(HeroAction request);
 }

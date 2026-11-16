@@ -123,10 +123,19 @@ internal sealed class ClientWorld : DisposableEventReceiver
     internal bool IsDeathSuppressed(Mob mob) => this.mobs.IsDeathSuppressed(mob);
 
     /// <summary>
-    /// 查询原生 mob 对应的 NetId
+    /// 查询 NetId 对应的远端 mob。
     /// </summary>
-    internal bool TryGetMobNetId(Mob mob, out uint netId)
-        => this.mobs.Receiver.TryGetNetId(mob, out netId);
+    internal bool TryGetRemoteMob(uint netId, out Mob mob)
+    {
+        if (this.entityStore.Get(netId) is Mob typed && !typed.destroyed)
+        {
+            mob = typed;
+            return true;
+        }
+
+        mob = null!;
+        return false;
+    }
 
     /// <summary>
     /// 采集调试 UI 所需的只读快照

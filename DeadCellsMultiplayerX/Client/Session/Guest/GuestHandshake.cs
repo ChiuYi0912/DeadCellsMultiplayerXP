@@ -27,7 +27,8 @@ internal static class GuestHandshake
         Stream serverStream,
         GuestClient client,
         EventHandler<JsonRpcDisconnectedEventArgs> onDisconnected,
-        ILogger logger)
+        ILogger logger,
+        Action<Result>? onReady = null)
     {
         ArgumentNullException.ThrowIfNull(localTarget);
         ArgumentNullException.ThrowIfNull(serverStream);
@@ -83,6 +84,10 @@ internal static class GuestHandshake
         logger.Information("Updating guest info...");
         await server.SetGuestInfo(lobby.Guests[client.Guid]);
 
+
+        var result = new Result(rpc, server, isOwner);
+        onReady?.Invoke(result);
+
         if (isOwner)
         {
             logger.Information("Updating savedata...");
@@ -94,6 +99,6 @@ internal static class GuestHandshake
             await server.UploadSavedata(await System.IO.File.ReadAllBytesAsync(path));
         }
 
-        return new Result(rpc, server, isOwner);
+        return result;
     }
 }

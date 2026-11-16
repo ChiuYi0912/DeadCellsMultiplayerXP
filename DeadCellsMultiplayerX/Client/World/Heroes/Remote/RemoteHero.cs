@@ -307,14 +307,9 @@ internal sealed class RemoteHero : KingSkin, IHxbitSerializable<RemoteHero.IHxDa
         }
     }
 
-    public bool ApplyShieldVisual(
-        ShieldActionKind kind,
-        int slot,
-        ItemRef? item,
-        bool fullParry,
-        double elapsedMs)
+    public bool ApplyShieldVisual(ShieldOutcome outcome)
     {
-        if (this.destroyed || this.spr == null)
+        if (this.destroyed || this.spr == null || outcome == null)
         {
             return false;
         }
@@ -325,31 +320,30 @@ internal sealed class RemoteHero : KingSkin, IHxbitSerializable<RemoteHero.IHxDa
             return false;
         }
 
-        switch (kind)
+        if (outcome.BlockKind != ShieldBlockKind.None)
         {
-            case ShieldActionKind.HoldStart:
+            anim.play("blockEnd".AsHaxeString(), null, null);
+            this.PlayParryFx(withText: outcome.BlockKind == ShieldBlockKind.Full);
+            return true;
+        }
+
+        switch (outcome.Phase)
+        {
+            case ShieldIntentKind.HoldStart:
                 anim.play("block".AsHaxeString(), null, null);
                 return true;
 
-            case ShieldActionKind.HoldEnd:
+            case ShieldIntentKind.HoldEnd:
                 this.RestoreAnim();
                 return true;
 
-            case ShieldActionKind.ParryStart:
+            case ShieldIntentKind.ParryStart:
                 anim.play("blockEnd".AsHaxeString(), null, null);
                 this.PlayParryFx(withText: false);
                 return true;
 
-            case ShieldActionKind.ParryEnd:
+            case ShieldIntentKind.ParryEnd:
                 this.RestoreAnim();
-                return true;
-
-            case ShieldActionKind.Block:
-                return true;
-
-            case ShieldActionKind.Counter:
-                anim.play("blockEnd".AsHaxeString(), null, null);
-                this.PlayParryFx(withText: true);
                 return true;
 
             default:

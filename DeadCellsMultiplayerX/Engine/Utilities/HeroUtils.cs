@@ -93,7 +93,6 @@ public static class HeroUtils
 
         loadout.Version = LoadoutCodec.ComputeVersion(loadout);
         spawn.Loadout = loadout;
-        spawn.Talisman = null;
 
         if (e.spr != null)
         {

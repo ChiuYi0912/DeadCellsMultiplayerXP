@@ -7,6 +7,7 @@ using DeadCellsMultiplayerX.Client.World.Heroes.Replay.Presenters;
 using DeadCellsMultiplayerX.Contracts.Actions;
 using DeadCellsMultiplayerX.Contracts.Snapshots;
 using DeadCellsMultiplayerX.Engine.Utilities;
+using DeadCellsMultiplayerX.Networking.Time;
 using Serilog;
 
 internal sealed class ClientReplayProxyManager(GuestClientSession session, string localGuid)
@@ -27,10 +28,12 @@ internal sealed class ClientReplayProxyManager(GuestClientSession session, strin
     /// </summary>
     private readonly Dictionary<string, ClientHeroReplayProxy> ghosts = [];
 
+    private readonly HeroOutcomeTimeline timeline = new();
+
     /// <summary>
-    /// 已释放的事件
+    /// 已释放的结果
     /// </summary>
-    private readonly HashSet<(string Caster, long ActionId)> appliedActions = [];
+    private readonly HashSet<(string Caster, long OutcomeId)> appliedActions = [];
 
     private int lastEpoch = int.MinValue;
 
@@ -53,6 +56,30 @@ internal sealed class ClientReplayProxyManager(GuestClientSession session, strin
 
         hero = null!;
         return false;
+    }
+
+    /// <summary>
+    /// 服务端完美格挡打断 mob 技能后，远端表现层停止该 mob 当前技能动画；
+    /// 位置/affect 仍以随后的 EntityDynamic 为准。
+    /// </summary>
+    internal void InterruptRemoteMobSkill(uint netId)
+    {
+        if (netId == 0)
+        {
+            return;
+        }
+
+        var world = this.Session.ClientWorld;
+        if (world?.TryGetRemoteMob(netId, out var mob) != true)
+        {
+            return;
+        }
+
+        var anim = mob.spr?.get_anim();
+        if (anim != null && !anim.destroyed)
+        {
+            anim.stopWithStateAnims();
+        }
     }
 
     /// <summary>
@@ -114,9 +141,14 @@ internal sealed class ClientReplayProxyManager(GuestClientSession session, strin
         }
 
         this.ghosts.Clear();
+        this.timeline.Clear();
     }
 
-    public void Tick(long nowMs) => this.SyncPositions(GuestClientSession.Game?.curLevel);
+    public void Tick(long nowMs)
+    {
+        this.SyncPositions(GuestClientSession.Game?.curLevel);
+        this.timeline.Drain(nowMs, this.Present);
+    }
 
     public void SyncPositions(Level? level)
     {
@@ -186,14 +218,60 @@ internal sealed class ClientReplayProxyManager(GuestClientSession session, strin
             this.appliedActions.Clear();
         }
 
-        if (frame.Actions == null || frame.Actions.Count == 0)
+        if (frame.HeroOutcomes == null || frame.HeroOutcomes.Count == 0)
         {
             return;
         }
 
+        foreach (var outcome in frame.HeroOutcomes)
+        {
+            if (outcome == null)
+            {
+                continue;
+            }
+
+            if (outcome.Epoch != frame.Epoch)
+            {
+                continue;
+            }
+
+            if (outcome.Status != HeroOutcomeStatus.Executed)
+            {
+                continue;
+            }
+
+            if (!this.appliedActions.Add((outcome.CasterGuid, outcome.OutcomeId)))
+            {
+                continue;
+            }
+
+            if (string.Equals(outcome.CasterGuid, this.LocalGuid, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (frame.ServerTimeMs - outcome.ServerTimeMs > MAX_EVENT_AGE_MS)
+            {
+                continue;
+            }
+
+            if (outcome.Slot is < 0 or > 1)
+            {
+                continue;
+            }
+
+            this.timeline.Enqueue(
+                frame,
+                outcome,
+                outcome.ServerTimeMs + SnapshotTiming.INTERPOLATION_DELAY_MS);
+        }
+    }
+
+    private void Present(WorldFrame frame, HeroOutcome outcome)
+    {
         var game = GuestClientSession.Game;
         var level = game?.curLevel;
-        if (game == null || level == null)
+        if (level == null)
         {
             return;
         }
@@ -201,75 +279,45 @@ internal sealed class ClientReplayProxyManager(GuestClientSession session, strin
         var levelId = level.map?.id?.ToString() ?? string.Empty;
         var subLevelIndex = level.GetSubLevelIndex();
 
-        foreach (var evt in frame.Actions)
+        if (outcome.LevelId != levelId
+            || outcome.SubLevelIndex != subLevelIndex)
         {
-            if (evt == null)
-            {
-                continue;
-            }
-
-            if (evt.Epoch != frame.Epoch)
-            {
-                continue;
-            }
-
-            if (!this.appliedActions.Add((evt.CasterGuid, evt.ActionId)))
-            {
-                continue;
-            }
-
-            if (string.Equals(evt.CasterGuid, this.LocalGuid, StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            if (frame.ServerTimeMs - evt.ServerTimeMs > MAX_EVENT_AGE_MS)
-            {
-                continue;
-            }
-
-            if (evt.LevelId != levelId || evt.SubLevelIndex != subLevelIndex)
-            {
-                continue;
-            }
-
-            if (evt.Slot is < 0 or > 1)
-            {
-                continue;
-            }
-
-            // ClientHeroReplayProxy 生命周期由 RemoteHeroManager 管理 这里只重放已存在的实例
-            if (!this.TryGet(evt.CasterGuid, out var ghost))
-            {
-                continue;
-            }
-
-            if (!ghost.MatchesLevel(level))
-            {
-                this.Remove(evt.CasterGuid);
-                continue;
-            }
-
-            ghost.SetTransform(
-                evt.CX, evt.CY, evt.XR, evt.YR, evt.Dir, evt.DX, evt.DY);
-            ghost.SetTiers(
-                evt.BrutalityTier, evt.SurvivalTier, evt.TacticTier);
-
-            if (!this.presenters.TryGetValue(evt.Kind, out var presenter))
-            {
-                Logger.Debug(
-                    "No presenter for action kind {Kind}: caster={Caster}",
-                    evt.Kind, evt.CasterGuid);
-                continue;
-            }
-
-            presenter.Present(this, frame, evt, ghost);
+            return;
         }
+
+        // ClientHeroReplayProxy 生命周期由 RemoteHeroManager 管理 这里只重放已存在的实例
+        if (!this.TryGet(outcome.CasterGuid, out var ghost))
+        {
+            return;
+        }
+
+        if (!ghost.MatchesLevel(level))
+        {
+            this.Remove(outcome.CasterGuid);
+            return;
+        }
+
+        ghost.SetTransform(
+            outcome.CX, outcome.CY, outcome.XR, outcome.YR,
+            outcome.Dir, outcome.DX, outcome.DY);
+        ghost.SetTiers(
+            outcome.BrutalityTier, outcome.SurvivalTier, outcome.TacticTier);
+
+        if (!this.presenters.TryGetValue(outcome.Kind, out var presenter))
+        {
+            Logger.Debug(
+                "No presenter for action kind {Kind}: caster={Caster}",
+                outcome.Kind, outcome.CasterGuid);
+            return;
+        }
+
+        presenter.Present(this, frame, outcome, ghost);
     }
 
     public void Dispose()
     {
         this.Clear();
         this.appliedActions.Clear();
+        this.timeline.Clear();
     }
 }

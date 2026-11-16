@@ -57,9 +57,9 @@ internal sealed class GhostWeapons(GhostActionContext context)
 
 
     /// <summary>
-    /// 重放一次武器连招段
+    /// 执行一次武器连招段；PresentOnly 模式下所有命中被显式降级为表现。
     /// </summary>
-    public bool Use(int slot, int cycle)
+    public bool Use(int slot, int cycle, HitPresentationMode mode)
     {
         var weapon = this.weapons[slot];
         if (weapon == null)
@@ -73,22 +73,20 @@ internal sealed class GhostWeapons(GhostActionContext context)
         var ranged = weapon.isBow() || weapon.item?.hasTag("Ranged".AsHaxeString()) == true;
         var candidates = this.CaptureOpponents(weapon, slot, ranged);
 
-        GhostReplayGuard.BeginVisualBatch();
-        try
-        {
-            weapon._executeImpl(1.0);
+        using var scope = mode == HitPresentationMode.PresentOnly
+            ? HitPresentationScope.Begin()
+            : null;
 
-            if (!ranged)
-            {
-                this.FallbackHits(weapon, candidates, slot);
-            }
-        }
-        finally
+        weapon._executeImpl(1.0);
+
+        if (!ranged)
         {
-            GhostReplayGuard.EndVisualBatch();
+            this.FallbackHits(weapon, candidates, slot);
         }
 
-        this.context.LogActionDelta("weapon", slot, before);
+        this.context.LogActionDelta(
+            mode == HitPresentationMode.PresentOnly ? "replay" : "weapon",
+            slot, before);
         return true;
     }
 
@@ -193,17 +191,12 @@ internal sealed class GhostWeapons(GhostActionContext context)
                 continue;
             }
 
-            // 客户端只表现时不扣血，用本次批次内的已命中标记避免重复 onDamage
-            if (GhostReplayGuard.WasVisualHit(mob))
-            {
-                continue;
-            }
-
             if (!weapon.canHit(mob, null))
             {
                 continue;
             }
 
+            // 服务端真实结算；客户端在 HitPresentationScope 内只触发受击表现。
             weapon.hitFromWeapon(mob, Ref<int>.In(-1));
             hits++;
             if (hits > 0)
@@ -228,13 +221,6 @@ internal sealed class GhostWeapons(GhostActionContext context)
         this.weapons[slot] = null;
     }
 
-    /// <summary>
-    /// 预留给后续武器状态 tick
-    /// </summary>
-    public static void Tick(double dt)
-    {
-    }
-
     public void Dispose()
     {
         for (var i = 0; i < this.weapons.Length; i++)
@@ -245,53 +231,4 @@ internal sealed class GhostWeapons(GhostActionContext context)
         this.loadout.Clear();
     }
 
-#if DEBUG
-    /// <summary>
-    /// 手动触发：打印 Ghost 武器附近可命中的怪物数量
-    /// </summary>
-    public void Diagnose(int slot)
-    {
-        var weapon = this.Get(slot);
-
-        var team = this.context.Hero._team;
-
-        var nearby = 0;
-        var hittable = 0;
-        var life = 0;
-
-        var iterator = team.opponentMobsIterator.reset(team);
-        var guard = 0;
-
-        while (iterator.hasNext() && guard++ < 512)
-        {
-            var mob = iterator.next();
-            if (mob == null || mob.destroyed || mob.life <= 0)
-            {
-                continue;
-            }
-
-            var dx = mob.cx - this.context.Hero.cx;
-            var dy = mob.cy - this.context.Hero.cy;
-            if ((dx * dx) + (dy * dy) > 144)
-            {
-                continue;
-            }
-
-            nearby++;
-            life += mob.life;
-
-            if (weapon!.canHit(mob, null))
-            {
-                hittable++;
-            }
-        }
-
-        Logger.Information(
-            "GhostHero weapon diag: owner={Owner} slot={Slot} dir={Dir} " +
-            "pos=({CX},{CY}) nearby={Nearby} hittable={Hittable} life={Life}",
-            this.context.OwnerGuid, slot, this.context.Hero.dir,
-            this.context.Hero.cx, this.context.Hero.cy,
-            nearby, hittable, life);
-    }
-#endif
 }

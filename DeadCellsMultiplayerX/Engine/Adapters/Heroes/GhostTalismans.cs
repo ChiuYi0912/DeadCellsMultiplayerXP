@@ -89,13 +89,6 @@ internal sealed class GhostTalismans(GhostActionContext context)
     }
 
     /// <summary>
-    /// 预留给后续项链状态 tick
-    /// </summary>
-    public static void Tick(double dt)
-    {
-    }
-
-    /// <summary>
     /// GhostHero 销毁时清空签名
     /// </summary>
     public void Dispose() => this.signature = null;

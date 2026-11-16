@@ -11,9 +11,13 @@ internal static class ServerShieldHookBinding
     public static IDisposable Install(IServerShieldHookSink sink)
     {
         Hook_BaseShield.counterGrenade += sink.OnCounterGrenade;
+        Hook_BaseShield.onShieldBlock += sink.OnShieldBlock;
+        Hook_BaseShield.shieldCounterAttack += sink.OnShieldCounterAttack;
 
         var group = new HookGroup();
         group.Add(new HookLease(() => Hook_BaseShield.counterGrenade -= sink.OnCounterGrenade));
+        group.Add(new HookLease(() => Hook_BaseShield.onShieldBlock -= sink.OnShieldBlock));
+        group.Add(new HookLease(() => Hook_BaseShield.shieldCounterAttack -= sink.OnShieldCounterAttack));
         return group;
     }
 }

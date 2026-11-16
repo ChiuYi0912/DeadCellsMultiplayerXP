@@ -22,7 +22,7 @@ internal sealed class ClientHeroReplayProxy : IGhostEntity
     {
         this.Hero = hero;
         this.OwnerGuid = ownerGuid;
-        this.Actions = new ClientHeroActionRuntime(hero, ownerGuid);
+        this.Actions = new ClientHeroPresentationRuntime(hero, ownerGuid);
         this.LevelKey = LevelUtils.KeyOf(hero._level);
     }
 
@@ -30,7 +30,7 @@ internal sealed class ClientHeroReplayProxy : IGhostEntity
 
     public string OwnerGuid { get; }
 
-    public ClientHeroActionRuntime Actions { get; }
+    public ClientHeroPresentationRuntime Actions { get; }
 
     public bool IsAlive => this.Hero != null && !this.Hero.destroyed;
 

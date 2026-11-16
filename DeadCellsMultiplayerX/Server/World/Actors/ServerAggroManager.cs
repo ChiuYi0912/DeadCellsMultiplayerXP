@@ -146,9 +146,9 @@ internal sealed class ServerAggroManager(
 
         // 先按 Ghost 校验, mob 上下文里 game.hero 会被临时指向 Ghost，
         // 不能再把这个 Ghost 当成服务端假人改掉
-        if (this.teams.TryGet(requested, out var combatant))
+        if (this.teams.TryGet(requested, out var hero))
         {
-            if (IsValidTarget(mob, combatant))
+            if (IsValidTarget(mob, hero))
             {
                 return false;
             }
@@ -191,9 +191,9 @@ internal sealed class ServerAggroManager(
             return;
         }
 
-        if (this.teams.TryGet(target, out var combatant))
+        if (this.teams.TryGet(target, out var hero))
         {
-            if (!IsValidTarget(mob, combatant))
+            if (!IsValidTarget(mob, hero))
             {
                 ClearTarget(mob, target);
             }
@@ -222,9 +222,9 @@ internal sealed class ServerAggroManager(
 
         // Ghost 在 mob 上下文里可能就是 game.hero
         // 必须先用 Ghost 身份校验
-        if (this.teams.TryGet(nemesis, out var combatant))
+        if (this.teams.TryGet(nemesis, out var hero))
         {
-            if (!IsValidTarget(mob, combatant))
+            if (!IsValidTarget(mob, hero))
             {
                 mob.clearNemesisTarget();
             }
@@ -244,25 +244,25 @@ internal sealed class ServerAggroManager(
     private bool IsUsableGhostHero(Hero? hero)
         => hero != null
             && !hero.destroyed
-            && this.teams.TryGet(hero, out var combatant)
-            && IsValidGhost(combatant);
+            && this.teams.TryGet(hero, out var found)
+            && IsValidGhost(found);
 
     /// <summary>
     /// Ghost 是否可作为该 mob 的合法目标（存活、同关卡）
     /// </summary>
-    private static bool IsValidTarget(Mob mob, ServerHeroCombatView combatant)
-        => IsValidGhost(combatant)
-            && ReferenceEquals(combatant.Level, mob._level);
+    private static bool IsValidTarget(Mob mob, ServerHero hero)
+        => IsValidGhost(hero)
+            && ReferenceEquals(hero.Level, mob._level);
 
     /// <summary>
     /// Ghost 是否处于可被 mob 选中的战斗状态
     /// </summary>
-    private static bool IsValidGhost(ServerHeroCombatView combatant)
-        => combatant != null
-            && combatant.CombatEnabled
-            && !combatant.IsDead
-            && combatant.Life > 0
-            && combatant.Entity is { destroyed: false };
+    private static bool IsValidGhost(ServerHero hero)
+        => hero != null
+            && hero.CombatEnabled
+            && !hero.IsDead
+            && hero.Life > 0
+            && hero.Entity is { destroyed: false };
 
     /// <summary>
     /// 清除对目标的仇恨并解除 mob 的攻击目标

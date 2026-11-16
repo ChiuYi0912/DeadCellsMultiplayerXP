@@ -56,9 +56,9 @@ public class WorldFrame
     [Key(8)] public List<EntityDespawn> DespawnedEntities { get; set; } = [];
 
     /// <summary>
-    /// 本帧服务端确认的英雄动作（主动技能/武器）
+    /// 本帧服务端确认的英雄动作结果
     /// </summary>
-    [Key(9)] public List<HeroActionEvent> Actions { get; set; } = [];
+    [Key(9)] public List<HeroOutcome> HeroOutcomes { get; set; } = [];
 
     /// <summary>
     /// 服务端权威的动态关卡区域状态

@@ -26,11 +26,10 @@ internal sealed partial class GuestClientSession(GuestClient client, Stream serv
     IGuestRPC,
     IOnFrameUpdate,
     IOnLocalHeroPostUpdate,
-    IOnLocalHeroInitDone,
-    IHeroActionSink
+    IOnLocalHeroInitDone
 {
     /// <summary>
-    /// 仅用于统计世界帧序列化大小
+    /// 用于统计世界帧序列化大小
     /// </summary>
     private static readonly MessagePackSerializer FrameSizeSerializer = new();
 
@@ -40,10 +39,10 @@ internal sealed partial class GuestClientSession(GuestClient client, Stream serv
     private GuestHookSession? hookSession;
 
     private LocalActionCapture? localCapture;
-    private LocalCombatPrediction? prediction;
     private CombatDeathGate? deathGate;
 
     private volatile bool serverDrivenTransition;
+    private volatile bool serverReady;
 
     /// <summary>
     /// 受击表现调用深度 防止 Mob.onDamage 内部再次触发命中时递归
@@ -74,14 +73,13 @@ internal sealed partial class GuestClientSession(GuestClient client, Stream serv
 
     internal ClientWorld? ClientWorld { get; private set; }
 
-    /// <summary>
-    /// 本地武器命中预测
-    /// </summary>
-    internal LocalCombatPrediction Prediction
-        => this.prediction ?? throw new InvalidOperationException();
-
     internal CombatDeathGate DeathGate
         => this.deathGate ?? throw new InvalidOperationException();
+
+    /// <summary>
+    /// 尚未被服务端 Outcome 确认的动作命令数。
+    /// </summary>
+    internal int PendingCommands => this.localCapture?.Commands.PendingCount ?? 0;
 
     private bool IsReady => this.server != null;
 
@@ -89,6 +87,8 @@ internal sealed partial class GuestClientSession(GuestClient client, Stream serv
         client.Guid,
         () => this.SyncedTimeMs,
         frame => this.server?.UploadClientWorldFrame(frame) ?? Task.CompletedTask,
+        nowMs => this.localCapture?.Commands.DrainPending(nowMs) ?? [],
+        () => this.serverReady,
         this.Logger);
 
     private GuestWorldLoader WorldLoader => field ??= new GuestWorldLoader(
@@ -103,8 +103,7 @@ internal sealed partial class GuestClientSession(GuestClient client, Stream serv
     {
         this.Client = client;
         this.deathGate = new CombatDeathGate();
-        this.prediction = new LocalCombatPrediction(this);
-        this.localCapture = new LocalActionCapture(this, this);
+        this.localCapture = new LocalActionCapture(this);
         this.localCapture.Init();
 
         this.InitHooks(this.deathGate);
@@ -118,7 +117,13 @@ internal sealed partial class GuestClientSession(GuestClient client, Stream serv
             serverStream,
             client,
             this.Rpc_Disconnected,
-            this.Logger
+            this.Logger,
+            result =>
+            {
+                this.rpc = result.Rpc;
+                this.server = result.Server;
+                this.serverReady = true;
+            }
         );
 
         if (handshake == null)
@@ -129,8 +134,6 @@ internal sealed partial class GuestClientSession(GuestClient client, Stream serv
 
         this.rpc = handshake.Rpc;
         this.server = handshake.Server;
-
-        this.Uploader.SetServerReady(true);
     }
 
     /// <summary>
@@ -199,8 +202,29 @@ internal sealed partial class GuestClientSession(GuestClient client, Stream serv
 
         this.ObserveWorldEpoch(frame.Epoch);
         this.ObserveServerTime((long)frame.ServerTimeMs);
+        this.AcknowledgeCommands(frame);
         this.ClientWorld?.OnWorldFrame(frame);
         return Task.CompletedTask;
+    }
+
+    private void AcknowledgeCommands(WorldFrame frame)
+    {
+        if (frame.HeroOutcomes == null
+            || frame.HeroOutcomes.Count == 0
+            || this.localCapture == null)
+        {
+            return;
+        }
+
+        foreach (var outcome in frame.HeroOutcomes)
+        {
+            if (outcome != null
+                && outcome.Cause == HeroOutcomeCause.Command
+                && outcome.CommandId > 0)
+            {
+                this.localCapture.Commands.Acknowledge(outcome.CommandId);
+            }
+        }
     }
 
     /// <summary>
@@ -209,7 +233,11 @@ internal sealed partial class GuestClientSession(GuestClient client, Stream serv
     public Task<ClientFrameBundle> RequestClientFrames(ClientFrameRangeRequest request)
         => Task.FromResult(this.Uploader.BuildBundle(request));
 
-    internal void ObserveWorldEpoch(int epoch) => this.Uploader.SetEpoch(epoch);
+    internal void ObserveWorldEpoch(int epoch)
+    {
+        this.Uploader.SetEpoch(epoch);
+        this.localCapture?.ObserveEpoch(epoch);
+    }
 
     internal void ObserveServerTime(long serverTimeMs) => this.Clock.ObserveServerTime(serverTimeMs);
 
@@ -284,11 +312,8 @@ internal sealed partial class GuestClientSession(GuestClient client, Stream serv
 
     void IOnLocalHeroInitDone.OnHeroInitDone(Hero hero) => this.Uploader.ResetLocalHeroState();
 
-    Task IHeroActionSink.SubmitHeroAction(HeroAction action) => this.server.SubmitHeroAction(action);
-
     private ClientWorld ReplaceWorld()
     {
-        this.prediction?.Clear();
         this.deathGate?.Clear();
         this.ClientWorld?.Dispose();
         this.ClientWorld = new ClientWorld(this, client.Guid);

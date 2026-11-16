@@ -13,19 +13,19 @@ internal sealed class SkillActionPresenter : IActionPresenter
     public bool Present(
         ClientReplayProxyManager manager,
         WorldFrame frame,
-        HeroActionEvent evt,
+        HeroOutcome outcome,
         ClientHeroReplayProxy ghost)
     {
-        if (!ghost.Actions.PrepareSkill(evt.Slot, evt.Item))
+        if (!ghost.Actions.PrepareSkill(outcome.Slot, outcome.Item))
         {
             return false;
         }
 
-        if (!ghost.Actions.ReplaySkill(evt.Slot))
+        if (!ghost.Actions.ReplaySkill(outcome.Slot))
         {
             Logger.Warning(
                 "Skill replay failed: caster={Caster} slot={Slot} item={Item}",
-                evt.CasterGuid, evt.Slot, evt.Item?.ItemId);
+                outcome.CasterGuid, outcome.Slot, outcome.Item?.ItemId);
             return false;
         }
 
@@ -42,44 +42,19 @@ internal sealed class WeaponActionPresenter : IActionPresenter
     public bool Present(
         ClientReplayProxyManager manager,
         WorldFrame frame,
-        HeroActionEvent evt,
+        HeroOutcome outcome,
         ClientHeroReplayProxy ghost)
     {
-        if (!ghost.Actions.PrepareWeapon(evt.Slot, evt.Item))
+        if (!ghost.Actions.PrepareWeapon(outcome.Slot, outcome.Item))
         {
             return false;
         }
 
-        if (!ghost.Actions.UseWeapon(evt.Slot, evt.Cycle))
+        if (!ghost.Actions.UseWeapon(outcome.Slot, outcome.Cycle))
         {
             Logger.Warning(
                 "Weapon replay failed: caster={Caster} slot={Slot} item={Item}",
-                evt.CasterGuid, evt.Slot, evt.Item?.ItemId);
-            return false;
-        }
-
-        return true;
-    }
-}
-
-internal sealed class TalismanActionPresenter : IActionPresenter
-{
-    private static readonly ILogger Logger =
-        Log.ForContext("SourceContext", "TalismanActionPresenter");
-
-    public HeroActionKind Kind => HeroActionKind.Talisman;
-
-    public bool Present(
-        ClientReplayProxyManager manager,
-        WorldFrame frame,
-        HeroActionEvent evt,
-        ClientHeroReplayProxy ghost)
-    {
-        if (!ghost.Actions.ApplyTalisman(evt.Item))
-        {
-            Logger.Warning(
-                "Talisman replay failed: caster={Caster} item={Item}",
-                evt.CasterGuid, evt.Item?.ItemId);
+                outcome.CasterGuid, outcome.Slot, outcome.Item?.ItemId);
             return false;
         }
 
@@ -97,26 +72,31 @@ internal sealed class ShieldActionPresenter : IActionPresenter
     public bool Present(
         ClientReplayProxyManager manager,
         WorldFrame frame,
-        HeroActionEvent evt,
+        HeroOutcome outcome,
         ClientHeroReplayProxy ghost)
     {
-        if (!manager.TryGetRemoteHero(evt.CasterGuid, out var remoteHero))
+        if (outcome.Shield == null)
         {
             return false;
         }
 
-        var elapsedMs = Math.Max(
-            0, frame.ServerTimeMs - evt.ServerTimeMs);
+        if (!manager.TryGetRemoteHero(outcome.CasterGuid, out var remoteHero))
+        {
+            return false;
+        }
 
-        if (!remoteHero.ApplyShieldVisual(
-                evt.ShieldKind, evt.Slot, evt.Item,
-                evt.FullParry, elapsedMs))
+        if (!remoteHero.ApplyShieldVisual(outcome.Shield))
         {
             Logger.Warning(
                 "Shield visual replay failed: caster={Caster} " +
-                "slot={Slot} kind={Kind}",
-                evt.CasterGuid, evt.Slot, evt.ShieldKind);
+                "slot={Slot} block={Block}",
+                outcome.CasterGuid, outcome.Slot, outcome.Shield.BlockKind);
             return false;
+        }
+
+        if (outcome.Shield.SkillInterrupted)
+        {
+            manager.InterruptRemoteMobSkill(outcome.Shield.SourceNetId);
         }
 
         return true;

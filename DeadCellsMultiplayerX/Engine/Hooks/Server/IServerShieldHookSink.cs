@@ -1,6 +1,7 @@
 namespace DeadCellsMultiplayerX.Engine.Hooks.Server;
 
 using dc.en;
+using dc.tool.atk;
 using dc.tool.weap;
 
 /// <summary>
@@ -12,4 +13,16 @@ internal interface IServerShieldHookSink
         Hook_BaseShield.orig_counterGrenade orig,
         BaseShield self,
         Grenade source);
+
+    public void OnShieldBlock(
+        Hook_BaseShield.orig_onShieldBlock orig,
+        BaseShield self,
+        AttackData sourceAtk,
+        bool fullParry);
+
+    public void OnShieldCounterAttack(
+        Hook_BaseShield.orig_shieldCounterAttack orig,
+        BaseShield self,
+        AttackData sourceAtk,
+        bool fullParry);
 }

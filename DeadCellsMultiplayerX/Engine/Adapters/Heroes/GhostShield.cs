@@ -2,7 +2,6 @@ namespace DeadCellsMultiplayerX.Engine.Adapters.Heroes;
 
 using dc.pr;
 using dc.tool;
-using dc.tool.atk;
 using dc.tool.weap;
 using DeadCellsMultiplayerX.Contracts.Actions;
 using Serilog;
@@ -27,15 +26,12 @@ internal sealed class GhostShield(GhostWeapons weapons)
     }
 
     /// <summary>
-    /// 重放一次盾牌动作
+    /// 把客户端相位重放到服务端隐形盾；格挡/反击由引擎原生判定。
     /// </summary>
     /// <param name="elapsedMs">事件已经过去的时间，用于缩短晚到的弹反窗口</param>
     public bool Apply(
-        ShieldActionKind kind,
+        ShieldIntentKind kind,
         int slot,
-        double ratio,
-        bool fullParry,
-        AttackData? sourceAtk,
         double elapsedMs = 0)
     {
         var shield = this.Get(slot);
@@ -46,31 +42,17 @@ internal sealed class GhostShield(GhostWeapons weapons)
 
         switch (kind)
         {
-            case ShieldActionKind.HoldStart:
+            case ShieldIntentKind.HoldStart:
                 return StartHold(shield);
 
-            case ShieldActionKind.HoldEnd:
+            case ShieldIntentKind.HoldEnd:
                 return EndHold(shield);
 
-            case ShieldActionKind.ParryStart:
+            case ShieldIntentKind.ParryStart:
                 return StartParry(shield, elapsedMs);
 
-            case ShieldActionKind.ParryEnd:
+            case ShieldIntentKind.ParryEnd:
                 shield.onShieldEndParry();
-                return true;
-
-            case ShieldActionKind.Block:
-                return true;
-
-            case ShieldActionKind.Counter:
-                if (sourceAtk == null)
-                {
-                    // 远端表现：没有真实 AttackData，只播放弹反成功反馈
-                    shield.triggerParryFeedbacks();
-                    return true;
-                }
-
-                shield.shieldCounterAttack(sourceAtk, fullParry);
                 return true;
 
             default:

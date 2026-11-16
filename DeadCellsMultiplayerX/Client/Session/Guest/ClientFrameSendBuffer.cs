@@ -1,8 +1,8 @@
 namespace DeadCellsMultiplayerX.Client.Session.Guest;
 
 using dc.en;
+using DeadCellsMultiplayerX.Contracts.Actions;
 using DeadCellsMultiplayerX.Contracts.Snapshots;
-
 using DeadCellsMultiplayerX.Engine.Utilities;
 
 /// <summary>
@@ -10,8 +10,11 @@ using DeadCellsMultiplayerX.Engine.Utilities;
 /// 每帧采集本地世界状态
 /// 供服务端 NACK 补发
 /// </summary>
-internal sealed class ClientFrameSendBuffer
+internal sealed class ClientFrameSendBuffer(Func<long, IReadOnlyList<HeroCommand>> pendingCommands)
 {
+    private readonly Func<long, IReadOnlyList<HeroCommand>> pendingCommands = pendingCommands
+            ?? throw new ArgumentNullException(nameof(pendingCommands));
+
     /// <summary>
     /// 缓冲最大存储值
     /// </summary>
@@ -143,6 +146,7 @@ internal sealed class ClientFrameSendBuffer
             ClientTimeMs = this.capturedTimeMs,
             FrameId = frame,
             Heroes = [upload],
+            Commands = [.. this.pendingCommands(this.capturedTimeMs)],
         };
 
         this.history.Add(result);

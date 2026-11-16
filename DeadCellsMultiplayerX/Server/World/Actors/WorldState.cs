@@ -1,5 +1,6 @@
 namespace DeadCellsMultiplayerX.Server.World.Actors;
 
+using dc;
 using DeadCellsMultiplayerX.Contracts.Actions;
 
 /// <summary>
@@ -7,9 +8,11 @@ using DeadCellsMultiplayerX.Contracts.Actions;
 /// </summary>
 internal sealed class WorldState
 {
-    private readonly Dictionary<string, Actor> actors = [with(StringComparer.Ordinal)];
+    private readonly Dictionary<string, ServerHero> actors = [with(StringComparer.Ordinal)];
 
     private readonly EventJournal events = new();
+
+    private long nextOutcomeId;
 
     /// <summary>
     /// 当前动作 epoch；未开始时为 -1
@@ -17,41 +20,67 @@ internal sealed class WorldState
     public int Epoch { get; private set; } = -1;
 
     /// <summary>
+    /// 取得本 epoch 内唯一的动作结果 id。
+    /// </summary>
+    public long NextOutcomeId() => ++this.nextOutcomeId;
+
+    /// <summary>
     /// 实际持有 ServerHeroCombatProxy 的数量
     /// </summary>
     public int Count => this.actors.Values.Count(actor => actor.Ghost != null);
 
     /// <summary>
-    /// 全部客户端聚合，供 spawn 同步遍历
+    /// 全部客户端 Hero，供 spawn 同步遍历
     /// </summary>
-    public IReadOnlyCollection<Actor> Actors => this.actors.Values;
+    public IReadOnlyCollection<ServerHero> Actors => this.actors.Values;
 
     /// <summary>
     /// 按 guid 查找
     /// </summary>
-    public Actor? Find(string guid)
+    public ServerHero? Find(string guid)
     {
         if (string.IsNullOrEmpty(guid))
         {
             return null;
         }
 
-        return this.actors.TryGetValue(guid, out var actor) ? actor : null;
+        return this.actors.TryGetValue(guid, out var hero) ? hero : null;
     }
 
     /// <summary>
-    /// 获取或创建客户端聚合
+    /// 按底层可命中实体反查 Hero。
     /// </summary>
-    public Actor GetOrCreate(string guid)
+    public ServerHero? FindByHero(Entity? entity)
     {
-        if (this.actors.TryGetValue(guid, out var actor))
+        if (entity == null)
         {
-            return actor;
+            return null;
         }
 
-        actor = new Actor(guid);
-        this.actors[guid] = actor;
-        return actor;
+        foreach (var hero in this.actors.Values)
+        {
+            if (ReferenceEquals(hero.Ghost?.Hero, entity))
+            {
+                return hero;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// 获取或创建客户端 Hero
+    /// </summary>
+    public ServerHero GetOrCreate(string guid)
+    {
+        if (this.actors.TryGetValue(guid, out var hero))
+        {
+            return hero;
+        }
+
+        hero = new ServerHero(guid);
+        this.actors[guid] = hero;
+        return hero;
     }
 
     /// <summary>
@@ -68,13 +97,14 @@ internal sealed class WorldState
     /// </summary>
     public void Reset()
     {
-        foreach (var actor in this.actors.Values)
+        foreach (var hero in this.actors.Values)
         {
-            actor.Dispose();
+            hero.Dispose();
         }
 
         this.actors.Clear();
         this.events.Clear();
+        this.nextOutcomeId = 0;
     }
 
     /// <summary>
@@ -87,21 +117,21 @@ internal sealed class WorldState
             return;
         }
 
-        if (this.actors.Remove(guid, out var actor))
+        if (this.actors.Remove(guid, out var hero))
         {
-            actor.Dispose();
+            hero.Dispose();
         }
     }
 
     /// <summary>
-    /// 记录一次已执行成功的事件
+    /// 记录一次动作结果
     /// </summary>
-    public void RecordEvent(HeroActionEvent actionEvent)
-        => this.events.Record(actionEvent);
+    public void RecordEvent(HeroOutcome outcome)
+        => this.events.Record(outcome);
 
     /// <summary>
-    /// 取出本帧全部事件
+    /// 取出本帧全部结果
     /// </summary>
-    public List<HeroActionEvent> DrainEvents()
+    public List<HeroOutcome> DrainEvents()
         => this.events.Drain();
 }

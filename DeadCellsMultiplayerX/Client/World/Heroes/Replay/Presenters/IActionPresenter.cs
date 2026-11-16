@@ -10,6 +10,6 @@ internal interface IActionPresenter
     public bool Present(
         ClientReplayProxyManager manager,
         WorldFrame frame,
-        HeroActionEvent evt,
+        HeroOutcome outcome,
         ClientHeroReplayProxy ghost);
 }

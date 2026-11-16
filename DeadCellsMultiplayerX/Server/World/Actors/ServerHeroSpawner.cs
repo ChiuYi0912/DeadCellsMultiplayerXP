@@ -22,7 +22,7 @@ internal sealed class ServerHeroSpawner(
     /// <summary>
     /// 确保 guid 对应的 Ghost 在状态所在关卡存在；返回 null 表示当前不可创建。
     /// </summary>
-    public Actor? Ensure(
+    public ServerHero? Ensure(
         Game game, string guid, HeroDynamic state, out Level? level)
     {
         level = null;
@@ -39,20 +39,20 @@ internal sealed class ServerHeroSpawner(
             return null;
         }
 
-        var actor = this.world.GetOrCreate(guid);
-        var created = actor.EnsureGhost(
+        var hero = this.world.GetOrCreate(guid);
+        var created = hero.EnsureGhost(
             game, level, state.Pos.CX, state.Pos.CY);
 
-        if (actor.Ghost == null)
+        if (hero.Ghost == null)
         {
             return null;
         }
 
         if (created)
         {
-            this.spawns.Sync(actor);
+            this.spawns.Sync(hero);
         }
 
-        return actor;
+        return hero;
     }
 }

@@ -1,5 +1,5 @@
 
-namespace DeadCellsMultiplayerX.Tools;
+namespace DeadCellsMultiplayerX.Engine.Utilities;
 
 using dc.hl;
 using DeadCellsMultiplayerX.Engine.Native;

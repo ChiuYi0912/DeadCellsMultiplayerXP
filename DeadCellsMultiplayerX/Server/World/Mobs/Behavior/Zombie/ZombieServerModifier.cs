@@ -54,7 +54,7 @@ internal sealed class ZombieServerModifier(
                     NetId = netId,
                     EntityKind = EntityKind.Mob,
                     Kind = MobModifierEventKind.ActionStarted,
-                    TargetGuid = combatant.Guid,
+                    TargetGuid = combatant.OwnerGuid,
                     SkillId = skill.id.ToString(),
                     SkillRatio = data,
                     ServerTimeMs = this.session.CurrentTimeStamp,

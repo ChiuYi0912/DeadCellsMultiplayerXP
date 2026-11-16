@@ -130,8 +130,6 @@ internal sealed class ClientMobReplicator(
         uint netId, object? native,
         EntityDespawnReason reason)
     {
-        this.session.Prediction.ConfirmDespawn(netId);
-
         if (native is Mob mob)
         {
             this.mobModifiers.Detach(mob);
@@ -155,13 +153,7 @@ internal sealed class ClientMobReplicator(
         }
 
         this.affectState.Remove(netId);
-        this.session.Prediction.OnRemoved(netId);
     }
-
-    /// <inheritdoc />
-    public void BeforeSpawns(WorldFrame frame) =>
-        // 必须在移除之前确认，避免预测死亡的 mob 已被移除
-        this.session.Prediction.ConfirmFrame(frame);
 
     /// <inheritdoc />
     public void AfterSpawns(WorldFrame frame)
@@ -219,8 +211,6 @@ internal sealed class ClientMobReplicator(
     /// <inheritdoc />
     public void Tick(long nowMs)
     {
-        this.session.Prediction.Tick(nowMs);
-
         var nowSec = this.session.SyncedTimeMs / 1000.0;
 
         foreach (var mob in this.Receiver.All)
@@ -265,12 +255,8 @@ internal sealed class ClientMobReplicator(
 
             var serverLife = (int)Math.Round(
                 prev.Life + ((next.Life - prev.Life) * alpha));
-            var renderTimeMs = (long)Math.Round(renderTimeSec * 1000);
 
-            var life = this.session.Prediction.ResolveLife(
-                netId, serverLife, renderTimeMs);
-
-            mob.life = life;
+            mob.life = serverLife;
             mob.maxLife = next.MaxLife;
         }
     }
@@ -278,8 +264,6 @@ internal sealed class ClientMobReplicator(
     /// <inheritdoc />
     public void OnEpochReset()
     {
-        this.session.Prediction.Clear();
-
         // 原生 Mob 的统一销毁由 ClientEntityStore.Clear → Despawn 负责。
         this.affectState.Reset();
         this.authoritativeLevels.Clear();
@@ -305,7 +289,6 @@ internal sealed class ClientMobReplicator(
                 continue;
             }
 
-            this.session.Prediction.ConfirmDespawn(dynamic.NetId);
             this.session.ForceNativeDeath(mob);
         }
     }
@@ -320,12 +303,6 @@ internal sealed class ClientMobReplicator(
             if (dynamic == null
                 || dynamic.Kind != EntityKind.Mob
                 || dynamic.Life <= 0)
-            {
-                continue;
-            }
-
-            // 本地预测致死还未确认前，服务端旧帧仍可能显示存活
-            if (this.session.Prediction.HasPendingDeathPrediction(dynamic.NetId))
             {
                 continue;
             }
@@ -374,8 +351,6 @@ internal sealed class ClientMobReplicator(
 
         this.affectState.ApplySnapshot(
             dynamic.NetId, mob, dynamic.Affects, nowSec);
-
-        this.session.Prediction.ClearNetId(dynamic.NetId);
     }
 
     /// <inheritdoc />

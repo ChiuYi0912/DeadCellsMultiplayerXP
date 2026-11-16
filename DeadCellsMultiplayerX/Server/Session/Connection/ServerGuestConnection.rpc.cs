@@ -2,7 +2,6 @@ namespace DeadCellsMultiplayerX.Server.Session.Connection;
 
 using dc;
 using dc.en;
-using DeadCellsMultiplayerX.Contracts.Actions;
 using DeadCellsMultiplayerX.Contracts.Lobby;
 using DeadCellsMultiplayerX.Contracts.Protocol;
 using DeadCellsMultiplayerX.Contracts.Snapshots;
@@ -40,7 +39,7 @@ internal sealed partial class ServerGuestConnection : IServerRPC
                 $"server={ProtocolVersion.Major}";
             this.Logger.Warning(
                 "Protocol rejected: guid={Guid} {Reason}",
-                this.GuestInfo.Guid, response.Reason);
+                this.ConnectionGuid, response.Reason);
             return Task.FromResult(response);
         }
 
@@ -51,7 +50,7 @@ internal sealed partial class ServerGuestConnection : IServerRPC
                 $"server={ProtocolVersion.Minor}";
             this.Logger.Warning(
                 "Protocol rejected: guid={Guid} {Reason}",
-                this.GuestInfo.Guid, response.Reason);
+                this.ConnectionGuid, response.Reason);
             return Task.FromResult(response);
         }
 
@@ -63,7 +62,7 @@ internal sealed partial class ServerGuestConnection : IServerRPC
                 $"required=0x{ProtocolVersion.RequiredCapabilities:X}";
             this.Logger.Warning(
                 "Protocol rejected: guid={Guid} {Reason}",
-                this.GuestInfo.Guid, response.Reason);
+                this.ConnectionGuid, response.Reason);
             return Task.FromResult(response);
         }
 
@@ -73,7 +72,7 @@ internal sealed partial class ServerGuestConnection : IServerRPC
             "Protocol accepted: guid={Guid} mod={ModVersion} " +
             "client={ClientMajor}.{ClientMinor} server={ServerMajor}.{ServerMinor} " +
             "caps=0x{Capabilities:X}",
-            this.GuestInfo.Guid, request.ModVersion,
+            this.ConnectionGuid, request.ModVersion,
             request.MAJOR, request.MINOR,
             ProtocolVersion.Major, ProtocolVersion.Minor,
             request.Capabilities);
@@ -85,7 +84,9 @@ internal sealed partial class ServerGuestConnection : IServerRPC
     {
         if (Version.Parse(version) != VersionUtils.ModVersion)
         {
-            this.Logger.Error("Dismatch version: {ver}", this.GuestInfo.Guid, version);
+            this.Logger.Error(
+                "Dismatch version: guid={Guid} ver={Ver}",
+                this.ConnectionGuid, version);
             Task.Delay(TimeSpan.FromSeconds(5)).ContinueWith(_ =>
             {
                 if (this.rpc == null)
@@ -104,6 +105,22 @@ internal sealed partial class ServerGuestConnection : IServerRPC
 
     public Task SetGuestInfo(GuestInfo info)
     {
+        if (info == null)
+        {
+            return Task.CompletedTask;
+        }
+
+        // 连接身份来自握手，不能被后续客户端消息改写；
+        // 否则帧/动作会归属到另一个 ServerHero。
+        if (!string.Equals(info.Guid, this.ConnectionGuid, StringComparison.Ordinal))
+        {
+            this.Logger.Warning(
+                "Guest info GUID mismatch: connection={Connection} reported={Reported}; " +
+                "keeping connection GUID",
+                this.ConnectionGuid, info.Guid);
+            info.Guid = this.ConnectionGuid;
+        }
+
         this.GuestInfo = info;
         return Task.CompletedTask;
     }
@@ -223,7 +240,7 @@ internal sealed partial class ServerGuestConnection : IServerRPC
 
     public Task UploadClientWorldFrame(ClientWorldFrame frame)
     {
-        this.Session.ClientFrames.OnFrame(this.GuestInfo.Guid, frame);
+        this.Session.ClientFrames.OnFrame(this.ConnectionGuid, frame);
         return Task.CompletedTask;
     }
 
@@ -231,9 +248,4 @@ internal sealed partial class ServerGuestConnection : IServerRPC
 
     public Task<WorldResync> RequestWorldResync(int knownEpoch) => Task.FromResult(this.Session.Broadcaster.BuildResync(this.Session.CurrentTimeStamp));
 
-    public Task SubmitHeroAction(HeroAction request)
-    {
-        this.Session.HandleHeroAction(this.GuestInfo.Guid, request);
-        return Task.CompletedTask;
-    }
 }

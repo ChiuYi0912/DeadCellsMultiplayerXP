@@ -20,7 +20,7 @@ internal sealed class ServerHookBootstrap(ServerMain server) : IDisposable
         this.group.Add(ServerMobHookBinding.Install(new ServerMobHookRouter(this.server)));
         this.group.Add(ServerHeroHookBinding.Install(new ServerHeroHookRouter(this.server)));
         this.group.Add(ServerCombatHookBinding.Install(new ServerCombatHookRouter()));
-        this.group.Add(ServerShieldHookBinding.Install(new ServerShieldHookRouter()));
+        this.group.Add(ServerShieldHookBinding.Install(new ServerShieldHookRouter(this.server)));
         this.group.Add(ServerPowerHookBinding.Install(new ServerPowerHookRouter()));
         this.group.Add(ServerLevelHookBinding.Install(new ServerLevelHookRouter(this.server)));
     }

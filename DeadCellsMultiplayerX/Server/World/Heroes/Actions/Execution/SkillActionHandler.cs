@@ -1,47 +1,68 @@
 namespace DeadCellsMultiplayerX.Server.World.Heroes.Actions.Execution;
 
 using DeadCellsMultiplayerX.Contracts.Actions;
-using DeadCellsMultiplayerX.Server.World.Actors;
+using DeadCellsMultiplayerX.Server.World.Heroes.Actions.Commands;
 using DeadCellsMultiplayerX.Server.World.Heroes.Actions.Modules;
 using DeadCellsMultiplayerX.Simulation.Actions;
 using Serilog;
 
-internal sealed class SkillActionHandler : IServerActionModule
+internal sealed class SkillActionHandler : IHeroActionModule
 {
-    private static readonly ILogger Logger = Log.ForContext("SourceContext", "ServerActorManager");
+    private static readonly ILogger Logger =
+        Log.ForContext("SourceContext", "SkillActionHandler");
 
-    public ActionDescriptor Descriptor { get; } =
+    public HeroActionRules Rules { get; } =
         new(HeroActionKind.ActiveSkill, SlotPolicy.Active);
 
-    public bool TryExecute(
-        ServerHeroCombatProxy ghost,
-        HeroAction request,
-        double ratio)
-    {
-        if (!ghost.Actions.PrepareSkill(request.Slot, request.Item))
-        {
-            return false;
-        }
+    public HeroRejection Validate(
+        HeroCommandContext context,
+        ItemRef item)
+        => context.Ghost == null
+            ? HeroRejection.GhostUnavailable
+            : HeroRejection.None;
 
-        if (!ghost.Actions.IsSkillReady(request.Slot))
+    public HeroRejection Execute(
+        HeroCommandContext context,
+        ItemRef item)
+    {
+        var ghost = context.Ghost!;
+        var slot = context.Command.Slot;
+
+        if (!ghost.Actions.PrepareSkill(slot, item))
         {
             Logger.Warning(
-                "Reject skill cast: guid={Guid} slot={Slot} not ready",
-                ghost.OwnerGuid, request.Slot);
-            return false;
+                "Skill rejected: guid={Guid} slot={Slot} item={Item} " +
+                "cmd={CommandId} reason=prepare",
+                ghost.OwnerGuid, slot, item.ItemId,
+                context.Command.CommandId);
+            return HeroRejection.ExecutionFailed;
         }
 
-        if (!ghost.Actions.CastSkill(request.Slot, ratio))
+        if (!ghost.Actions.IsSkillReady(slot))
         {
-            return false;
+            Logger.Warning(
+                "Skill rejected: guid={Guid} slot={Slot} item={Item} " +
+                "cmd={CommandId} reason=not-ready",
+                ghost.OwnerGuid, slot, item.ItemId,
+                context.Command.CommandId);
+            return HeroRejection.NotReady;
+        }
+
+        if (!ghost.Actions.CastSkill(slot, context.Ratio))
+        {
+            Logger.Warning(
+                "Skill rejected: guid={Guid} slot={Slot} item={Item} " +
+                "cmd={CommandId} reason=cast",
+                ghost.OwnerGuid, slot, item.ItemId,
+                context.Command.CommandId);
+            return HeroRejection.ExecutionFailed;
         }
 
         Logger.Information(
-            "Skill cast accepted: guid={Guid} slot={Slot} item={Item} action={ActionId}",
-            ghost.OwnerGuid, request.Slot, request.Item.ItemId, request.ActionId);
+            "Skill cast accepted: guid={Guid} slot={Slot} item={Item} " +
+            "cmd={CommandId}",
+            ghost.OwnerGuid, slot, item.ItemId, context.Command.CommandId);
 
-        return true;
+        return HeroRejection.None;
     }
 }
-
-

@@ -64,13 +64,6 @@ internal sealed class GhostSkills(GhostActionContext context)
         return AffectCodec.ToObject<HeroActiveSkill>(value);
     }
 
-    /// <summary>
-    /// 预留给后续技能状态 tick
-    /// </summary>
-    public static void Tick(double dt)
-    {
-    }
-
     public void Dispose()
     {
         this.DestroyPowers();

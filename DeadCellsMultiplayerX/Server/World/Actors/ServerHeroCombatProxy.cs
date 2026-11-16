@@ -7,6 +7,7 @@ using DeadCellsMultiplayerX.Contracts.Entities;
 using DeadCellsMultiplayerX.Engine.Adapters.Heroes;
 using DeadCellsMultiplayerX.Engine.Adapters.Snapshots;
 using DeadCellsMultiplayerX.Engine.Utilities;
+using DeadCellsMultiplayerX.Simulation.Actions;
 using Serilog;
 
 /// <summary>
@@ -34,6 +35,11 @@ internal sealed class ServerHeroCombatProxy : IGhostEntity
     public string OwnerGuid { get; }
 
     public ServerHeroActionRuntime Actions { get; }
+
+    /// <summary>
+    /// 两个武器槽的盾牌相位守卫。
+    /// </summary>
+    public HeroShieldStateMachine[] ShieldPhases { get; } = [new(), new()];
 
     public bool IsAlive => this.Hero != null && !this.Hero.destroyed;
 
@@ -111,7 +117,7 @@ internal sealed class ServerHeroCombatProxy : IGhostEntity
 
     /// <summary>
     /// 只有同一个 Level 实例且 levelId/subLevel 都一致才复用
-    /// 否则由 Actor 销毁重建
+    /// 否则由 ServerHero 销毁重建
     /// </summary>
     public bool MatchesLevel(Level? level)
     {

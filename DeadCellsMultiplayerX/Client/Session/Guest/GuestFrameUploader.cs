@@ -2,6 +2,7 @@ namespace DeadCellsMultiplayerX.Client.Session.Guest;
 
 using dc.en;
 using dc.pr;
+using DeadCellsMultiplayerX.Contracts.Actions;
 using DeadCellsMultiplayerX.Contracts.Snapshots;
 using Serilog;
 
@@ -14,10 +15,12 @@ internal sealed class GuestFrameUploader(
     string guid,
     Func<long> syncedTimeMs,
     Func<ClientWorldFrame, Task> upload,
+    Func<long, IReadOnlyList<HeroCommand>> pendingCommands,
+    Func<bool> isServerReady,
     ILogger logger)
 {
 
-    private readonly ClientFrameSendBuffer sendBuffer = new();
+    private readonly ClientFrameSendBuffer sendBuffer = new(pendingCommands);
 
     private readonly string guid = guid
             ?? throw new ArgumentNullException(nameof(guid));
@@ -25,23 +28,23 @@ internal sealed class GuestFrameUploader(
             ?? throw new ArgumentNullException(nameof(syncedTimeMs));
     private readonly Func<ClientWorldFrame, Task> upload = upload
             ?? throw new ArgumentNullException(nameof(upload));
+    private readonly Func<bool> isServerReady = isServerReady
+            ?? throw new ArgumentNullException(nameof(isServerReady));
     private readonly ILogger logger = logger
             ?? throw new ArgumentNullException(nameof(logger));
 
     private Task? uploadTask;
     private long lastUploadErrorLogMs;
     private volatile bool disposed;
-    private volatile bool serverReady;
     public bool UploadBroken { get; private set; }
 
-    public void SetServerReady(bool value) => this.serverReady = value;
     public void MarkDisposed() => this.disposed = true;
 
 
     /// <summary>Captures the local hero and sends at most one in-flight frame.</summary>
     public void CaptureAndUpload(Hero hero)
     {
-        if (!this.serverReady || this.disposed || this.UploadBroken)
+        if (!this.isServerReady() || this.disposed || this.UploadBroken)
         {
             return;
         }

@@ -10,7 +10,6 @@ internal sealed partial class GuestClientSession
     {
         base.MyDispose();
 
-        this.prediction?.Clear();
         this.deathGate?.Clear();
 
         // Stop inbound RPC before tearing down game-facing state; otherwise a
@@ -29,7 +28,6 @@ internal sealed partial class GuestClientSession
         this.DisposeSafely(this.ClientWorld, "Client world");
         this.ClientWorld = null;
 
-        this.prediction = null;
         this.deathGate = null;
         this.Uploader.MarkDisposed();
         this.Uploader.Clear();

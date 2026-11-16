@@ -128,7 +128,7 @@ internal sealed class ServerMobModifierRegistry
         var targetGuid = string.Empty;
         if (this.teams.TryGet(target, out var combatant))
         {
-            targetGuid = combatant.Guid;
+            targetGuid = combatant.OwnerGuid;
         }
 
         var level = mob._level;

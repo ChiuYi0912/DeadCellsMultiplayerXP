@@ -2,24 +2,22 @@ namespace DeadCellsMultiplayerX.Client.World.Heroes.Local;
 
 using dc.en;
 using dc.tool;
-using dc.tool.atk;
 using dc.tool.hero;
 using dc.tool.hero.weap;
 using dc.tool.weap;
 using DeadCellsMultiplayerX.Client.Session.Guest;
 using DeadCellsMultiplayerX.Contracts.Actions;
-using DeadCellsMultiplayerX.Engine.Adapters.Items;
 using DeadCellsMultiplayerX.Engine.Hooks.Client;
 using DeadCellsMultiplayerX.Engine.Utilities;
 using Serilog;
 
 /// <summary>
-/// 本地动作意图记录：从 Hook 捕获技能/武器/项链/盾牌，
-/// 构造 HeroAction 并交给发送通道。
+/// 本地动作意图记录：从 Hook 捕获技能/武器/盾牌，
+/// 只上报“想做什么”，物品/等级/pose 由服务端解析。
 /// </summary>
 internal sealed class LocalIntentRecorder(
     GuestClientSession session,
-    LocalActionSender sender,
+    HeroCommandSender sender,
     LocalActionDeduper dedupe) : IClientActionHookSink
 {
     private static readonly ILogger Logger =
@@ -27,7 +25,7 @@ internal sealed class LocalIntentRecorder(
 
     private readonly GuestClientSession session = session
             ?? throw new ArgumentNullException(nameof(session));
-    private readonly LocalActionSender sender = sender
+    private readonly HeroCommandSender sender = sender
             ?? throw new ArgumentNullException(nameof(sender));
     private readonly LocalActionDeduper dedupe = dedupe
             ?? throw new ArgumentNullException(nameof(dedupe));
@@ -47,20 +45,6 @@ internal sealed class LocalIntentRecorder(
         var hero = self.hero;
         var isLocal = hero != null && ReferenceEquals(hero, game?.hero);
 
-        int cx = 0, cy = 0, dir = 0;
-        double xr = 0, yr = 0, dx = 0, dy = 0;
-
-        if (isLocal)
-        {
-            cx = hero!.cx;
-            cy = hero.cy;
-            xr = hero.xr;
-            yr = hero.yr;
-            dir = hero.dir;
-            dx = hero.dx;
-            dy = hero.dy;
-        }
-
         orig(self!, id, ratio);
 
         if (!isLocal)
@@ -68,15 +52,9 @@ internal sealed class LocalIntentRecorder(
             return;
         }
 
-        var item = hero?.inventory.getActiveOn(id);
-        if (item == null)
-        {
-            return;
-        }
-
-        this.SendHeroAction(
-            hero!, HeroActionKind.ActiveSkill, id, ItemCodec.Collect(item),
-            ratio, 0, cx, cy, xr, yr, dir, dx, dy);
+        this.SendCommand(
+            hero!, HeroActionKind.ActiveSkill, id,
+            new HeroIntent { Ratio = ratio });
     }
 
     /// <summary>
@@ -100,89 +78,20 @@ internal sealed class LocalIntentRecorder(
             return;
         }
 
-        var cx = hero!.cx;
-        var cy = hero.cy;
-        var xr = hero.xr;
-        var yr = hero.yr;
-        var dir = hero.dir;
-        var dx = hero.dx;
-        var dy = hero.dy;
         var cycle = weapon!.get_cycle();
 
-        var epoch = this.session.ClientWorld?.Epoch ?? -1;
-        var token = epoch >= 0 ? this.session.Prediction.BeginWeapon() : 0;
+        orig(self!, weapon);
 
-        try
-        {
-            orig(self!, weapon);
-        }
-        finally
-        {
-            if (token != 0)
-            {
-                this.session.Prediction.EndWeapon();
-            }
-        }
-
-        // ActionId 和 epoch 在 orig 之后才确定
+        // CommandId 和 epoch 在 orig 之后才确定
         var sendEpoch = this.session.ClientWorld?.Epoch ?? -1;
-        long actionId = 0;
-        if (sendEpoch >= 0)
-        {
-            actionId = this.dedupe.NextActionId();
+        var commandId = sendEpoch >= 0
+            ? this.sender.NextCommandId()
+            : 0;
 
-            if (token != 0)
-            {
-                this.session.Prediction.CommitWeapon(token, actionId);
-            }
-        }
-
-        this.SendHeroAction(
-            hero, HeroActionKind.Weapon, slot,
-            ItemCodec.Collect(item),
-            1.0, cycle, cx, cy, xr, yr, dir, dx, dy,
-            sendEpoch, actionId);
-    }
-
-    /// <summary>
-    /// 上报本地切换后的项链
-    /// </summary>
-    public InventItem OnInventoryAdd(
-        Hook_Inventory.orig_add orig,
-        Inventory self,
-        InventItem item)
-    {
-        var game = GuestClientSession.Game;
-        var hero = game?.hero;
-
-        var isLocal = hero != null && ReferenceEquals(self, hero.inventory);
-
-        var isTalisman = isLocal && item?.kind is InventItemKind.Talisman;
-
-        var result = orig(self, item);
-
-        if (!isTalisman)
-        {
-            return result;
-        }
-
-        var talisman = hero!.inventory.hasTalisman()
-            ? hero.inventory.getTalisman()
-            : item;
-
-        if (talisman == null)
-        {
-            return result;
-        }
-
-        this.SendHeroAction(
-            hero, HeroActionKind.Talisman, 0,
-            ItemCodec.Collect(talisman),
-            1.0, 0,
-            hero.cx, hero.cy, hero.xr, hero.yr,
-            hero.dir, hero.dx, hero.dy);
-
-        return result;
+        this.SendCommand(
+            hero!, HeroActionKind.Weapon, slot,
+            new HeroIntent { Cycle = cycle },
+            sendEpoch, commandId);
     }
 
     public void OnShieldChargeStart(
@@ -199,7 +108,7 @@ internal sealed class LocalIntentRecorder(
             return;
         }
 
-        this.SendShieldAction(self, ShieldActionKind.HoldStart);
+        this.SendShieldCommand(self, ShieldIntentKind.HoldStart);
     }
 
     public void OnShieldReleased(
@@ -212,7 +121,7 @@ internal sealed class LocalIntentRecorder(
         }
 
         this.dedupe.EndHold(self);
-        this.SendShieldAction(self, ShieldActionKind.HoldEnd);
+        this.SendShieldCommand(self, ShieldIntentKind.HoldEnd);
     }
 
     public void OnStartParry(
@@ -229,7 +138,7 @@ internal sealed class LocalIntentRecorder(
             return;
         }
 
-        this.SendShieldAction(self, ShieldActionKind.ParryStart);
+        this.SendShieldCommand(self, ShieldIntentKind.ParryStart);
     }
 
     public void OnShieldEndParry(
@@ -246,39 +155,7 @@ internal sealed class LocalIntentRecorder(
             return;
         }
 
-        this.SendShieldAction(self, ShieldActionKind.ParryEnd);
-    }
-
-    public void OnShieldBlock(
-        Hook_BaseShield.orig_onShieldBlock orig,
-        BaseShield self,
-        AttackData sourceAtk,
-        bool fullParry)
-    {
-        orig(self, sourceAtk, fullParry);
-        if (!IsLocalShield(self))
-        {
-            return;
-        }
-
-        this.SendShieldAction(
-            self, ShieldActionKind.Block, sourceAtk, fullParry);
-    }
-
-    public void OnShieldCounterAttack(
-        Hook_BaseShield.orig_shieldCounterAttack orig,
-        BaseShield self,
-        AttackData sourceAtk,
-        bool fullParry)
-    {
-        orig(self, sourceAtk, fullParry);
-        if (!IsLocalShield(self))
-        {
-            return;
-        }
-
-        this.SendShieldAction(
-            self, ShieldActionKind.Counter, sourceAtk, fullParry);
+        this.SendShieldCommand(self, ShieldIntentKind.ParryEnd);
     }
 
     /// <summary>
@@ -288,27 +165,14 @@ internal sealed class LocalIntentRecorder(
     {
         var hero = GuestClientSession.Game?.hero;
         var world = this.session.ClientWorld;
-        if (hero == null || world == null)
+        if (hero == null || world == null || world.Epoch < 0)
         {
             return;
         }
 
-        if (world.Epoch < 0)
-        {
-            return;
-        }
-
-        this.SendHeroAction(
+        this.SendCommand(
             hero, HeroActionKind.ActiveSkill, slot,
-            new ItemRef
-            {
-                Kind = (int)InventItemKind.Indexes.Active,
-                ItemId = itemId,
-                ItemLevel = 1,
-                PosID = slot,
-            },
-            1.0, 0,
-            hero.cx, hero.cy, hero.xr, hero.yr, hero.dir, hero.dx, hero.dy);
+            new HeroIntent { Ratio = 1.0 });
 
         Logger.Information(
             "Debug skill cast sent: item={Item} slot={Slot}", itemId, slot);
@@ -321,27 +185,14 @@ internal sealed class LocalIntentRecorder(
     {
         var hero = GuestClientSession.Game?.hero;
         var world = this.session.ClientWorld;
-        if (hero == null || world == null)
+        if (hero == null || world == null || world.Epoch < 0)
         {
             return;
         }
 
-        if (world.Epoch < 0)
-        {
-            return;
-        }
-
-        this.SendHeroAction(
+        this.SendCommand(
             hero, HeroActionKind.Weapon, slot,
-            new ItemRef
-            {
-                Kind = (int)InventItemKind.Indexes.Weapon,
-                ItemId = itemId,
-                ItemLevel = 1,
-                PosID = slot,
-            },
-            1.0, cycle,
-            hero.cx, hero.cy, hero.xr, hero.yr, hero.dir, hero.dx, hero.dy);
+            new HeroIntent { Cycle = cycle });
 
         Logger.Information(
             "Debug weapon use sent: item={Item} slot={Slot} cycle={Cycle}",
@@ -364,11 +215,9 @@ internal sealed class LocalIntentRecorder(
         return shield.item != null && shield.item.posID is >= 0 and <= 1;
     }
 
-    private void SendShieldAction(
+    private void SendShieldCommand(
         BaseShield shield,
-        ShieldActionKind kind,
-        AttackData? sourceAtk = null,
-        bool fullParry = false)
+        ShieldIntentKind kind)
     {
         var hero = GuestClientSession.Game?.hero;
         var item = shield.item;
@@ -383,47 +232,22 @@ internal sealed class LocalIntentRecorder(
             return;
         }
 
-        this.SendHeroAction(
+        this.SendCommand(
             hero, HeroActionKind.Shield, slot,
-            ItemCodec.Collect(item),
-            1.0, 0,
-            hero.cx, hero.cy, hero.xr, hero.yr,
-            hero.dir, hero.dx, hero.dy,
-            shieldKind: kind,
-            fullParry: fullParry,
-            sourceNetId: this.ResolveSourceNetId(sourceAtk));
+            new HeroIntent
+            {
+                Ratio = 1.0,
+                ShieldKind = kind,
+            });
     }
 
-    private uint ResolveSourceNetId(AttackData? atk)
-    {
-        var attacker = atk?.source as Mob ?? atk?.carrier as Mob;
-        if (attacker != null
-            && this.session.ClientWorld?.TryGetMobNetId(
-                attacker, out var netId) == true)
-        {
-            return netId;
-        }
-
-        return 0;
-    }
-
-    private void SendHeroAction(
+    private void SendCommand(
         Hero hero,
         HeroActionKind kind,
         int slot,
-        ItemRef item,
-        double ratio,
-        int cycle,
-        int cx, int cy,
-        double xr, double yr,
-        int dir,
-        double dx, double dy,
+        HeroIntent intent,
         int? epoch = null,
-        long? actionId = null,
-        ShieldActionKind shieldKind = ShieldActionKind.HoldStart,
-        bool fullParry = false,
-        uint sourceNetId = 0,
-        long sourceActionId = 0)
+        long? commandId = null)
     {
         var world = this.session.ClientWorld;
         if (world == null)
@@ -437,34 +261,18 @@ internal sealed class LocalIntentRecorder(
             return;
         }
 
-        var request = new HeroAction
+        var command = new HeroCommand
         {
             Epoch = currentEpoch,
-            ActionId = actionId ?? this.dedupe.NextActionId(),
+            CommandId = commandId ?? this.sender.NextCommandId(),
             Kind = kind,
             Slot = slot,
-            Item = item,
-            Ratio = ratio,
-            Cycle = cycle,
-            CX = cx,
-            CY = cy,
-            XR = xr,
-            YR = yr,
-            Dir = dir,
-            DX = dx,
-            DY = dy,
+            Intent = intent,
             ClientTimeMs = this.session.SyncedTimeMs,
             LevelId = hero._level?.map?.id?.ToString() ?? string.Empty,
             SubLevelIndex = hero._level?.GetSubLevelIndex() ?? -1,
-            BrutalityTier = hero.brutalityTier,
-            SurvivalTier = hero.survivalTier,
-            TacticTier = hero.tacticTier,
-            ShieldKind = shieldKind,
-            FullParry = fullParry,
-            SourceNetId = sourceNetId,
-            SourceActionId = sourceActionId,
         };
 
-        this.sender.Send(request);
+        this.sender.Send(command);
     }
 }

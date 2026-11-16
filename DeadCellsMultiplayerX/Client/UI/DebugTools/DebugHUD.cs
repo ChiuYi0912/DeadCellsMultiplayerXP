@@ -75,7 +75,7 @@ public partial class DebugHUD : IEventReceiver, IClientDebugHookSink, IDisposabl
         Ghosts,
         Heroes,
         Entities,
-        Pred,
+        PendingCommands,
         Spawn,
     }
 
@@ -263,7 +263,7 @@ public partial class DebugHUD : IEventReceiver, IClientDebugHookSink, IDisposabl
         Add(entityRow, MetricKind.Heroes, "heroes=", "", Thresholds((upper, neutral)));
         Add(entityRow, MetricKind.Entities, "entities=", "", Thresholds((upper, neutral)));
         Add(entityRow, MetricKind.Spawn, "pendingSpawn=", "", Thresholds((1, green), (upper, yellow)));
-        Add(entityRow, MetricKind.Pred, "predicted=", "", Thresholds((1, green), (upper, yellow)));
+        Add(entityRow, MetricKind.PendingCommands, "cmds=", "", Thresholds((1, green), (upper, yellow)));
 
         void Add(Flow row, MetricKind kind, string prefix, string suffix, IntMap map)
         {
@@ -491,7 +491,7 @@ public partial class DebugHUD : IEventReceiver, IClientDebugHookSink, IDisposabl
             MetricKind.Ghosts => snapshot.Ghosts,
             MetricKind.Heroes => snapshot.Heroes,
             MetricKind.Entities => snapshot.Entities,
-            MetricKind.Pred => snapshot.Pred,
+            MetricKind.PendingCommands => snapshot.PendingCommands,
             MetricKind.Spawn => snapshot.PendingSpawns,
             _ => 0,
         };

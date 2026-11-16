@@ -1,5 +1,6 @@
 namespace DeadCellsMultiplayerX.Server.Replication.Frames;
 
+using DeadCellsMultiplayerX.Contracts.Actions;
 using DeadCellsMultiplayerX.Contracts.Snapshots;
 using DeadCellsMultiplayerX.Networking.Frames;
 using Serilog;
@@ -94,6 +95,11 @@ internal sealed class ClientFrameCollector
     /// 待广播的移除 GUID
     /// </summary>
     private readonly List<string> pendingRemoved = [];
+
+    /// <summary>
+    /// 客户端上传帧中携带的动作命令；由 ServerSession 接到动作分发器。
+    /// </summary>
+    public event Action<string, IReadOnlyList<HeroCommand>>? CommandsReceived;
 
     /// <summary>
     /// 当前世界 epoch
@@ -353,23 +359,26 @@ internal sealed class ClientFrameCollector
         channel.Latest = frame;
 
         var upload = frame.Heroes?.FirstOrDefault(h => h?.Dynamic != null);
-        if (upload == null)
+        if (upload != null)
         {
-            return;
-        }
-
-        if (upload.Spawn != null)
-        {
-            if (channel.LastSpawn == null || !upload.Spawn.SameAs(channel.LastSpawn))
+            if (upload.Spawn != null)
             {
-                channel.SpawnVersion++;
-                upload.Spawn.Version = channel.SpawnVersion;
-                channel.LastSpawn = upload.Spawn;
-                this.pendingSpawnChanges.Add(upload.Spawn);
+                if (channel.LastSpawn == null || !upload.Spawn.SameAs(channel.LastSpawn))
+                {
+                    channel.SpawnVersion++;
+                    upload.Spawn.Version = channel.SpawnVersion;
+                    channel.LastSpawn = upload.Spawn;
+                    this.pendingSpawnChanges.Add(upload.Spawn);
+                }
             }
+
+            upload.Dynamic.SpawnVersion = channel.SpawnVersion;
         }
 
-        upload.Dynamic.SpawnVersion = channel.SpawnVersion;
+        if (frame.Commands is { Count: > 0 })
+        {
+            this.CommandsReceived?.Invoke(channel.Guid, frame.Commands);
+        }
     }
 
     private async Task<FrameSequencerBatch<ClientWorldFrame>> RequestFramesAsync(

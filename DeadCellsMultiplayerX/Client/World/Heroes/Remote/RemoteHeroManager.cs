@@ -260,10 +260,6 @@ IOnLocalHeroInitDone
         {
             ghost.Actions.ApplyLoadout(spawn.Loadout);
         }
-        else
-        {
-            ghost.Actions.ApplyTalisman(spawn.Talisman);
-        }
     }
 
     /// <summary>

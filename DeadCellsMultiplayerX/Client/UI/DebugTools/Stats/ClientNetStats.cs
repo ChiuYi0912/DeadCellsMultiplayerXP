@@ -35,7 +35,7 @@ internal readonly record struct ClientNetSnapshot(
     int Heroes,
     int Entities,
     int PendingSpawns,
-    int Pred,
+    int PendingCommands,
     bool UploadBroken);
 
 internal static class ClientNetStats
@@ -74,7 +74,7 @@ internal static class ClientNetStats
                 Heroes: 0,
                 Entities: 0,
                 PendingSpawns: 0,
-                Pred: 0,
+                PendingCommands: 0,
                 UploadBroken: false);
         }
 
@@ -139,7 +139,7 @@ internal static class ClientNetStats
                 Heroes: 0,
                 Entities: 0,
                 PendingSpawns: 0,
-                Pred: 0,
+                PendingCommands: 0,
                 UploadBroken: session.UploadBroken);
         }
 
@@ -189,7 +189,7 @@ internal static class ClientNetStats
             Heroes: stats.Heroes,
             Entities: stats.Entities,
             PendingSpawns: stats.PendingSpawns,
-            Pred: session.Prediction.PendingMobCount,
+            PendingCommands: session.PendingCommands,
             UploadBroken: session.UploadBroken);
     }
 }

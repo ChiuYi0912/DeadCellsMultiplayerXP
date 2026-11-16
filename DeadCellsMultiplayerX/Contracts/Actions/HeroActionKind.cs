@@ -7,6 +7,5 @@ public enum HeroActionKind
 {
     ActiveSkill = 0,
     Weapon = 1,
-    Talisman = 2,
-    Shield = 3,
+    Shield = 2,
 }

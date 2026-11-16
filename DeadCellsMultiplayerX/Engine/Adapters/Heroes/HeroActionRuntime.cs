@@ -1,7 +1,6 @@
 namespace DeadCellsMultiplayerX.Engine.Adapters.Heroes;
 
 using dc.en;
-using dc.tool.atk;
 using dc.tool.hero.activeSkills;
 using DeadCellsMultiplayerX.Contracts.Actions;
 using DeadCellsMultiplayerX.Contracts.Loadout;
@@ -9,16 +8,15 @@ using DeadCellsMultiplayerX.Simulation.Loadout;
 using Serilog;
 
 /// <summary>
-/// Shared Hero loadout/weapon/talisman operations.  The client and server
-/// differ only in the skill endpoint; that endpoint lives in the role runtime
-/// below instead of being a co-located Cast/Replay pair.
+/// 共享的 Hero 装备/技能/武器准备逻辑。
+/// 客户端只表现、服务端真实结算，两者通过 <see cref="HitPresentationMode"/> 区分。
 /// </summary>
-internal abstract class HeroActionRuntime : IDisposable
+internal abstract class HeroLoadoutRuntime : IDisposable
 {
     private readonly GhostTalismans talismans;
     private bool disposed;
 
-    protected HeroActionRuntime(Hero hero, string ownerGuid)
+    protected HeroLoadoutRuntime(Hero hero, string ownerGuid)
     {
         ArgumentNullException.ThrowIfNull(hero);
         ArgumentException.ThrowIfNullOrWhiteSpace(ownerGuid);
@@ -84,16 +82,19 @@ internal abstract class HeroActionRuntime : IDisposable
         return this.Weapons.Prepare(slot, snapshot);
     }
 
-    public bool UseWeapon(int slot, int cycle)
-    {
-        ObjectDisposedException.ThrowIf(this.disposed, this);
-        return this.Weapons.Use(slot, cycle);
-    }
-
     public bool ApplyTalisman(ItemRef? snapshot)
     {
         ObjectDisposedException.ThrowIf(this.disposed, this);
         return this.talismans.Apply(snapshot);
+    }
+
+    protected bool UseWeaponCore(
+        int slot,
+        int cycle,
+        HitPresentationMode mode)
+    {
+        ObjectDisposedException.ThrowIf(this.disposed, this);
+        return this.Weapons.Use(slot, cycle, mode);
     }
 
     /// <summary>
@@ -141,7 +142,10 @@ internal abstract class HeroActionRuntime : IDisposable
     }
 }
 
-internal sealed class ServerHeroActionRuntime : HeroActionRuntime
+/// <summary>
+/// 服务端权威执行：武器/技能/盾牌都会真实作用于游戏世界。
+/// </summary>
+internal sealed class ServerHeroActionRuntime : HeroLoadoutRuntime
 {
     private readonly GhostShield shield;
 
@@ -165,21 +169,28 @@ internal sealed class ServerHeroActionRuntime : HeroActionRuntime
         return true;
     }
 
+    public bool UseWeapon(int slot, int cycle)
+        => this.UseWeaponCore(slot, cycle, HitPresentationMode.Apply);
+
     public bool PrepareShield(int slot, ItemRef? snapshot) => this.shield.Prepare(slot, snapshot);
 
     public bool UseShield(
-        ShieldActionKind kind,
+        ShieldIntentKind kind,
         int slot,
-        double ratio,
-        bool fullParry,
-        AttackData? sourceAtk,
-        double elapsedMs) => this.shield.Apply(kind, slot, ratio, fullParry, sourceAtk, elapsedMs);
+        double elapsedMs) => this.shield.Apply(kind, slot, elapsedMs);
 }
 
-internal sealed class ClientHeroActionRuntime(Hero hero, string ownerGuid) : HeroActionRuntime(hero, ownerGuid)
+/// <summary>
+/// 客户端只表现：武器命中在 <see cref="HitPresentationScope"/> 内被降级为受击表现。
+/// </summary>
+internal sealed class ClientHeroPresentationRuntime(Hero hero, string ownerGuid)
+    : HeroLoadoutRuntime(hero, ownerGuid)
 {
     private static readonly ILogger Logger =
-        Log.ForContext("SourceContext", "ClientHeroActionRuntime");
+        Log.ForContext("SourceContext", "ClientHeroPresentationRuntime");
+
+    public bool UseWeapon(int slot, int cycle)
+        => this.UseWeaponCore(slot, cycle, HitPresentationMode.PresentOnly);
 
     public bool ReplaySkill(int slot)
     {
