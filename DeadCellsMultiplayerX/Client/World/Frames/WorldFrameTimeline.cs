@@ -10,7 +10,7 @@ using Serilog;
 /// 负责 epoch 校验、乱序重排、缺口补发与重同步；
 /// 已应用帧的插值历史、静态数据索引与帧统计由独立协作者维护。
 /// </summary>
-internal sealed class WorldFrameTimeline
+internal sealed class WorldFrameTimeline : IDisposable
 {
     /// <summary>
     /// 乱序待处理帧上限。
@@ -69,6 +69,8 @@ internal sealed class WorldFrameTimeline
     /// 当前重同步请求任务。
     /// </summary>
     private Task<WorldResync>? resyncTask;
+    private bool disposed;
+    private int generation;
 
     /// <summary>
     /// 是否已记录首帧日志。
@@ -189,14 +191,20 @@ internal sealed class WorldFrameTimeline
     /// </summary>
     public event Action<WorldFrame>? FrameApplied;
 
-    public void Start() => this.sequencer.Start();
+    public void Start()
+    {
+        if (!this.disposed)
+        {
+            this.sequencer.Start();
+        }
+    }
 
     /// <summary>
     /// 服务端广播入口
     /// </summary>
     public void OnFrame(WorldFrame frame)
     {
-        if (frame == null)
+        if (this.disposed || frame == null)
         {
             return;
         }
@@ -224,11 +232,15 @@ internal sealed class WorldFrameTimeline
     /// </summary>
     public void Tick(long nowMs)
     {
+        if (this.disposed)
+        {
+            return;
+        }
 #if DEBUG
         // 调试命令强制重同步
         if (WorldFrameDebug.ConsumeForceResync())
         {
-            this.resyncTask = null;
+            this.DiscardResyncRequest();
             this.lastResyncRequestLocalMs = 0;
             this.RequestResync("debug");
         }
@@ -278,6 +290,10 @@ internal sealed class WorldFrameTimeline
     /// </summary>
     public void RequestResync(string reason)
     {
+        if (this.disposed)
+        {
+            return;
+        }
         // 已有请求在途 不重复发送
         if (this.resyncTask != null && !this.resyncTask.IsCompleted)
         {
@@ -293,6 +309,7 @@ internal sealed class WorldFrameTimeline
 
         this.lastResyncRequestLocalMs = now;
         this.ResyncCount++;
+        this.DiscardResyncRequest();
 
         // 正常同步原因记 Information 缺口或溢出记 Warning
         if (reason is "initial" or "epoch changed" or "baseline retry" or "debug")
@@ -323,19 +340,34 @@ internal sealed class WorldFrameTimeline
     /// </summary>
     public void Reset()
     {
+        if (this.disposed)
+        {
+            return;
+        }
+        this.ResetCore();
+    }
+
+    private void ResetCore()
+    {
+        this.generation++;
+        this.DiscardResyncRequest();
         this.history.Clear();
         this.spawns.Clear();
         this.Epoch = -1;
         this.sequencer.Reset();
         this.lastResyncRequestLocalMs = 0;
-        this.resyncTask = null;
         this.loggedFirstFrame = false;
         this.stats.Reset();
     }
 
     public void Dispose()
     {
-        this.Reset();
+        if (this.disposed)
+        {
+            return;
+        }
+        this.disposed = true;
+        this.ResetCore();
         FrameApplied = null;
 
 #if DEBUG
@@ -351,7 +383,7 @@ internal sealed class WorldFrameTimeline
     /// </summary>
     public void OnResync(WorldResync resync)
     {
-        if (resync == null)
+        if (this.disposed || resync == null)
         {
             return;
         }
@@ -431,6 +463,11 @@ internal sealed class WorldFrameTimeline
         long from,
         long to)
     {
+        if (this.disposed)
+        {
+            return FrameSequencerBatch<WorldFrame>.Empty;
+        }
+        var requestGeneration = this.generation;
         var bundle = await this.session.Server.RequestWorldFrames(
             new WorldFrameRangeRequest
             {
@@ -438,7 +475,7 @@ internal sealed class WorldFrameTimeline
                 ToSequence = to,
             });
 
-        if (bundle == null)
+        if (this.disposed || requestGeneration != this.generation || bundle == null)
         {
             return FrameSequencerBatch<WorldFrame>.Empty;
         }
@@ -461,17 +498,38 @@ internal sealed class WorldFrameTimeline
             return;
         }
 
-        if (this.resyncTask.IsCompletedSuccessfully)
+        var task = this.resyncTask;
+        this.resyncTask = null;
+        if (task.IsCompletedSuccessfully)
         {
-            var resync = this.resyncTask.Result;
-            this.resyncTask = null;
-            this.OnResync(resync);
+            this.OnResync(task.Result);
         }
-        else
+        else if (task.IsFaulted)
         {
-            Logger.Warning(this.resyncTask.Exception, "RequestWorldResync faulted");
-            this.resyncTask = null;
+            Logger.Warning(task.Exception, "RequestWorldResync faulted");
         }
+    }
+
+    private void DiscardResyncRequest()
+    {
+        var task = this.resyncTask;
+        this.resyncTask = null;
+        if (task != null)
+        {
+            _ = ObserveDiscardedResyncAsync(task);
+        }
+    }
+
+    private static async Task ObserveDiscardedResyncAsync(Task<WorldResync> task)
+    {
+        // RPC belongs to the session. Reset/Dispose detach the result without
+        // blocking the game thread or abandoning a possible background failure.
+        try
+        {
+            await task.ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { Logger.Warning(ex, "Discarded world resync request failed"); }
     }
 
     /// <summary>
@@ -479,7 +537,7 @@ internal sealed class WorldFrameTimeline
     /// </summary>
     private void ApplyFrame(WorldFrame frame)
     {
-        if (frame == null || frame.Epoch != this.Epoch)
+        if (this.disposed || frame == null || frame.Epoch != this.Epoch)
         {
             return;
         }

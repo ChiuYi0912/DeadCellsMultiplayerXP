@@ -170,7 +170,7 @@ internal sealed class FrameSequencer<TFrame>(
         this.NextExpected = sequence + 1;
         this.gapSinceMs = null;
         this.lastNackMs = 0;
-        this.nackTask = null;
+        this.DiscardNackRequest();
         this.HasBaseline = true;
     }
 
@@ -275,7 +275,30 @@ internal sealed class FrameSequencer<TFrame>(
         this.HasBaseline = false;
         this.gapSinceMs = null;
         this.lastNackMs = 0;
+        this.DiscardNackRequest();
+    }
+
+    private void DiscardNackRequest()
+    {
+        var task = this.nackTask;
         this.nackTask = null;
+        if (task != null)
+        {
+            _ = this.ObserveDiscardedNackAsync(task);
+        }
+    }
+
+    private async Task ObserveDiscardedNackAsync(Task<FrameSequencerBatch<TFrame>> task)
+    {
+        try
+        {
+            await task.ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            this.log?.Invoke($"Discarded frame NACK failed: {ex.GetBaseException().Message}");
+        }
     }
 
     private void BufferPending(long sequence, TFrame frame)

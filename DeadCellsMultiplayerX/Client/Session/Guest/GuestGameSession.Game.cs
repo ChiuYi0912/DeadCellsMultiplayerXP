@@ -4,7 +4,6 @@ using dc.cine;
 using dc.en;
 using dc.tool.atk;
 using DeadCellsMultiplayerX.Client.Integration.Events;
-using DeadCellsMultiplayerX.Client.UI.DebugTools;
 using DeadCellsMultiplayerX.Client.World;
 using DeadCellsMultiplayerX.Contracts.Snapshots;
 using ModCore.Events.Interfaces.Game;

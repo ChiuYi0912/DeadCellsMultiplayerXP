@@ -101,13 +101,23 @@ internal sealed class ClientWorld : Disposable
     /// <summary>
     /// 处理接收到的世界帧
     /// </summary>
-    public void OnWorldFrame(WorldFrame frame) => this.frames.OnFrame(frame);
+    public void OnWorldFrame(WorldFrame frame)
+    {
+        if (!this.IsDisposed)
+        {
+            this.frames.OnFrame(frame);
+        }
+    }
 
     /// <summary>
     /// 推进世界帧与怪物同步的定时逻辑
     /// </summary>
     public void Tick(long nowMs)
     {
+        if (this.IsDisposed)
+        {
+            return;
+        }
         this.ghosts.Tick(nowMs);
         this.frames.Tick(nowMs);
         this.entities.Tick(nowMs);
@@ -213,6 +223,10 @@ internal sealed class ClientWorld : Disposable
     /// </summary>
     private void OnFrameApplied(WorldFrame frame)
     {
+        if (this.IsDisposed)
+        {
+            return;
+        }
         // 确认不等待视觉重放；补发帧同样经过时间线后到达这里。
         this.acknowledgeCommands(frame);
         this.ghosts.BeginFrame(frame);
@@ -225,12 +239,12 @@ internal sealed class ClientWorld : Disposable
     protected override void MyDispose()
     {
         this.frames?.FrameApplied -= this.OnFrameApplied;
+        this.Cleanup(() => this.frames?.Dispose(), "frame timeline");
         this.Cleanup(() => this.MobModifiers?.Clear(), "mob modifiers");
-        this.Cleanup(() => this.entities?.Clear(), "entities");
+        this.Cleanup(() => this.entities?.Dispose(), "entities");
         this.Cleanup(() => this.areaAffects?.Reset(), "area effects");
         this.Cleanup(() => this.heroes?.Dispose(), "remote heroes");
         this.Cleanup(() => this.ghosts?.Dispose(), "replay proxies");
-        this.Cleanup(() => this.frames?.Dispose(), "frame timeline");
         this.Cleanup(() => this.localHero?.Dispose(), "local hero events");
     }
 

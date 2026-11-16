@@ -66,7 +66,7 @@ IOnLocalHeroInitDone
     /// <param name="frames">帧管理器</param>
     public void ApplyFrame(WorldFrame frame, WorldFrameTimeline frames)
     {
-        if (frame == null)
+        if (this.IsDisposed || frame == null)
         {
             return;
         }
@@ -201,14 +201,15 @@ IOnLocalHeroInitDone
     {
         this.appliedLoadoutVersions.Remove(guid);
 
-        if (this.heroes.Remove(guid, out var hero))
+        try
         {
-            this.Logger.Information("Despawn remote hero {Guid}", guid);
-            hero?.destroy();
+            if (this.heroes.Remove(guid, out var hero))
+            {
+                this.Logger.Information("Despawn remote hero {Guid}", guid);
+                hero?.destroy();
+            }
         }
-
-        // 可见 Hero 与隐形回放代理保持同步，避免双重清理。
-        this.ghosts.Remove(guid);
+        finally { this.ghosts.Remove(guid); }
     }
 
     public bool TryGet(string guid, out RemoteHero hero)
@@ -378,7 +379,7 @@ IOnLocalHeroInitDone
 
     void IOnLocalHeroInitDone.OnHeroInitDone(Hero hero)
     {
-        if (!ReferenceEquals(hero, GuestGameSession.Game?.hero))
+        if (this.IsDisposed || !ReferenceEquals(hero, GuestGameSession.Game?.hero))
         {
             return;
         }
@@ -387,7 +388,11 @@ IOnLocalHeroInitDone
         // 下一帧从世界帧重新创建
         foreach (var h in this.heroes.Values)
         {
-            h?.destroy();
+            try
+            {
+                h?.destroy();
+            }
+            catch (Exception ex) { this.Logger.Warning(ex, "Remote hero level cleanup failed"); }
         }
 
         this.heroes.Clear();

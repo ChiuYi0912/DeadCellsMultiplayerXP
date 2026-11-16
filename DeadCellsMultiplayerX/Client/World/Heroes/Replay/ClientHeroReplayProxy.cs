@@ -32,7 +32,7 @@ internal sealed class ClientHeroReplayProxy : IGhostEntity
 
     public ClientHeroPresentationRuntime Actions { get; }
 
-    public bool IsAlive => this.Hero != null && !this.Hero.destroyed;
+    public bool IsAlive => !this.disposed && this.Hero != null && !this.Hero.destroyed;
 
     public LevelKey LevelKey { get; private set; }
 
@@ -68,6 +68,10 @@ internal sealed class ClientHeroReplayProxy : IGhostEntity
     public void SetTransform(
         int cx, int cy, double xr, double yr, int dir, double dx, double dy)
     {
+        if (!this.IsAlive)
+        {
+            return;
+        }
         this.Hero.setPosCase(cx, cy, xr, yr);
         this.Hero.dir = dir;
         this.Hero.dx = dx;
@@ -76,6 +80,10 @@ internal sealed class ClientHeroReplayProxy : IGhostEntity
 
     public void SetTiers(int brutality, int survival, int tactic)
     {
+        if (!this.IsAlive)
+        {
+            return;
+        }
         this.Hero.setBrutalityTier(brutality);
         this.Hero.setSurvivalTier(survival);
         this.Hero.setTacticTier(tactic);
@@ -90,8 +98,22 @@ internal sealed class ClientHeroReplayProxy : IGhostEntity
 
         this.disposed = true;
 
-        this.Actions.Dispose();
-        HeroProxyFactory.DisposeClient(this.Hero);
+        List<Exception>? errors = null;
+        try
+        {
+            this.Actions.Dispose();
+        }
+        catch (Exception ex) { (errors ??= []).Add(ex); }
+
+        try
+        {
+            HeroProxyFactory.DisposeClient(this.Hero);
+        }
+        catch (Exception ex) { (errors ??= []).Add(ex); }
+        if (errors != null)
+        {
+            throw new AggregateException("Replay proxy cleanup failed", errors);
+        }
         Logger.Information("ClientHeroReplayProxy disposed: owner={Owner}", this.OwnerGuid);
     }
 

@@ -10,7 +10,7 @@ using DeadCellsMultiplayerX.Engine.Utilities;
 using DeadCellsMultiplayerX.Networking.Time;
 using Serilog;
 
-internal sealed class ClientReplayProxyManager(GuestGameSession session, string localGuid)
+internal sealed class ClientReplayProxyManager(GuestGameSession session, string localGuid) : IDisposable
 {
     private const long MAX_EVENT_AGE_MS = 2000;
 
@@ -36,6 +36,8 @@ internal sealed class ClientReplayProxyManager(GuestGameSession session, string 
     private readonly HashSet<(string Caster, long OutcomeId)> appliedActions = [];
 
     private int lastEpoch = int.MinValue;
+    private bool disposed;
+    private bool clearing;
 
     public int Count => this.ghosts.Count;
 
@@ -44,12 +46,15 @@ internal sealed class ClientReplayProxyManager(GuestGameSession session, string 
     /// <summary>
     /// 绑定可见远端 Hero 查询；两者由组合根共同创建，存在互相引用。
     /// </summary>
-    public void BindRemoteHeroes(RemoteHeroManager heroes) => this.remoteHeroes = heroes
-            ?? throw new ArgumentNullException(nameof(heroes));
+    public void BindRemoteHeroes(RemoteHeroManager heroes)
+    {
+        ObjectDisposedException.ThrowIf(this.disposed, this);
+        this.remoteHeroes = heroes ?? throw new ArgumentNullException(nameof(heroes));
+    }
 
     public bool TryGetRemoteHero(string guid, out RemoteHero hero)
     {
-        if (this.remoteHeroes != null)
+        if (!this.disposed && this.remoteHeroes != null)
         {
             return this.remoteHeroes.TryGet(guid, out hero);
         }
@@ -64,7 +69,7 @@ internal sealed class ClientReplayProxyManager(GuestGameSession session, string 
     /// </summary>
     internal void InterruptRemoteMobSkill(uint netId)
     {
-        if (netId == 0)
+        if (this.disposed || netId == 0)
         {
             return;
         }
@@ -91,7 +96,7 @@ internal sealed class ClientReplayProxyManager(GuestGameSession session, string 
     /// <returns></returns>
     public ClientHeroReplayProxy? Ensure(string guid, Level level)
     {
-        if (string.IsNullOrEmpty(guid) || level == null)
+        if (this.disposed || this.clearing || string.IsNullOrEmpty(guid) || level == null)
         {
             return null;
         }
@@ -103,8 +108,8 @@ internal sealed class ClientReplayProxyManager(GuestGameSession session, string 
                 return ghost;
             }
 
-            ghost.Dispose();
             this.ghosts.Remove(guid);
+            ghost.Dispose();
         }
 
         ghost = ClientHeroReplayProxy.CreateClient(GuestGameSession.Game, level, guid);
@@ -118,7 +123,14 @@ internal sealed class ClientReplayProxyManager(GuestGameSession session, string 
     }
 
     public bool TryGet(string guid, out ClientHeroReplayProxy ghost)
-        => this.ghosts.TryGetValue(guid, out ghost!);
+    {
+        if (!this.disposed)
+        {
+            return this.ghosts.TryGetValue(guid, out ghost!);
+        }
+        ghost = null!;
+        return false;
+    }
 
     public void Remove(string guid)
     {
@@ -135,24 +147,54 @@ internal sealed class ClientReplayProxyManager(GuestGameSession session, string 
 
     public void Clear()
     {
-        foreach (var ghost in this.ghosts.Values)
+        if (!this.disposed)
         {
-            ghost.Dispose();
+            this.ClearCore();
         }
+    }
 
+    private void ClearCore()
+    {
+        if (this.clearing)
+        {
+            return;
+        }
+        this.clearing = true;
+        var proxies = this.ghosts.Values.ToArray();
         this.ghosts.Clear();
         this.timeline.Clear();
+        List<Exception>? errors = null;
+        try
+        {
+            foreach (var ghost in proxies)
+            {
+                try
+                {
+                    ghost.Dispose();
+                }
+                catch (Exception ex) { (errors ??= []).Add(ex); }
+            }
+        }
+        finally { this.clearing = false; }
+        if (errors != null)
+        {
+            throw new AggregateException("Replay proxy cleanup failed", errors);
+        }
     }
 
     public void Tick(long nowMs)
     {
+        if (this.disposed || this.clearing)
+        {
+            return;
+        }
         this.SyncPositions(GuestGameSession.Game?.curLevel);
         this.timeline.Drain(nowMs, this.Present);
     }
 
     public void SyncPositions(Level? level)
     {
-        if (level == null || this.ghosts.Count == 0 || this.remoteHeroes == null)
+        if (this.disposed || this.clearing || level == null || this.ghosts.Count == 0 || this.remoteHeroes == null)
         {
             return;
         }
@@ -188,7 +230,7 @@ internal sealed class ClientReplayProxyManager(GuestGameSession session, string 
     /// </summary>
     public void BeginFrame(WorldFrame frame)
     {
-        if (frame == null)
+        if (this.disposed || this.clearing || frame == null)
         {
             return;
         }
@@ -205,7 +247,7 @@ internal sealed class ClientReplayProxyManager(GuestGameSession session, string 
 
     public void ApplyFrame(WorldFrame frame)
     {
-        if (frame == null)
+        if (this.disposed || this.clearing || frame == null)
         {
             return;
         }
@@ -269,6 +311,10 @@ internal sealed class ClientReplayProxyManager(GuestGameSession session, string 
 
     private void Present(WorldFrame frame, HeroOutcome outcome)
     {
+        if (this.disposed || this.clearing)
+        {
+            return;
+        }
         var game = GuestGameSession.Game;
         var level = game?.curLevel;
         if (level == null)
@@ -316,8 +362,13 @@ internal sealed class ClientReplayProxyManager(GuestGameSession session, string 
 
     public void Dispose()
     {
-        this.Clear();
+        if (this.disposed)
+        {
+            return;
+        }
+        this.disposed = true;
+        this.remoteHeroes = null;
         this.appliedActions.Clear();
-        this.timeline.Clear();
+        this.ClearCore();
     }
 }

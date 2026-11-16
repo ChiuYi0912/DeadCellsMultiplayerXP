@@ -1,5 +1,6 @@
 namespace DeadCellsMultiplayerX.Client.World.Entities;
 
+using System.Runtime.ExceptionServices;
 using dc;
 using DeadCellsMultiplayerX.Contracts.Entities;
 using DeadCellsMultiplayerX.Contracts.Snapshots;
@@ -14,6 +15,7 @@ internal sealed class ClientEntityStore
         [with(ReferenceEqualityComparer.Instance)];
     private readonly List<IClientEntityKindHandler> handlers = [];
     private readonly Dictionary<EntityKind, IClientEntityKindHandler> byKind = [];
+    private bool clearing;
 
     public IReadOnlyList<IClientEntityKindHandler> Handlers => this.handlers;
 
@@ -85,7 +87,7 @@ internal sealed class ClientEntityStore
 
     public void OnSpawned(EntitySpawn spawn)
     {
-        if (spawn == null || spawn.NetId == 0)
+        if (this.clearing || spawn == null || spawn.NetId == 0)
         {
             return;
         }
@@ -103,7 +105,7 @@ internal sealed class ClientEntityStore
 
     public void RetryPending()
     {
-        if (this.byId.Count == 0)
+        if (this.clearing || this.byId.Count == 0)
         {
             return;
         }
@@ -164,6 +166,10 @@ internal sealed class ClientEntityStore
     /// </summary>
     public bool TryRecreate(uint netId)
     {
+        if (this.clearing)
+        {
+            return false;
+        }
         if (!this.byId.TryGetValue(netId, out var record))
         {
             return false;
@@ -203,12 +209,29 @@ internal sealed class ClientEntityStore
             this.byNative.Remove(record.Native);
         }
 
-        if (this.byKind.TryGetValue(record.Kind, out var handler))
+        Exception? despawnFailure = null;
+        try
         {
-            handler.Despawn(netId, record.Native, reason);
+            if (this.byKind.TryGetValue(record.Kind, out var handler))
+            {
+                handler.Despawn(netId, record.Native, reason);
+            }
+        }
+        catch (Exception ex) { despawnFailure = ex; }
+
+        try
+        {
+            RecordRemoved?.Invoke(record);
+        }
+        catch (Exception ex) when (despawnFailure != null)
+        {
+            throw new AggregateException("Entity destruction and removal notification failed", despawnFailure, ex);
         }
 
-        RecordRemoved?.Invoke(record);
+        if (despawnFailure != null)
+        {
+            ExceptionDispatchInfo.Capture(despawnFailure).Throw();
+        }
     }
 
     /// <summary>
@@ -264,13 +287,31 @@ internal sealed class ClientEntityStore
     /// </summary>
     public void Clear()
     {
-        var netIds = new List<uint>(this.byId.Keys);
-        foreach (var netId in netIds)
+        if (this.clearing)
         {
-            this.Remove(netId, EntityDespawnReason.LevelUnloaded);
+            return;
         }
-
-        this.byId.Clear();
-        this.byNative.Clear();
+        this.clearing = true;
+        List<Exception>? errors = null;
+        try
+        {
+            var netIds = new List<uint>(this.byId.Keys);
+            foreach (var netId in netIds)
+            {
+                try
+                { this.Remove(netId, EntityDespawnReason.LevelUnloaded); }
+                catch (Exception ex) { (errors ??= []).Add(ex); }
+            }
+        }
+        finally
+        {
+            this.byId.Clear();
+            this.byNative.Clear();
+            this.clearing = false;
+        }
+        if (errors != null)
+        {
+            throw new AggregateException("Entity store cleanup failed", errors);
+        }
     }
 }

@@ -6,9 +6,11 @@ using DeadCellsMultiplayerX.Contracts.Snapshots;
 /// <summary>
 /// 客户端通用实体帧管线
 /// </summary>
-internal sealed class ClientEntityFrameApplier
+internal sealed class ClientEntityFrameApplier : IDisposable
 {
     private int lastEpoch = -1;
+    private bool disposed;
+    private bool clearing;
 
     public ClientEntityFrameApplier(ClientEntityStore store)
     {
@@ -25,21 +27,19 @@ internal sealed class ClientEntityFrameApplier
 
     public void ApplyFrame(WorldFrame frame)
     {
-        if (frame == null)
+        if (this.disposed || this.clearing || frame == null)
         {
             return;
         }
 
         if (frame.Epoch != this.lastEpoch)
         {
-            this.lastEpoch = frame.Epoch;
-            foreach (var handler in this.Store.Handlers)
+            this.Clear();
+            if (this.disposed)
             {
-                handler.OnEpochReset();
+                return;
             }
-
-            this.DebugLabels.Reset();
-            this.Store.Clear();
+            this.lastEpoch = frame.Epoch;
         }
 
         foreach (var handler in this.Store.Handlers)
@@ -101,6 +101,10 @@ internal sealed class ClientEntityFrameApplier
 
     public void Tick(long nowMs)
     {
+        if (this.disposed || this.clearing)
+        {
+            return;
+        }
         this.Store.RetryPending();
 
         foreach (var handler in this.Store.Handlers)
@@ -113,13 +117,61 @@ internal sealed class ClientEntityFrameApplier
 
     public void Clear()
     {
-        foreach (var handler in this.Store.Handlers)
+        if (!this.disposed)
         {
-            handler.OnEpochReset();
+            this.ClearCore();
         }
+    }
 
-        this.DebugLabels.Reset();
-        this.Store.Clear();
+    public void Dispose()
+    {
+        if (this.disposed)
+        {
+            return;
+        }
+        this.disposed = true;
+        this.Store.RecordCreated -= this.DebugLabels.OnCreated;
+        this.Store.RecordRemoved -= this.DebugLabels.OnRemoved;
+        this.ClearCore();
+    }
+
+    private void ClearCore()
+    {
+        if (this.clearing)
+        {
+            return;
+        }
+        this.clearing = true;
         this.lastEpoch = -1;
+        List<Exception>? errors = null;
+        try
+        {
+            foreach (var handler in this.Store.Handlers)
+            {
+                try
+                {
+                    handler.OnEpochReset();
+                }
+                catch (Exception ex) { (errors ??= []).Add(ex); }
+            }
+
+            try
+            {
+                this.DebugLabels.Reset();
+            }
+            catch (Exception ex) { (errors ??= []).Add(ex); }
+
+            try
+            {
+                this.Store.Clear();
+            }
+            catch (Exception ex) { (errors ??= []).Add(ex); }
+        }
+        finally { this.clearing = false; }
+
+        if (errors != null)
+        {
+            throw new AggregateException("Entity pipeline cleanup failed", errors);
+        }
     }
 }

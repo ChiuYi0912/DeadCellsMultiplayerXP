@@ -43,7 +43,7 @@ public static class LoadoutCodec
         };
     }
 
-    public static EquipmentSlot CreateSlot(ItemRef? item) => new EquipmentSlot
+    public static EquipmentSlot CreateSlot(ItemRef? item) => new()
     {
         Def = ToDef(item),
         Runtime = new ItemRuntime
