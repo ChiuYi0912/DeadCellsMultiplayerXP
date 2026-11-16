@@ -1,6 +1,7 @@
 namespace DeadCellsMultiplayerX.Client.World.Heroes.Local;
 
 using DeadCellsMultiplayerX.Contracts.Actions;
+using DeadCellsMultiplayerX.Contracts.Snapshots;
 
 /// <summary>
 /// 未确认动作命令队列。
@@ -58,20 +59,36 @@ internal sealed class HeroCommandQueue
         return result;
     }
 
-    public void Acknowledge(long commandId)
+    /// <summary>
+    /// 确认已验证帧中属于本玩家、当前 epoch 的命令结果。
+    /// 执行成功与拒绝均为最终结果，世界事件不确认命令。
+    /// </summary>
+    public void Acknowledge(WorldFrame frame, string localGuid)
     {
-        if (commandId > 0)
+        if (frame.Epoch != this.epoch || frame.HeroOutcomes == null)
         {
-            _ = this.pending.Remove(commandId);
+            return;
+        }
+
+        foreach (var outcome in frame.HeroOutcomes)
+        {
+            if (outcome != null
+                && outcome.Epoch == this.epoch
+                && string.Equals(outcome.CasterGuid, localGuid, StringComparison.Ordinal)
+                && outcome.Cause == HeroOutcomeCause.Command
+                && outcome.CommandId > 0)
+            {
+                _ = this.pending.Remove(outcome.CommandId);
+            }
         }
     }
 
     /// <summary>
-    /// 返回 true 表示 epoch 变化，命令 id 需要从 0 重新开始。
+    /// 返回 true 表示进入更新的 epoch，命令 id 需要从 0 重新开始。
     /// </summary>
     public bool ObserveEpoch(int value)
     {
-        if (value == this.epoch)
+        if (value <= this.epoch)
         {
             return false;
         }

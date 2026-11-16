@@ -24,6 +24,8 @@ internal sealed class ClientWorld : DisposableEventReceiver
     /// </summary>
     private readonly WorldFrameTimeline frames;
 
+    private readonly Action<WorldFrame> acknowledgeCommands;
+
     /// <summary>
     /// 远程英雄管理器，负责维护其他玩家的显示实体
     /// </summary>
@@ -61,6 +63,7 @@ internal sealed class ClientWorld : DisposableEventReceiver
 
     public ClientWorld(GuestClientSession session, string localGuid)
     {
+        this.acknowledgeCommands = session.AcknowledgeCommands;
         this.frames = new WorldFrameTimeline(session, localGuid);
         this.entityStore = new ClientEntityStore();
 
@@ -200,6 +203,8 @@ internal sealed class ClientWorld : DisposableEventReceiver
     /// </summary>
     private void OnFrameApplied(WorldFrame frame)
     {
+        // 确认不等待视觉重放；补发帧同样经过时间线后到达这里。
+        this.acknowledgeCommands(frame);
         this.ghosts.BeginFrame(frame);
         this.heroes.ApplyFrame(frame, this.frames);
         this.areaAffects.ApplyFrame(frame);

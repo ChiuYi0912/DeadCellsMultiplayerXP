@@ -201,26 +201,15 @@ internal sealed class WorldFrameTimeline
             return;
         }
 
-        // 首次收到世界帧 先记录 epoch 并请求基线
-        if (this.Epoch < 0)
+        var previousEpoch = this.Epoch;
+        if (!this.ObserveEpoch(frame.Epoch))
         {
-            this.Epoch = frame.Epoch;
-            this.session.ObserveWorldEpoch(this.Epoch);
-            this.RequestResync("initial");
-        }
-        // 服务端世界重载 清空旧状态并重新建立基线
-        else if (frame.Epoch > this.Epoch)
-        {
-            this.Reset();
-            this.Epoch = frame.Epoch;
-            this.session.ObserveWorldEpoch(this.Epoch);
-            this.RequestResync("epoch changed");
-        }
-        // 旧 epoch 的迟到帧直接丢弃
-        else if (frame.Epoch < this.Epoch)
-        {
-            this.sequencer.NoteDroppedOld();
             return;
+        }
+
+        if (this.Epoch != previousEpoch)
+        {
+            this.RequestResync(previousEpoch < 0 ? "initial" : "epoch changed");
         }
 
         // 用最新服务端时间校正本地时钟
@@ -367,12 +356,6 @@ internal sealed class WorldFrameTimeline
             return;
         }
 
-        if (resync.Epoch < this.Epoch)
-        {
-            this.sequencer.NoteDroppedOld();
-            return;
-        }
-
         // 迟到的重同步响应不应把已前进的时间线回退
         if (this.sequencer.HasBaseline && resync.Epoch == this.Epoch
             && resync.Sequence < this.sequencer.LastDelivered)
@@ -381,14 +364,11 @@ internal sealed class WorldFrameTimeline
             return;
         }
 
-        // 更高 epoch 说明世界已重载 先整体重置
-        if (resync.Epoch > this.Epoch)
+        if (!this.ObserveEpoch(resync.Epoch))
         {
-            this.Reset();
-            this.Epoch = resync.Epoch;
+            return;
         }
 
-        this.session.ObserveWorldEpoch(resync.Epoch);
         this.session.ObserveServerTime((long)resync.ServerTimeMs);
 
         // 基线覆盖当前状态 清空旧时间线与缓存
@@ -419,6 +399,32 @@ internal sealed class WorldFrameTimeline
         Logger.Information(
             "World resync applied: epoch={Epoch} seq={Sequence} heroes={Heroes}",
             resync.Epoch, resync.Sequence, baseline.Heroes.Count);
+    }
+
+    /// <summary>
+    /// 普通帧与重同步共用 epoch 边界；旧 epoch 不得触发会话状态更新。
+    /// </summary>
+    private bool ObserveEpoch(int epoch)
+    {
+        if (epoch < 0 || epoch < this.Epoch)
+        {
+            this.sequencer.NoteDroppedOld();
+            return false;
+        }
+
+        if (epoch > this.Epoch)
+        {
+            // 首次确定 epoch 时保留 Start 已发出的基线请求。
+            if (this.Epoch >= 0)
+            {
+                this.Reset();
+            }
+
+            this.Epoch = epoch;
+            this.session.ObserveWorldEpoch(epoch);
+        }
+
+        return true;
     }
 
     private async Task<FrameSequencerBatch<WorldFrame>> RequestFramesAsync(
@@ -473,7 +479,7 @@ internal sealed class WorldFrameTimeline
     /// </summary>
     private void ApplyFrame(WorldFrame frame)
     {
-        if (frame == null)
+        if (frame == null || frame.Epoch != this.Epoch)
         {
             return;
         }

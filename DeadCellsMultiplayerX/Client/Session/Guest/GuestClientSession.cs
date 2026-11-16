@@ -9,7 +9,6 @@ using DeadCellsMultiplayerX.Client.Presentation.Combat;
 using DeadCellsMultiplayerX.Client.UI.DebugTools;
 using DeadCellsMultiplayerX.Client.World;
 using DeadCellsMultiplayerX.Client.World.Heroes.Local;
-using DeadCellsMultiplayerX.Contracts.Actions;
 using DeadCellsMultiplayerX.Contracts.Snapshots;
 using DeadCellsMultiplayerX.Networking.Rpc.Contracts;
 using ModCore.Events.Interfaces.Game;
@@ -200,32 +199,15 @@ internal sealed partial class GuestClientSession(GuestClient client, Stream serv
         }
 #endif
 
-        this.ObserveWorldEpoch(frame.Epoch);
-        this.ObserveServerTime((long)frame.ServerTimeMs);
-        this.AcknowledgeCommands(frame);
         this.ClientWorld?.OnWorldFrame(frame);
         return Task.CompletedTask;
     }
 
-    private void AcknowledgeCommands(WorldFrame frame)
-    {
-        if (frame.HeroOutcomes == null
-            || frame.HeroOutcomes.Count == 0
-            || this.localCapture == null)
-        {
-            return;
-        }
-
-        foreach (var outcome in frame.HeroOutcomes)
-        {
-            if (outcome != null
-                && outcome.Cause == HeroOutcomeCause.Command
-                && outcome.CommandId > 0)
-            {
-                this.localCapture.Commands.Acknowledge(outcome.CommandId);
-            }
-        }
-    }
+    /// <summary>
+    /// 仅由时间线交付的帧确认命令；普通推送与补发共用此入口。
+    /// </summary>
+    internal void AcknowledgeCommands(WorldFrame frame)
+        => this.localCapture?.Commands.Acknowledge(frame, client.Guid);
 
     /// <summary>
     /// 服务端请求补发本地上传帧
