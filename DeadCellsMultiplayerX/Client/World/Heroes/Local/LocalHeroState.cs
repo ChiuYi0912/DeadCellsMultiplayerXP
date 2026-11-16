@@ -15,7 +15,7 @@ internal sealed class LocalHeroState : DisposableEventReceiver,
     IOnLocalHeroInitDone,
     IOnLocalHeroPostUpdate
 {
-    private readonly GuestClientSession session;
+    private readonly GuestGameSession session;
 
 #if DEBUG
 
@@ -39,14 +39,23 @@ internal sealed class LocalHeroState : DisposableEventReceiver,
     /// </summary>
     public double SyncedTimeMs => this.session.SyncedTimeMs;
 
-    public LocalHeroState(GuestClientSession session)
+    public LocalHeroState(GuestGameSession session)
     {
         this.session = session;
 
-        this.Context.HasHero = true;
-        this.Context.IsAlive = !GuestClientSession.Game.hero.destroyed;
+        try
+        {
+            this.Context.HasHero = true;
+            this.Context.IsAlive = !GuestGameSession.Game.hero.destroyed;
 
-        this.SyncLevelSnapshot(GuestClientSession.Game);
+            this.SyncLevelSnapshot(GuestGameSession.Game);
+        }
+        catch
+        {
+            // The base constructor already registered this event receiver.
+            this.Dispose();
+            throw;
+        }
     }
 
     void IOnLocalHeroInitDone.OnHeroInitDone(Hero hero)

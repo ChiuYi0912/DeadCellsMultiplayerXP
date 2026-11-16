@@ -40,7 +40,7 @@ internal readonly record struct ClientNetSnapshot(
 
 internal static class ClientNetStats
 {
-    public static ClientNetSnapshot Collect(GuestClientSession? session)
+    public static ClientNetSnapshot Collect(GuestGameSession? session)
     {
         var version = VersionUtils.ModVersion.ToString(3);
 

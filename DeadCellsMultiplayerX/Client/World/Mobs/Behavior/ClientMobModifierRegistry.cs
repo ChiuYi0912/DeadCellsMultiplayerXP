@@ -17,13 +17,13 @@ using GameZombie = dc.en.mob.Zombie;
 /// </summary>
 internal sealed class ClientMobModifierRegistry
 {
-    private readonly GuestClientSession session;
+    private readonly GuestGameSession session;
     private readonly ClientEntityStore store;
     private readonly ClientReplayProxyManager ghosts;
     private readonly MobModifierRegistry<ClientMobModifierContext> inner = new();
 
     public ClientMobModifierRegistry(
-        GuestClientSession session,
+        GuestGameSession session,
         ClientEntityStore store,
         ClientReplayProxyManager ghosts)
     {
@@ -170,7 +170,7 @@ internal sealed class ClientMobModifierRegistry
             return ghost.Hero;
         }
 
-        return GuestClientSession.Game?.hero;
+        return GuestGameSession.Game?.hero;
     }
 
     /// <summary>

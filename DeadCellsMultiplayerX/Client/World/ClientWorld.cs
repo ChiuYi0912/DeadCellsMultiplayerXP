@@ -17,7 +17,7 @@ using DeadCellsMultiplayerX.Foundation.Lifecycle;
 /// <summary>
 /// 客户端世界组合根
 /// </summary>
-internal sealed class ClientWorld : DisposableEventReceiver
+internal sealed class ClientWorld : Disposable
 {
     /// <summary>
     /// 世界帧管理器，负责接收、应用和驱动世界帧
@@ -61,31 +61,41 @@ internal sealed class ClientWorld : DisposableEventReceiver
     /// </summary>
     private readonly ClientAreaAffectState areaAffects;
 
-    public ClientWorld(GuestClientSession session, string localGuid)
+    public ClientWorld(GuestGameSession session, string localGuid)
     {
-        this.acknowledgeCommands = session.AcknowledgeCommands;
-        this.frames = new WorldFrameTimeline(session, localGuid);
-        this.entityStore = new ClientEntityStore();
+        try
+        {
+            this.acknowledgeCommands = session.AcknowledgeCommands;
+            this.frames = new WorldFrameTimeline(session, localGuid);
+            this.entityStore = new ClientEntityStore();
 
-        this.ghosts = new ClientReplayProxyManager(session, localGuid);
-        this.MobModifiers = new ClientMobModifierRegistry(
-            session, this.entityStore, this.ghosts);
-        this.mobs = new ClientMobReplicator(
-            session, this.MobModifiers, this.frames, this.entityStore);
-        this.entityStore.RegisterHandler(this.mobs);
+            this.ghosts = new ClientReplayProxyManager(session, localGuid);
+            this.MobModifiers = new ClientMobModifierRegistry(
+                session, this.entityStore, this.ghosts);
+            this.mobs = new ClientMobReplicator(
+                session, this.MobModifiers, this.frames, this.entityStore);
+            this.entityStore.RegisterHandler(this.mobs);
 
-        this.entities = new ClientEntityFrameApplier(this.entityStore);
-        this.entities.DebugLabels.Register(new MobDebugTextProvider(session));
+            this.entities = new ClientEntityFrameApplier(this.entityStore);
+            this.entities.DebugLabels.Register(new MobDebugTextProvider(session));
 
-        this.localHero = new LocalHeroState(session);
-        this.heroes = new RemoteHeroManager(
-            session, this.localHero, localGuid, this.ghosts);
-        this.ghosts.BindRemoteHeroes(this.heroes);
+            this.localHero = new LocalHeroState(session);
+            this.heroes = new RemoteHeroManager(
+                session, this.localHero, localGuid, this.ghosts);
+            this.ghosts.BindRemoteHeroes(this.heroes);
 
-        this.areaAffects = new ClientAreaAffectState(session);
+            this.areaAffects = new ClientAreaAffectState(session);
 
-        this.frames.FrameApplied += this.OnFrameApplied;
-        this.frames.Start();
+            this.frames.FrameApplied += this.OnFrameApplied;
+            this.frames.Start();
+        }
+        catch
+        {
+            // Native hero/level initialization can fail after some children
+            // have registered events. Roll back while this owner is reachable.
+            this.Dispose();
+            throw;
+        }
     }
 
     /// <summary>
@@ -214,14 +224,22 @@ internal sealed class ClientWorld : DisposableEventReceiver
 
     protected override void MyDispose()
     {
-        this.frames.FrameApplied -= this.OnFrameApplied;
-        this.MobModifiers.Clear();
-        this.entities.Clear();
-        this.areaAffects.Reset();
-        this.heroes.Dispose();
-        this.ghosts.Dispose();
-        this.frames.Dispose();
-        this.localHero.Dispose();
-        base.MyDispose();
+        this.frames?.FrameApplied -= this.OnFrameApplied;
+        this.Cleanup(() => this.MobModifiers?.Clear(), "mob modifiers");
+        this.Cleanup(() => this.entities?.Clear(), "entities");
+        this.Cleanup(() => this.areaAffects?.Reset(), "area effects");
+        this.Cleanup(() => this.heroes?.Dispose(), "remote heroes");
+        this.Cleanup(() => this.ghosts?.Dispose(), "replay proxies");
+        this.Cleanup(() => this.frames?.Dispose(), "frame timeline");
+        this.Cleanup(() => this.localHero?.Dispose(), "local hero events");
+    }
+
+    private void Cleanup(Action cleanup, string resource)
+    {
+        try
+        {
+            cleanup();
+        }
+        catch (Exception ex) { this.Logger.Warning(ex, "World cleanup failed: {Resource}", resource); }
     }
 }

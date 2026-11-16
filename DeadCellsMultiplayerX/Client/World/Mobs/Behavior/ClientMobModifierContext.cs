@@ -12,7 +12,7 @@ internal sealed class ClientMobModifierContext(
     Mob mob,
     uint netId,
     long tick,
-    GuestClientSession session,
+    GuestGameSession session,
     ClientReplayProxyManager remoteGhost) : IMobModifierContext
 {
 
@@ -31,14 +31,14 @@ internal sealed class ClientMobModifierContext(
     /// <summary>
     /// 客户端会话。
     /// </summary>
-    public GuestClientSession Session { get; } = session;
+    public GuestGameSession Session { get; } = session;
 
     public ClientReplayProxyManager RemoteGhost { get; } = remoteGhost;
 
     /// <inheritdoc />
     public T GetService<T>() where T : class
     {
-        if (typeof(T) == typeof(GuestClientSession))
+        if (typeof(T) == typeof(GuestGameSession))
         {
             return (T)(object)this.Session;
         }

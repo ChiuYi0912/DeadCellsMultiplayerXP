@@ -10,7 +10,7 @@ using DeadCellsMultiplayerX.Engine.Utilities;
 using DeadCellsMultiplayerX.Networking.Time;
 using Serilog;
 
-internal sealed class ClientReplayProxyManager(GuestClientSession session, string localGuid)
+internal sealed class ClientReplayProxyManager(GuestGameSession session, string localGuid)
 {
     private const long MAX_EVENT_AGE_MS = 2000;
 
@@ -39,7 +39,7 @@ internal sealed class ClientReplayProxyManager(GuestClientSession session, strin
 
     public int Count => this.ghosts.Count;
 
-    internal GuestClientSession Session { get; } = session;
+    internal GuestGameSession Session { get; } = session;
 
     /// <summary>
     /// 绑定可见远端 Hero 查询；两者由组合根共同创建，存在互相引用。
@@ -107,7 +107,7 @@ internal sealed class ClientReplayProxyManager(GuestClientSession session, strin
             this.ghosts.Remove(guid);
         }
 
-        ghost = ClientHeroReplayProxy.CreateClient(GuestClientSession.Game, level, guid);
+        ghost = ClientHeroReplayProxy.CreateClient(GuestGameSession.Game, level, guid);
         if (ghost == null)
         {
             return null;
@@ -146,7 +146,7 @@ internal sealed class ClientReplayProxyManager(GuestClientSession session, strin
 
     public void Tick(long nowMs)
     {
-        this.SyncPositions(GuestClientSession.Game?.curLevel);
+        this.SyncPositions(GuestGameSession.Game?.curLevel);
         this.timeline.Drain(nowMs, this.Present);
     }
 
@@ -269,7 +269,7 @@ internal sealed class ClientReplayProxyManager(GuestClientSession session, strin
 
     private void Present(WorldFrame frame, HeroOutcome outcome)
     {
-        var game = GuestClientSession.Game;
+        var game = GuestGameSession.Game;
         var level = game?.curLevel;
         if (level == null)
         {

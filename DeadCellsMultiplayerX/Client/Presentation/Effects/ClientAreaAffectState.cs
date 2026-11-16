@@ -13,7 +13,7 @@ using Serilog;
 /// <summary>
 /// 客户端动态 LevelAreaAffect 快照镜像
 /// </summary>
-internal sealed class ClientAreaAffectState(GuestClientSession session)
+internal sealed class ClientAreaAffectState(GuestGameSession session)
 {
     private const int MAX_ENTRIES = 512;
     private const double AREA_FPS = 60.0;
@@ -21,7 +21,7 @@ internal sealed class ClientAreaAffectState(GuestClientSession session)
     private static readonly ILogger Logger =
         Log.ForContext("SourceContext", "ClientAreaAffectState");
 
-    private readonly GuestClientSession session = session;
+    private readonly GuestGameSession session = session;
 
     /// <summary>
     /// 服务端快照接管的区域
@@ -62,7 +62,7 @@ internal sealed class ClientAreaAffectState(GuestClientSession session)
             return;
         }
 
-        var game = GuestClientSession.Game;
+        var game = GuestGameSession.Game;
         if (game == null)
         {
             return;

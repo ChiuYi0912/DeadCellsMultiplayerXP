@@ -25,7 +25,7 @@ using Serilog;
 /// </summary>
 internal sealed class RemoteHero : KingSkin, IHxbitSerializable<RemoteHero.IHxData>
 {
-    private readonly GuestClientSession session;
+    private readonly GuestGameSession session;
     private readonly WorldFrameTimeline frames;
 
     private static readonly ILogger Log = Serilog.Log.ForContext("SourceContext", "RemoteHero");
@@ -98,7 +98,7 @@ internal sealed class RemoteHero : KingSkin, IHxbitSerializable<RemoteHero.IHxDa
     public sealed class IHxData { }
 
     public RemoteHero(
-        GuestClientSession session,
+        GuestGameSession session,
         Level lvl,
         WorldFrameTimeline frames,
         string guid,
@@ -133,7 +133,7 @@ internal sealed class RemoteHero : KingSkin, IHxbitSerializable<RemoteHero.IHxDa
         base.initGfx();
 
         //移除状态机动画
-        AnimManager anim = this.spr.get_anim();
+        var anim = this.spr.get_anim();
         anim.removeAllStateAnims();
 
         //创建光
@@ -164,15 +164,15 @@ internal sealed class RemoteHero : KingSkin, IHxbitSerializable<RemoteHero.IHxDa
             return;
         }
 
-        SpriteLib? sprlib = Assets.Class.lib.get(
+        var sprlib = Assets.Class.lib.get(
             spawn.MainSprite.AtlasName.AsHaxeString());
         if (sprlib == null)
         {
             return;
         }
 
-        String group = spawn.MainSprite.GroupName.AsHaxeString();
-        dc.h3d.mat.Texture normalMap = sprlib.getNormalMapFromGroup(group);
+        var group = spawn.MainSprite.GroupName.AsHaxeString();
+        var normalMap = sprlib.getNormalMapFromGroup(group);
         this.initSprite(sprlib, group, null, null, null, true, null, normalMap);
 
         if (this.spr == null)
@@ -210,7 +210,7 @@ internal sealed class RemoteHero : KingSkin, IHxbitSerializable<RemoteHero.IHxDa
 
         if (this.frames.TryGetHeroBracket(
                 this.Guid, nowSec,
-                out HeroDynamic prev, out HeroDynamic next,
+                out var prev, out var next,
                 out var alpha, out var renderTimeSec))
         {
             // 时间线还没追上目标关卡时,保持创建时的摆放,不使用旧关卡样本
@@ -272,7 +272,7 @@ internal sealed class RemoteHero : KingSkin, IHxbitSerializable<RemoteHero.IHxDa
     /// <param name="renderTimeSec">客户端时间,用于判断动画开始与结束时间</param>
     public void Animate(AnimInfo prevAnim, AnimInfo nextAnim, double renderTimeSec)
     {
-        AnimManager? anim = this.spr?.get_anim();
+        var anim = this.spr?.get_anim();
         if (anim == null)
         {
             return;
@@ -314,7 +314,7 @@ internal sealed class RemoteHero : KingSkin, IHxbitSerializable<RemoteHero.IHxDa
             return false;
         }
 
-        AnimManager? anim = this.spr.get_anim();
+        var anim = this.spr.get_anim();
         if (anim == null || anim.destroyed)
         {
             return false;
@@ -407,14 +407,11 @@ internal sealed class RemoteHero : KingSkin, IHxbitSerializable<RemoteHero.IHxDa
     /// <param name="name"></param>
     /// <remarks>由于原始翻滚技能使用状态打断,这里必须判断,否则会出现动画快速切换(闪烁)</remarks>
     /// <returns>bool</returns>
-    private static bool IsRollRelatedGroup(string name)
+    private static bool IsRollRelatedGroup(string name) => name switch
     {
-        return name switch
-        {
-            "rolling" or "rollEnd" or "rollIdle" or "rollRun" => true,
-            _ => false,
-        };
-    }
+        "rolling" or "rollEnd" or "rollIdle" or "rollRun" => true,
+        _ => false,
+    };
 
     /// <summary>
     /// 强制开启渲染

@@ -12,20 +12,25 @@ internal static class ClientActionHookBinding
 {
     public static IDisposable Install(IClientActionHookSink sink)
     {
-        Hook_HeroActiveSkillsManager.onActiveSkill += sink.OnActiveSkill;
-        Hook_BeheadedWeaponsManager.onWeaponExecute += sink.OnWeaponExecute;
-        Hook_BaseShield.onShieldChargeStart += sink.OnShieldChargeStart;
-        Hook_BaseShield.onShieldReleased += sink.OnShieldReleased;
-        Hook_BaseShield.startParry += sink.OnStartParry;
-        Hook_BaseShield.onShieldEndParry += sink.OnShieldEndParry;
-
         var group = new HookGroup();
-        group.Add(new HookLease(() => Hook_HeroActiveSkillsManager.onActiveSkill -= sink.OnActiveSkill));
-        group.Add(new HookLease(() => Hook_BeheadedWeaponsManager.onWeaponExecute -= sink.OnWeaponExecute));
-        group.Add(new HookLease(() => Hook_BaseShield.onShieldChargeStart -= sink.OnShieldChargeStart));
-        group.Add(new HookLease(() => Hook_BaseShield.onShieldReleased -= sink.OnShieldReleased));
-        group.Add(new HookLease(() => Hook_BaseShield.startParry -= sink.OnStartParry));
-        group.Add(new HookLease(() => Hook_BaseShield.onShieldEndParry -= sink.OnShieldEndParry));
+        try
+        {
+            group.Subscribe(() => Hook_HeroActiveSkillsManager.onActiveSkill += sink.OnActiveSkill, () => Hook_HeroActiveSkillsManager.onActiveSkill -= sink.OnActiveSkill);
+            group.Subscribe(() => Hook_BeheadedWeaponsManager.onWeaponExecute += sink.OnWeaponExecute, () => Hook_BeheadedWeaponsManager.onWeaponExecute -= sink.OnWeaponExecute);
+            group.Subscribe(() => Hook_BaseShield.onShieldChargeStart += sink.OnShieldChargeStart, () => Hook_BaseShield.onShieldChargeStart -= sink.OnShieldChargeStart);
+            group.Subscribe(() => Hook_BaseShield.onShieldReleased += sink.OnShieldReleased, () => Hook_BaseShield.onShieldReleased -= sink.OnShieldReleased);
+            group.Subscribe(() => Hook_BaseShield.startParry += sink.OnStartParry, () => Hook_BaseShield.startParry -= sink.OnStartParry);
+            group.Subscribe(() => Hook_BaseShield.onShieldEndParry += sink.OnShieldEndParry, () => Hook_BaseShield.onShieldEndParry -= sink.OnShieldEndParry);
+        }
+        catch (Exception installError)
+        {
+            try
+            {
+                group.Dispose();
+            }
+            catch (Exception cleanupError) { throw new AggregateException(installError, cleanupError); }
+            throw;
+        }
         return group;
     }
 }

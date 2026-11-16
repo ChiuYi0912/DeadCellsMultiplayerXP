@@ -40,6 +40,8 @@ internal sealed class GuestFrameUploader(
 
     public void MarkDisposed() => this.disposed = true;
 
+    public Task CompleteAsync() => this.uploadTask ?? Task.CompletedTask;
+
 
     /// <summary>Captures the local hero and sends at most one in-flight frame.</summary>
     public void CaptureAndUpload(Hero hero)

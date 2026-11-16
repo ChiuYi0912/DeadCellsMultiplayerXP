@@ -16,6 +16,7 @@ using HaxeProxy.Runtime;
 using ModCore;
 using ModCore.Events;
 using ModCore.Utilities;
+using Microsoft.VisualStudio.Threading;
 
 internal sealed partial class ClientRuntime : Module<ClientRuntime>, IClientLifecycleHookSink
 {
@@ -28,6 +29,10 @@ internal sealed partial class ClientRuntime : Module<ClientRuntime>, IClientLife
     /// 进程级 Hook 的租约
     /// </summary>
     private ClientHookBootstrap? hookBootstrap;
+
+    private readonly SemaphoreSlim startGate = new(1, 1);
+    private CancellationTokenSource? pendingStart;
+    private long startGeneration;
 
     /// <summary>
     /// 当前的 Guest Client 实例
@@ -83,68 +88,182 @@ internal sealed partial class ClientRuntime : Module<ClientRuntime>, IClientLife
         orig(self, i, glowData);
     }
 
-    /// <summary>
-    /// 清理 Client 实例
-    /// </summary>
     public void CleanupClient()
     {
-        Logger.Information("Cleaning clients...");
-
-        this.CurrentGuestClient?.Dispose();
-        this.CurrentHostClient?.Dispose();
-        this.CurrentHostClient = null;
-        this.CurrentGuestClient = null;
-
-        GC.Collect(2, GCCollectionMode.Forced);
-
-        Task.Delay(200).ContinueWith(_ => GC.Collect(2, GCCollectionMode.Forced));
+        this.pendingStart?.Cancel();
+        var guest = this.CurrentGuestClient;
+        var host = this.CurrentHostClient;
+        guest?.Dispose();
+        _ = this.CleanupClientsAsync(guest, host);
     }
 
-    /// <summary>
-    /// 启动 Host 客户端，并加入房间
-    /// </summary>
-    /// <param name="ip"></param>
-    /// <param name="port"></param>
-    public async Task StartHost(string ip, int port)
+    private async Task CleanupClientsAsync(GuestClient? guest, HostClient? host)
     {
-        this.CleanupClient();
+        try
+        {
+            if (guest != null)
+            {
+                await guest.DisposeAsync();
+            }
 
-        var listener = new QuicNetworkListener(ip, port);
+            await ModCore.Modules.Game.SynchronizationContext;
 
-        await listener.Init();
+            if (ReferenceEquals(this.CurrentGuestClient, guest))
+            {
+                this.CurrentGuestClient = null;
+            }
 
-        var launcher = this.serverProcessLauncher
-            ?? throw new InvalidOperationException(
-                "ClientRuntime.Init must be called with an IServerProcessLauncher.");
-
-        this.CurrentHostClient = new HostClient(listener, default, launcher);
-        await this.CurrentHostClient.Init();
-
-        await this.StartGuest(ip, port);
+            this.DisposeHost(host);
+        }
+        catch (Exception ex) { Logger.Warning(ex, "Client cleanup failed"); }
     }
 
-    /// <summary>
-    /// 启动 Guest 客户端
-    /// </summary>
-    /// <param name="ip"></param>
-    /// <param name="port"></param>
-    /// <returns></returns>
-    public async Task StartGuest(string ip, int port, string? playerName = null)
+    private void DisposeHost(HostClient? host)
     {
-        if (string.IsNullOrEmpty(playerName))
+        try
         {
-            playerName = Environment.UserName;
+            host?.Dispose();
         }
-
-        if (this.CurrentGuestClient != null && !this.CurrentGuestClient.IsDisposed)
+        catch (Exception ex) { Logger.Warning(ex, "Host cleanup failed"); }
+        finally
         {
-            throw new InvalidOperationException();
+            if (ReferenceEquals(this.CurrentHostClient, host))
+            {
+                this.CurrentHostClient = null;
+            }
         }
+    }
 
-        var connect = await QuicNetworkConnect.Connect(ip, port, default);
+    public async Task StartHost(string ip, int port, CancellationToken cancellationToken = default)
+    {
+        Interlocked.Increment(ref this.startGeneration);
+        await this.startGate.WaitAsync(cancellationToken);
+        using var start = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        this.pendingStart = start;
+        try
+        {
+            await this.CleanupClientsAsync(this.CurrentGuestClient, this.CurrentHostClient);
+            await ModCore.Modules.Game.SynchronizationContext;
+            start.Token.ThrowIfCancellationRequested();
+            var launcher = this.serverProcessLauncher
+                ?? throw new InvalidOperationException("ClientRuntime.Init requires a server process launcher.");
+            var listener = new QuicNetworkListener(ip, port);
+            try
+            {
+                await listener.Init();
+                start.Token.ThrowIfCancellationRequested();
+                this.CurrentHostClient = new HostClient(listener, default, launcher);
+            }
+            catch
+            {
+                await listener.DisposeAsync();
+                throw;
+            }
+            await this.CurrentHostClient.Init();
+            start.Token.ThrowIfCancellationRequested();
+            await this.StartGuestCoreAsync(ip, port, null, start.Token);
+        }
+        catch
+        {
+            await this.CleanupClientsAsync(this.CurrentGuestClient, this.CurrentHostClient);
+            throw;
+        }
+        finally
+        {
+            this.pendingStart = null;
+            this.startGate.Release();
+        }
+    }
 
-        this.CurrentGuestClient = new GuestClient(connect);
-        await this.CurrentGuestClient.Init(playerName);
+    public async Task StartGuest(string ip, int port, string? playerName = null,
+        CancellationToken cancellationToken = default)
+    {
+        Interlocked.Increment(ref this.startGeneration);
+        await this.startGate.WaitAsync(cancellationToken);
+        using var start = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        this.pendingStart = start;
+        try
+        { await this.StartGuestCoreAsync(ip, port, playerName, start.Token); }
+        finally
+        {
+            this.pendingStart = null;
+            this.startGate.Release();
+        }
+    }
+
+    private async Task StartGuestCoreAsync(string ip, int port, string? playerName,
+        CancellationToken cancellationToken)
+    {
+        await ModCore.Modules.Game.SynchronizationContext;
+        if (this.CurrentGuestClient is { } previous)
+        {
+            if (!previous.IsDisposed)
+            {
+                throw new InvalidOperationException("A guest is already connected.");
+            }
+            // Finish the old room's cleanup before clearing its identity; its
+            // queued stop notification may lose the race to this reconnect.
+            await this.CleanupClientsAsync(previous, this.CurrentHostClient);
+            await ModCore.Modules.Game.SynchronizationContext;
+        }
+        var connection = await QuicNetworkConnect.Connect(ip, port, cancellationToken);
+        GuestClient? guest = null;
+        try
+        {
+            await ModCore.Modules.Game.SynchronizationContext;
+            cancellationToken.ThrowIfCancellationRequested();
+            guest = new GuestClient(connection, ModCore.Modules.Game.SynchronizationContext);
+            guest.Stopping += this.OnGuestStopping;
+            this.CurrentGuestClient = guest;
+            await guest.JoinLobbyAsync(string.IsNullOrEmpty(playerName) ? Environment.UserName : playerName,
+                cancellationToken);
+        }
+        catch
+        {
+            if (guest != null)
+            {
+                await guest.DisposeAsync();
+            }
+            else
+            {
+                await connection.DisposeAsync();
+            }
+
+            await ModCore.Modules.Game.SynchronizationContext;
+
+            if (ReferenceEquals(this.CurrentGuestClient, guest))
+            {
+                this.CurrentGuestClient = null;
+            }
+
+            throw;
+        }
+    }
+
+    private void OnGuestStopping(GuestClient guest, bool returnToMenu)
+        => _ = this.HandleGuestStoppingAsync(guest, returnToMenu, this.startGeneration);
+
+    private async Task HandleGuestStoppingAsync(GuestClient guest, bool returnToMenu, long generation)
+    {
+        try
+        {
+            await guest.DisposeAsync();
+            await ModCore.Modules.Game.SynchronizationContext;
+            // A late callback from an old connection must never clean up a new one.
+            if (!ReferenceEquals(this.CurrentGuestClient, guest))
+            {
+                return;
+            }
+
+            this.CurrentGuestClient = null;
+            this.DisposeHost(this.CurrentHostClient);
+
+            if (returnToMenu && generation == this.startGeneration)
+            {
+                dc.Boot.Class.ME.returnToMainMenu();
+            }
+        }
+        catch (Exception ex) { Logger.Warning(ex, "Guest stop notification failed"); }
     }
 
     #region Menu

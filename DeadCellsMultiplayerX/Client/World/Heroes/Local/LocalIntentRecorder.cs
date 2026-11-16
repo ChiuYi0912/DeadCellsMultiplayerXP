@@ -16,14 +16,14 @@ using Serilog;
 /// 只上报“想做什么”，物品/等级/pose 由服务端解析。
 /// </summary>
 internal sealed class LocalIntentRecorder(
-    GuestClientSession session,
+    GuestGameSession session,
     HeroCommandSender sender,
     LocalActionDeduper dedupe) : IClientActionHookSink
 {
     private static readonly ILogger Logger =
         Log.ForContext("SourceContext", "LocalIntentRecorder");
 
-    private readonly GuestClientSession session = session
+    private readonly GuestGameSession session = session
             ?? throw new ArgumentNullException(nameof(session));
     private readonly HeroCommandSender sender = sender
             ?? throw new ArgumentNullException(nameof(sender));
@@ -41,7 +41,7 @@ internal sealed class LocalIntentRecorder(
         int id,
         double ratio)
     {
-        var game = GuestClientSession.Game;
+        var game = GuestGameSession.Game;
         var hero = self.hero;
         var isLocal = hero != null && ReferenceEquals(hero, game?.hero);
 
@@ -65,7 +65,7 @@ internal sealed class LocalIntentRecorder(
         BeheadedWeaponsManager self,
         Weapon weapon)
     {
-        var game = GuestClientSession.Game;
+        var game = GuestGameSession.Game;
         var hero = self?.hero;
         var isLocal = hero != null && ReferenceEquals(hero, game?.hero);
         var item = isLocal ? weapon?.item : null;
@@ -163,7 +163,7 @@ internal sealed class LocalIntentRecorder(
     /// </summary>
     internal void DebugCastSkill(string itemId, int slot)
     {
-        var hero = GuestClientSession.Game?.hero;
+        var hero = GuestGameSession.Game?.hero;
         var world = this.session.ClientWorld;
         if (hero == null || world == null || world.Epoch < 0)
         {
@@ -183,7 +183,7 @@ internal sealed class LocalIntentRecorder(
     /// </summary>
     internal void DebugUseWeapon(string itemId, int slot, int cycle = 0)
     {
-        var hero = GuestClientSession.Game?.hero;
+        var hero = GuestGameSession.Game?.hero;
         var world = this.session.ClientWorld;
         if (hero == null || world == null || world.Epoch < 0)
         {
@@ -206,7 +206,7 @@ internal sealed class LocalIntentRecorder(
             return false;
         }
 
-        var hero = GuestClientSession.Game?.hero;
+        var hero = GuestGameSession.Game?.hero;
         if (hero == null || !ReferenceEquals(shield.owner, hero))
         {
             return false;
@@ -219,7 +219,7 @@ internal sealed class LocalIntentRecorder(
         BaseShield shield,
         ShieldIntentKind kind)
     {
-        var hero = GuestClientSession.Game?.hero;
+        var hero = GuestGameSession.Game?.hero;
         var item = shield.item;
         if (hero == null || item == null)
         {

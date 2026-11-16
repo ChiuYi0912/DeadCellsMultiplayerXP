@@ -22,14 +22,14 @@ using Math = Math;
 /// Mob 类型的客户端处理器
 /// </summary>
 internal sealed class ClientMobReplicator(
-    GuestClientSession session,
+    GuestGameSession session,
     ClientMobModifierRegistry mobModifiers,
     WorldFrameTimeline frames,
     ClientEntityStore store) : IClientEntityKindHandler
 {
     private static readonly ILogger Logger = Log.ForContext("SourceContext", "ClientMobReplicator");
 
-    private readonly GuestClientSession session = session;
+    private readonly GuestGameSession session = session;
     private readonly ClientMobModifierRegistry mobModifiers = mobModifiers;
     private readonly WorldFrameTimeline frames = frames;
     private readonly ClientEntityStore store = store;
@@ -61,7 +61,7 @@ internal sealed class ClientMobReplicator(
         }
 
         var level = LevelUtils.ResolveLevel(
-            GuestClientSession.Game, spawn.LevelId, spawn.SubLevelIndex);
+            GuestGameSession.Game, spawn.LevelId, spawn.SubLevelIndex);
         if (level == null)
         {
             return false;

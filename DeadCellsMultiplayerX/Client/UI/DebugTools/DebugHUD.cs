@@ -86,15 +86,16 @@ public partial class DebugHUD : IEventReceiver, IClientDebugHookSink, IDisposabl
 
     public int TextColor { get; set; } = 0xFFFFFF;
 
-    public static void EnsureCreated()
+    public static DebugHUD EnsureCreated()
     {
         if (instance != null)
         {
-            return;
+            return instance;
         }
 
         Logger.Information("DebugHUD hooks created");
         instance = new DebugHUD();
+        return instance;
     }
 
     public static void EnsureNative() => instance?.EnsureNativeInternal();

@@ -23,26 +23,81 @@ internal static class StreamUtils
 
     public static JsonRpc CreateJsonRpc(
         this Stream stream, string role = "unknown", TraceListener? failureListener = null)
-    {
-        var rpcChannel = stream.CreateMultiplexingStream(out var mxstream);
-        var formatter = new NerdbankMessagePackFormatter
-        {
-            MultiplexingStream = mxstream,
-            TypeShapeProvider = TypeShapeProvider_DeadCellsMultiplayerX.Default,
-        };
-        var handler = new LengthHeaderMessageHandler(rpcChannel, rpcChannel, formatter);
+        => stream.CreateJsonRpc(role, failureListener, out _, out _);
 
-        var traceSource = new TraceSource("JSON-RPC", SourceLevels.Error);
+    /// <summary>Exposes the transport resources to endpoints that own their full lifetime.</summary>
+    public static JsonRpc CreateJsonRpc(
+        this Stream stream, string role, TraceListener? failureListener,
+        out MultiplexingStream multiplexingStream, out TraceSource traceSource)
+    {
+        traceSource = new TraceSource("JSON-RPC", SourceLevels.Error);
         if (failureListener != null)
         {
             traceSource.Listeners.Add(failureListener);
         }
 
-        var rpc = new JsonRpc(handler)
+        MultiplexingStream? createdMux = null;
+        LengthHeaderMessageHandler? handler = null;
+        try
         {
-            TraceSource = traceSource,
-        };
-        return rpc;
+            var rpcChannel = stream.CreateMultiplexingStream(out createdMux);
+            var formatter = new NerdbankMessagePackFormatter
+            {
+                MultiplexingStream = createdMux,
+                TypeShapeProvider = TypeShapeProvider_DeadCellsMultiplayerX.Default,
+            };
+            handler = new LengthHeaderMessageHandler(rpcChannel, rpcChannel, formatter);
+            var rpc = new JsonRpc(handler) { TraceSource = traceSource };
+            multiplexingStream = createdMux;
+            return rpc;
+        }
+        catch
+        {
+            try
+            {
+                stream.Dispose();
+            }
+            catch (Exception ex) { Serilog.Log.Warning(ex, "Failed RPC input cleanup"); }
+            _ = DisposeFailedRpcAsync(handler, createdMux, traceSource);
+            throw;
+        }
+    }
+
+    private static async Task DisposeFailedRpcAsync(
+        LengthHeaderMessageHandler? handler, MultiplexingStream? mux, TraceSource trace)
+    {
+        try
+        {
+            if (handler != null)
+            {
+                await handler.DisposeAsync().ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex) { Serilog.Log.Warning(ex, "Failed RPC handler cleanup"); }
+
+        try
+        {
+            if (mux != null)
+            {
+                await mux.DisposeAsync().ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex) { Serilog.Log.Warning(ex, "Failed RPC transport cleanup"); }
+
+        try
+        {
+            if (mux != null)
+            {
+                await mux.Completion.ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex) { Serilog.Log.Debug(ex, "RPC transport ended during failed initialization"); }
+
+        try
+        {
+            trace.Close();
+        }
+        catch (Exception ex) { Serilog.Log.Warning(ex, "Failed RPC trace cleanup"); }
     }
 
 

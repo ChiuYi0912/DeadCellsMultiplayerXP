@@ -68,7 +68,7 @@ internal sealed class ShieldAttackArbiter(
         var stunMs = 0L;
         var skillInfo = shield.get_curSkillInf();
         var stunSeconds = skillInfo?.props?.duration ?? 0.0;
-        stunMs = (long)System.Math.Max(0, stunSeconds * 1000.0);
+        stunMs = (long)Math.Max(0, stunSeconds * 1000.0);
 
         var engineHero = hero.Ghost.Hero;
         var outcome = new HeroOutcome
@@ -110,7 +110,7 @@ internal sealed class ShieldAttackArbiter(
                 SourceNetId = sourceNetId,
                 StunDurationMs = stunMs,
                 SkillInterrupted = skillInterrupted,
-                ParryWindowEndMs = now + (long)System.Math.Max(
+                ParryWindowEndMs = now + (long)Math.Max(
                     0, shield.totalParryDurationS * 1000.0),
             },
         };

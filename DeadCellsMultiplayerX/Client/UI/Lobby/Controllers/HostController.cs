@@ -21,7 +21,7 @@ internal sealed class HostController(
             this.Ctx.HostPort = port;
             this.Ctx.IsHost = true;
 
-            await this.Client.StartHost(ip, port).WaitAsync(ct);
+            await this.Client.StartHost(ip, port, ct);
 
             var guest = this.Client.CurrentGuestClient
                 ?? throw new InvalidOperationException("Host guest client not created");

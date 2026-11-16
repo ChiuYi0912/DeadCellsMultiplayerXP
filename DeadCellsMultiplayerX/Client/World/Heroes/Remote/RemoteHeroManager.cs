@@ -11,13 +11,13 @@ using DeadCellsMultiplayerX.Engine.Utilities;
 using DeadCellsMultiplayerX.Foundation.Lifecycle;
 
 internal sealed class RemoteHeroManager(
-    GuestClientSession session,
+    GuestGameSession session,
     LocalHeroState localHero,
     string localGuid,
     ClientReplayProxyManager ghosts) : DisposableEventReceiver,
 IOnLocalHeroInitDone
 {
-    private readonly GuestClientSession session = session;
+    private readonly GuestGameSession session = session;
     private readonly LocalHeroState localHero = localHero;
     private readonly string localGuid = localGuid;
     private readonly ClientReplayProxyManager ghosts = ghosts;
@@ -147,7 +147,7 @@ IOnLocalHeroInitDone
                     this.missingSpawnLogged.Remove(state.GUID);
                 }
 
-                var currentLevel = GuestClientSession.Game?.curLevel;
+                var currentLevel = GuestGameSession.Game?.curLevel;
                 if (currentLevel != null)
                 {
                     this.ghosts.Ensure(state.GUID, currentLevel);
@@ -216,14 +216,19 @@ IOnLocalHeroInitDone
 
     protected override void MyDispose()
     {
+        // Native destruction must not leave a stopped world's event receiver registered.
+        base.MyDispose();
         foreach (var h in this.heroes.Values)
         {
-            h?.destroy();
+            try
+            {
+                h?.destroy();
+            }
+            catch (Exception ex) { this.Logger.Warning(ex, "Remote hero cleanup failed"); }
         }
 
         this.heroes.Clear();
         this.appliedLoadoutVersions.Clear();
-        base.MyDispose();
     }
 
     /// <summary>
@@ -271,7 +276,7 @@ IOnLocalHeroInitDone
     /// <returns><see cref="RemoteHero"/></returns>
     private RemoteHero CreateHero(HeroSpawn spawn, WorldFrameTimeline frames, HeroDynamic state)
     {
-        var game = GuestClientSession.Game;
+        var game = GuestGameSession.Game;
         var level = game.curLevel;
         var hero = new RemoteHero(this.session, level, frames, spawn.GUID);
         hero.init();
@@ -373,7 +378,7 @@ IOnLocalHeroInitDone
 
     void IOnLocalHeroInitDone.OnHeroInitDone(Hero hero)
     {
-        if (!ReferenceEquals(hero, GuestClientSession.Game?.hero))
+        if (!ReferenceEquals(hero, GuestGameSession.Game?.hero))
         {
             return;
         }

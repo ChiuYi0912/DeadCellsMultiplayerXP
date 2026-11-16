@@ -2,6 +2,7 @@ namespace DeadCellsMultiplayerX.Client.Session.Guest;
 
 using DeadCellsMultiplayerX.Networking.Time;
 using Serilog;
+using Microsoft.VisualStudio.Threading;
 
 /// <summary>
 /// Owns the guest's NTP sampling and server-time offset.  It has no game
@@ -12,7 +13,8 @@ internal sealed class GuestClockSync(
     Func<bool> isDisposed,
     Func<bool> canRequest,
     Func<Task<long>> requestServerTime,
-    ILogger logger)
+    ILogger logger,
+    SynchronizationContext gameContext)
 {
     private const long NTP_INTERVAL_MS = 500;
 
@@ -37,6 +39,8 @@ internal sealed class GuestClockSync(
     public long RttMs => this.timeSystem.RttMs;
 
     public long OffsetMs => this.timeSystem.OffsetMs;
+
+    public Task CompleteAsync() => this.ntpTask ?? Task.CompletedTask;
 
     /// <summary>Called once per game frame.</summary>
     public void Tick()
@@ -64,7 +68,7 @@ internal sealed class GuestClockSync(
     /// <summary>Called for every received world frame.</summary>
     public void ObserveServerTime(long serverTimeMs)
     {
-        if (serverTimeMs <= this.lastServerFrameTimeMs)
+        if (this.isDisposed() || serverTimeMs <= this.lastServerFrameTimeMs)
         {
             return;
         }
@@ -81,7 +85,11 @@ internal sealed class GuestClockSync(
             var serverTime = await this.requestServerTime().ConfigureAwait(false);
             var t1 = ClientTimeSystem.NowMs();
 
-            this.timeSystem.AddSample(t0, t1, serverTime);
+            await gameContext;
+            if (!this.isDisposed())
+            {
+                this.timeSystem.AddSample(t0, t1, serverTime);
+            }
         }
         catch (Exception) when (this.isDisposed())
         {

@@ -50,7 +50,7 @@ internal sealed class WorldFrameTimeline
     private static readonly ILogger Logger =
         Log.ForContext("SourceContext", "WorldFrameTimeline");
 
-    private readonly GuestClientSession session;
+    private readonly GuestGameSession session;
     private readonly WorldFrameHistory history = new();
     private readonly FrameSpawnIndex spawns = new();
     private readonly FrameTimelineStats stats = new();
@@ -75,7 +75,7 @@ internal sealed class WorldFrameTimeline
     /// </summary>
     private bool loggedFirstFrame;
 
-    public WorldFrameTimeline(GuestClientSession session, string localGuid)
+    public WorldFrameTimeline(GuestGameSession session, string localGuid)
     {
         this.session = session;
 

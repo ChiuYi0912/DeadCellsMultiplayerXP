@@ -44,8 +44,20 @@ internal sealed class QuicNetworkConnect(QuicConnection connection, bool isClien
         }, cancellationToken);
 
         var nc = new QuicNetworkConnect(connect, true);
-        await nc.Init(cancellationToken);
-        return nc;
+        try
+        {
+            await nc.Init(cancellationToken);
+            return nc;
+        }
+        catch
+        {
+            try
+            {
+                await nc.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex) { nc.Logger.Warning(ex, "Failed QUIC connection cleanup"); }
+            throw;
+        }
     }
 
     public override Stream Stream => this.stream ?? throw new InvalidOperationException(

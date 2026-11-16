@@ -9,7 +9,7 @@ using DeadCellsMultiplayerX.Contracts.MobBehavior;
 /// <summary>
 /// mob 调试文本：netId、生命、elite、最近技能 id、目标玩家、事件阶段
 /// </summary>
-internal sealed class MobDebugTextProvider(GuestClientSession session)
+internal sealed class MobDebugTextProvider(GuestGameSession session)
     : IEntityDebugTextProvider
 {
     private sealed class State
@@ -85,12 +85,12 @@ internal sealed class MobDebugTextProvider(GuestClientSession session)
             return "-";
         }
 
-        if (guid == session.Client?.Guid)
+        if (guid == session.LocalGuid)
         {
             return "me";
         }
 
-        var guests = session.Client?.LobbyInfo?.Guests;
+        var guests = session.LobbyInfo?.Guests;
         if (guests != null
             && guests.TryGetValue(guid, out var info)
             && !string.IsNullOrEmpty(info.Name))

@@ -2,28 +2,33 @@ namespace DeadCellsMultiplayerX.Client.World.Heroes.Local;
 
 using DeadCellsMultiplayerX.Client.Session.Guest;
 using DeadCellsMultiplayerX.Engine.Hooks.Client;
-using DeadCellsMultiplayerX.Engine.Hooks.Shared;
 
 /// <summary>
 /// 本地动作捕获的组合根：持有命令队列、Hook 生命周期与三个协作者。
 /// </summary>
 internal sealed class LocalActionCapture(
-    GuestClientSession session) : IDisposable
+    GuestGameSession session) : IDisposable
 {
     private LocalIntentRecorder? recorder;
-    private HookGroup? hookGroup;
+    private IDisposable? hooks;
+    private bool disposed;
 
     internal HeroCommandQueue Commands { get; } = new();
 
     public void Init()
     {
+        ObjectDisposedException.ThrowIf(this.disposed, this);
+        if (this.hooks != null)
+        {
+            return;
+        }
+
         this.recorder ??= new LocalIntentRecorder(
             session,
             new HeroCommandSender(this.Commands),
             new LocalActionDeduper());
 
-        this.hookGroup = new HookGroup();
-        this.hookGroup.Add(ClientActionHookBinding.Install(this.recorder));
+        this.hooks = ClientActionHookBinding.Install(this.recorder);
     }
 
     internal void ObserveEpoch(int epoch)
@@ -42,10 +47,23 @@ internal sealed class LocalActionCapture(
 
     public void Dispose()
     {
-        this.hookGroup?.Dispose();
-        this.hookGroup = null;
-        this.Commands.Clear();
-        this.recorder?.Clear();
-        this.recorder = null;
+        if (this.disposed)
+        {
+            return;
+        }
+
+        this.disposed = true;
+
+        try
+        {
+            this.hooks?.Dispose();
+        }
+        finally
+        {
+            this.hooks = null;
+            this.Commands.Clear();
+            this.recorder?.Clear();
+            this.recorder = null;
+        }
     }
 }
