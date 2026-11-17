@@ -77,9 +77,8 @@ internal sealed class ClientWorld : Disposable
                 session, this.entityStore, this.heroes);
             this.mobs = new ClientMobReplicator(
                 session, this.MobModifiers, this.frames, this.entityStore);
-            this.entityStore.RegisterHandler(this.mobs);
-
             this.entities = new ClientEntityFrameApplier(this.entityStore);
+            this.entities.RegisterHandler(this.mobs);
             this.entities.DebugLabels.Register(new MobDebugTextProvider(session));
 
             this.areaAffects = new ClientAreaAffectState(session);
@@ -165,7 +164,7 @@ internal sealed class ClientWorld : Disposable
     internal ClientWorldStats CaptureStats()
     {
         var mobCount = 0;
-        foreach (var mob in this.mobs.Receiver.All)
+        foreach (var mob in this.mobs.All)
         {
             if (!mob.destroyed)
             {

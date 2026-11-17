@@ -11,7 +11,7 @@ internal sealed class ClientEntityRecord
 {
     public required EntitySpawn Spawn { get; init; }
 
-    public object? Native { get; set; }
+    public object? Native { get; internal set; }
 
     public uint NetId => this.Spawn.NetId;
 

@@ -11,12 +11,10 @@ using DeadCellsMultiplayerX.Contracts.Entities;
 using DeadCellsMultiplayerX.Contracts.EntityEvents;
 using DeadCellsMultiplayerX.Contracts.MobBehavior;
 using DeadCellsMultiplayerX.Contracts.Snapshots;
-using DeadCellsMultiplayerX.Engine.Adapters.Snapshots;
 using DeadCellsMultiplayerX.Engine.Serialization;
 using DeadCellsMultiplayerX.Engine.Utilities;
 using Serilog;
 using LevelMob = dc.level.Mob;
-using Math = Math;
 
 /// <summary>
 /// Mob 类型的客户端处理器
@@ -33,19 +31,23 @@ internal sealed class ClientMobReplicator(
     private readonly ClientMobModifierRegistry mobModifiers = mobModifiers;
     private readonly WorldFrameTimeline frames = frames;
     private readonly ClientEntityStore store = store;
-    private readonly ClientMobAffectState affectState = new();
+    private readonly ClientMobStateApplier states = new(session, mobModifiers, frames);
+    private readonly HashSet<Mob> suppressedDeaths = [with(ReferenceEqualityComparer.Instance)];
 
     private readonly HashSet<LevelKey> authoritativeLevels = [];
+    // A pending spawn must not create an actor after an authoritative zero-life state.
+    private readonly HashSet<uint> confirmedDead = [];
 
     private bool loggedFirstMob;
 
-    public ClientMobFrameReceiver Receiver { get; } = new ClientMobFrameReceiver(store);
+    public IEnumerable<Mob> All => this.store.Records
+        .Where(record => record.Kind == EntityKind.Mob).Select(record => record.Native).OfType<Mob>();
 
     public EntityKind Kind => EntityKind.Mob;
 
-    public bool IsRemoteMob(Mob mob) => this.Receiver.IsRemoteMob(mob);
+    public bool IsRemoteMob(Mob mob) => mob != null && this.store.IsReplicated(mob);
 
-    public bool IsDeathSuppressed(Mob mob) => this.Receiver.IsDeathSuppressed(mob);
+    public bool IsDeathSuppressed(Mob mob) => mob != null && this.suppressedDeaths.Contains(mob);
 
     /// <inheritdoc />
     public bool TryCreate(
@@ -54,6 +56,7 @@ internal sealed class ClientMobReplicator(
         native = null!;
 
         if (spawn == null
+            || this.confirmedDead.Contains(spawn.NetId)
             || spawn.EntityData == null
             || spawn.EntityData.Length == 0)
         {
@@ -89,23 +92,33 @@ internal sealed class ClientMobReplicator(
             return false;
         }
 
-        //mob.hasRepelling = false;
-        mob.hasGravity = false;
-        mob.gravity = 0;
-        mob.collisionMode = new CollisionMode.None();
-        mob.frict = 0;
-
-        if (needsCleanup)
+        try
         {
-            this.authoritativeLevels.Add(levelKey);
+            mob.hasGravity = false;
+            mob.gravity = 0;
+            mob.collisionMode = new CollisionMode.None();
+            mob.frict = 0;
+            if (needsCleanup)
+            {
+                this.authoritativeLevels.Add(levelKey);
+            }
+            Logger.Verbose("Mob spawned on client: netId={NetId} level={LevelId}#{SubLevelIndex}",
+                spawn.NetId, spawn.LevelId, spawn.SubLevelIndex);
+            native = mob;
+            return true;
         }
-
-        Logger.Verbose(
-            "Mob spawned on client: netId={NetId} level={LevelId}#{SubLevelIndex}",
-            spawn.NetId, spawn.LevelId, spawn.SubLevelIndex);
-
-        native = mob;
-        return true;
+        catch (Exception initializationError)
+        {
+            try
+            {
+                this.Despawn(spawn.NetId, mob, EntityDespawnReason.LevelUnloaded);
+            }
+            catch (Exception cleanupError)
+            {
+                throw new AggregateException(initializationError, cleanupError);
+            }
+            throw;
+        }
     }
 
     /// <inheritdoc />
@@ -126,48 +139,83 @@ internal sealed class ClientMobReplicator(
     }
 
     /// <inheritdoc />
-    public void Despawn(
-        uint netId, object? native,
-        EntityDespawnReason reason)
+    public void Despawn(uint netId, object? native, EntityDespawnReason reason)
     {
-        if (native is Mob mob)
+        try
         {
-            this.mobModifiers.Detach(mob);
-
-            if (!this.Receiver.IsDeathSuppressed(mob))
+            if (native is Mob mob)
             {
-                // 关卡卸载/对账移除只销毁，不触发本地死亡掉落
-                if (reason == EntityDespawnReason.LevelUnloaded)
+                try
                 {
-                    if (!mob.destroyed)
-                    {
-                        mob.destroy();
-                    }
+                    this.mobModifiers.Detach(mob);
                 }
-                else
+                finally
                 {
-                    // 服务端确认死亡
-                    this.session.ForceNativeDeath(mob);
+                    if (!this.IsDeathSuppressed(mob))
+                    {
+                        if (reason == EntityDespawnReason.LevelUnloaded)
+                        {
+                            // The index has already been detached; keep death hooks suppressed during destroy.
+                            this.suppressedDeaths.Add(mob);
+                            try
+                            {
+                                if (!mob.destroyed)
+                                {
+                                    mob.destroy();
+                                }
+                            }
+                            finally
+                            {
+                                this.suppressedDeaths.Remove(mob);
+                            }
+                        }
+                        else
+                        {
+                            this.session.ForceNativeDeath(mob);
+                        }
+                    }
                 }
             }
         }
-
-        this.affectState.Remove(netId);
+        finally
+        {
+            this.states.Remove(netId);
+            if (this.store.GetRecord(netId) == null)
+            {
+                this.confirmedDead.Remove(netId);
+            }
+        }
     }
 
     /// <inheritdoc />
-    public void AfterSpawns(WorldFrame frame)
+    public void ApplyFrame(WorldFrame frame, Func<uint, bool> tryRecreate)
     {
         if (frame.Entities == null)
         {
             return;
         }
 
+        foreach (var state in frame.Entities)
+        {
+            if (state == null || state.Kind != EntityKind.Mob)
+            {
+                continue;
+            }
+            if (state.Life <= 0)
+            {
+                this.confirmedDead.Add(state.NetId);
+            }
+            else
+            {
+                this.confirmedDead.Remove(state.NetId);
+            }
+        }
+
         // 服务端帧已给出 Life<=0 但还没进 DespawnedEntities，补充死亡
         this.ForceFrameDeadMobs(frame);
 
         // 本地预测致死后服务端仍存活，使用 NetId 重建
-        this.RepairDestroyedMobs(frame);
+        this.RepairDestroyedMobs(frame, tryRecreate);
 
         // 有动态状态但没有本地实体也没有待生成数据时请求重同步
         foreach (var dynamic in frame.Entities)
@@ -177,15 +225,15 @@ internal sealed class ClientMobReplicator(
                 continue;
             }
 
-            if (!this.store.HasOrPending(dynamic.NetId))
+            if (this.store.GetRecord(dynamic.NetId) == null)
             {
                 this.frames.RequestResync("mob spawn missing");
             }
         }
+        this.LogFirstFrame(frame);
     }
 
-    /// <inheritdoc />
-    public void AfterFrame(WorldFrame frame)
+    private void LogFirstFrame(WorldFrame frame)
     {
         if (!this.loggedFirstMob && frame.Entities != null)
         {
@@ -211,63 +259,25 @@ internal sealed class ClientMobReplicator(
     /// <inheritdoc />
     public void Tick(long nowMs)
     {
-        var nowSec = this.session.SyncedTimeMs / 1000.0;
-
-        foreach (var mob in this.Receiver.All)
+        // Carry NetId with the record instead of querying it back through a receiver.
+        foreach (var record in this.store.Records.Where(record => record.Kind == EntityKind.Mob).ToArray())
         {
-            if (mob == null || mob.destroyed)
+            if (record.Native is Mob { destroyed: false } mob)
             {
-                continue;
+                this.states.ApplyInterpolated(record.NetId, mob, nowMs);
             }
-
-            if (!this.Receiver.TryGetNetId(mob, out var netId))
-            {
-                continue;
-            }
-
-            if (!this.frames.TryGetEntityBracket(
-                    netId, nowSec,
-                    out var prev, out var next,
-                    out var alpha, out var renderTimeSec))
-            {
-                this.affectState.ExpireIfDue(netId, mob, nowSec);
-                continue;
-            }
-
-            var sample = PoseInterpolator.Interpolate(
-                prev.Pos, next.Pos, alpha);
-
-            mob.setPosCase(
-                sample.Cx, sample.Cy, sample.Xr, sample.Yr);
-            mob.dir = sample.Dir;
-            mob.dx = 0;
-            mob.dy = 0;
-            mob.bdx = 0;
-            mob.bdy = 0;
-
-            if (!this.mobModifiers.DispatchClientUpdate(mob, nowMs))
-            {
-                RemoteMobAnimator.Apply(mob, prev.Anim, next.Anim, renderTimeSec);
-            }
-
-            this.affectState.ApplySnapshot(
-                netId, mob, next.Affects ?? prev.Affects, nowSec);
-
-            var serverLife = (int)Math.Round(
-                prev.Life + ((next.Life - prev.Life) * alpha));
-
-            mob.life = serverLife;
-            mob.maxLife = next.MaxLife;
         }
     }
 
     /// <inheritdoc />
     public void OnEpochReset()
     {
-        // 原生 Mob 的统一销毁由 ClientEntityStore.Clear → Despawn 负责。
-        this.affectState.Reset();
+        // Entity pipeline releases all natives before resetting kind-specific state.
+        this.states.Reset();
         this.authoritativeLevels.Clear();
-        this.Receiver.ClearSuppressed();
+        this.confirmedDead.Clear();
+        this.suppressedDeaths.Clear();
+        this.loggedFirstMob = false;
     }
 
     /// <summary>
@@ -284,7 +294,7 @@ internal sealed class ClientMobReplicator(
                 continue;
             }
 
-            if (this.Receiver.Get(dynamic.NetId) is not { destroyed: false } mob)
+            if (this.store.Get(dynamic.NetId) is not Mob { destroyed: false } mob)
             {
                 continue;
             }
@@ -296,61 +306,25 @@ internal sealed class ClientMobReplicator(
     /// <summary>
     /// 预测错误时重建对应 mob
     /// </summary>
-    private void RepairDestroyedMobs(WorldFrame frame)
+    private void RepairDestroyedMobs(WorldFrame frame, Func<uint, bool> tryRecreate)
     {
         foreach (var dynamic in frame.Entities)
         {
-            if (dynamic == null
-                || dynamic.Kind != EntityKind.Mob
-                || dynamic.Life <= 0)
+            if (dynamic == null || dynamic.Kind != EntityKind.Mob || dynamic.Life <= 0)
             {
                 continue;
             }
-
-            if (!this.store.IsMissingOrDestroyed(dynamic.NetId))
+            var record = this.store.GetRecord(dynamic.NetId);
+            if (record == null || record.Native is Entity { destroyed: false })
             {
                 continue;
             }
-
-            if (this.store.TryRecreate(dynamic.NetId)
-                && this.store.Get(dynamic.NetId) is Mob mob)
+            // Policy belongs here; native ownership and replacement stay in the entity pipeline.
+            if (tryRecreate(dynamic.NetId) && this.store.Get(dynamic.NetId) is Mob mob)
             {
-                this.ApplyDynamicNow(dynamic, mob);
-                continue;
-            }
-
-            // 重建失败但旧实体已销毁，清掉旧映射，触发后续 resync 恢复
-            if (this.store.Get(dynamic.NetId) is Entity { destroyed: true })
-            {
-                this.store.Remove(dynamic.NetId, EntityDespawnReason.Removed);
+                this.states.ApplyImmediate(dynamic, mob);
             }
         }
-    }
-
-    private void ApplyDynamicNow(EntityDynamic dynamic, Mob mob)
-    {
-        PoseInterpolator.SetPosition(
-            mob,
-            dynamic.Pos.CX + dynamic.Pos.XR,
-            dynamic.Pos.CY + dynamic.Pos.XY);
-        mob.dir = dynamic.Pos.DIR;
-        mob.dx = dynamic.Pos.DX;
-        mob.dy = dynamic.Pos.DY;
-        mob.bdx = dynamic.Pos.BDX;
-        mob.bdy = dynamic.Pos.BDY;
-
-        mob.life = dynamic.Life;
-        mob.maxLife = dynamic.MaxLife;
-
-        var nowSec = this.session.SyncedTimeMs / 1000.0;
-        if (!this.mobModifiers.DispatchClientUpdate(
-                mob, this.session.SyncedTimeMs))
-        {
-            RemoteMobAnimator.Apply(mob, dynamic.Anim, dynamic.Anim, nowSec);
-        }
-
-        this.affectState.ApplySnapshot(
-            dynamic.NetId, mob, dynamic.Affects, nowSec);
     }
 
     /// <inheritdoc />
@@ -361,8 +335,7 @@ internal sealed class ClientMobReplicator(
             return;
         }
 
-        var mob = this.Receiver.Get(mobEvt.NetId);
-        if (mob == null || mob.destroyed)
+        if (this.store.Get(mobEvt.NetId) is not Mob mob || mob.destroyed)
         {
             return;
         }
@@ -386,29 +359,44 @@ internal sealed class ClientMobReplicator(
         for (var i = 0; i < entities.length; i++)
         {
             if (entities.getDyn(i) is Mob mob
-                && !this.Receiver.IsRemoteMob(mob)
+                && !this.IsRemoteMob(mob)
                 && !mob.destroyed)
             {
                 toDestroy.Add(mob);
             }
         }
 
-        // 清理本地怪物时同样抑制本地死亡掉落
+        // Keep every selected mob suppressed until the entire cleanup pass has finished.
         foreach (var mob in toDestroy)
         {
-            this.Receiver.SuppressDeath(mob);
+            this.suppressedDeaths.Add(mob);
         }
 
-        foreach (var mob in toDestroy)
+        List<Exception>? errors = null;
+        try
         {
-            mob.destroy();
+            foreach (var mob in toDestroy)
+            {
+                try
+                {
+                    mob.destroy();
+                }
+                catch (Exception ex)
+                {
+                    (errors ??= []).Add(ex);
+                }
+            }
         }
-
-        foreach (var mob in toDestroy)
+        finally
         {
-            this.Receiver.UnsuppressDeath(mob);
+            foreach (var mob in toDestroy)
+            {
+                this.suppressedDeaths.Remove(mob);
+            }
+        }
+        if (errors != null)
+        {
+            throw new AggregateException("Local mob cleanup failed", errors);
         }
     }
-
-    public void Clear() => this.OnEpochReset();
 }

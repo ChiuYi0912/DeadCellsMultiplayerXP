@@ -17,7 +17,7 @@ internal interface IClientEntityKindHandler
     public bool TryCreate(EntitySpawn spawn, out object native);
 
     /// <summary>
-    /// 创建Mob之后运行 用于修改对应实体的初始化字段
+    /// 原生实体已经绑定到存储后初始化。失败时由管线撤销绑定并调用 Despawn。
     /// </summary>
     public void OnCreated(EntitySpawn spawn, object native);
 
@@ -28,19 +28,11 @@ internal interface IClientEntityKindHandler
         uint netId, object? native, EntityDespawnReason reason);
 
     /// <summary>
-    /// 处理本帧 spawn 之前调用
+    /// 生成后、显式移除及对账前处理权威状态。
+    /// 需要修复时同步调用 tryRecreate；原生实例替换仍由实体管线执行。
+    /// 不得保存或异步使用本帧的重建入口。
     /// </summary>
-    public void BeforeSpawns(WorldFrame frame) { }
-
-    /// <summary>
-    /// 处理完本帧 spawn 之后调用
-    /// </summary>
-    public void AfterSpawns(WorldFrame frame) { }
-
-    /// <summary>
-    /// 对账与移除完成后调用
-    /// </summary>
-    public void AfterFrame(WorldFrame frame) { }
+    public void ApplyFrame(WorldFrame frame, Func<uint, bool> tryRecreate) { }
 
     /// <summary>
     /// 每帧状态推进
