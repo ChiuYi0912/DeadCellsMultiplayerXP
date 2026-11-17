@@ -6,6 +6,7 @@ using dc.hl.types;
 using dc.tool;
 using dc.tool.atk;
 using dc.tool.weap;
+using DeadCellsMultiplayerX.Client.Presentation.Combat;
 using DeadCellsMultiplayerX.Client.World.Heroes.Remote;
 using DeadCellsMultiplayerX.Engine.Adapters.Heroes;
 
@@ -13,14 +14,14 @@ using DeadCellsMultiplayerX.Engine.Adapters.Heroes;
 internal sealed class GuestCombatHookAdapter(
     Func<Mob, bool> isRemoteMob,
     Func<bool> isApplyingServerAreaAffect,
-    Action<AttackData, Mob> playHitVisual)
+    GuestCombatPresentation combat)
 {
     private readonly Func<Mob, bool> isRemoteMob = isRemoteMob
             ?? throw new ArgumentNullException(nameof(isRemoteMob));
     private readonly Func<bool> isApplyingServerAreaAffect = isApplyingServerAreaAffect
             ?? throw new ArgumentNullException(nameof(isApplyingServerAreaAffect));
-    private readonly Action<AttackData, Mob> playHitVisual = playHitVisual
-            ?? throw new ArgumentNullException(nameof(playHitVisual));
+    private readonly GuestCombatPresentation combat = combat
+            ?? throw new ArgumentNullException(nameof(combat));
 
     public static void CounterGrenade(
         Hook_BaseShield.orig_counterGrenade orig,
@@ -43,7 +44,7 @@ internal sealed class GuestCombatHookAdapter(
                 && atk != null
                 && atk.isSuccess())
             {
-                this.playHitVisual(atk, presentationMob);
+                this.combat.PlayHitVisual(atk, presentationMob);
             }
 
             return;
@@ -53,7 +54,7 @@ internal sealed class GuestCombatHookAdapter(
         {
             if (atk != null && atk.isSuccess())
             {
-                this.playHitVisual(atk, mob);
+                this.combat.PlayHitVisual(atk, mob);
             }
 
             return;

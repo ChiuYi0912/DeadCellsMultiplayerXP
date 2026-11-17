@@ -57,7 +57,7 @@ internal sealed partial class GuestGameSession
             this.Cleanup(() => this.ClientWorld?.Dispose(), "replicated world");
             this.ClientWorld = null;
 
-            this.DeathGate.Clear();
+            this.Combat.ClearDeathPermissions();
             this.Uploader.Clear();
 
             this.Cleanup(() => this.debugHud?.Dispose(), "debug HUD");

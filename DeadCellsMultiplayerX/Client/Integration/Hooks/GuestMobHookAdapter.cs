@@ -18,7 +18,7 @@ internal sealed class GuestMobHookAdapter(
     Func<Mob, bool> isRemoteMob,
     Func<Mob, bool> isDeathSuppressed,
     Func<long> syncedTimeMs,
-    CombatDeathGate deathGate)
+    GuestCombatPresentation combat)
 {
     private readonly Func<ClientMobModifierRegistry?> mobModifiers = mobModifiers
             ?? throw new ArgumentNullException(nameof(mobModifiers));
@@ -28,8 +28,8 @@ internal sealed class GuestMobHookAdapter(
             ?? throw new ArgumentNullException(nameof(isDeathSuppressed));
     private readonly Func<long> syncedTimeMs = syncedTimeMs
             ?? throw new ArgumentNullException(nameof(syncedTimeMs));
-    private readonly CombatDeathGate deathGate = deathGate
-            ?? throw new ArgumentNullException(nameof(deathGate));
+    private readonly GuestCombatPresentation combat = combat
+            ?? throw new ArgumentNullException(nameof(combat));
 
     public void InitSkills(Hook_Mob.orig_initSkills orig, Mob self)
     {
@@ -153,7 +153,7 @@ internal sealed class GuestMobHookAdapter(
     public void OnDie(Hook_Mob.orig_onDie orig, Mob self)
     {
         // 本地预测由服务端确认死亡时允许远端 mob 执行死亡
-        if (this.deathGate.IsAllowed(self))
+        if (this.combat.IsNativeDeathAllowed(self))
         {
             orig(self);
             return;

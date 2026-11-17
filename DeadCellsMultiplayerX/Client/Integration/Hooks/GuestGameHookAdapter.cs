@@ -28,9 +28,11 @@ internal sealed class GuestGameHookAdapter(
             ?? throw new ArgumentNullException(nameof(quit));
     private Game? ownedGame;
     private HlAction<Hero>? heroInitialized;
+    private Action? stopLevelTransitionDiagnostics;
 
     public void Dispose()
     {
+        this.StopLevelTransitionDiagnostics();
         var game = this.ownedGame;
         var callback = this.heroInitialized;
         this.ownedGame = null;
@@ -105,16 +107,33 @@ internal sealed class GuestGameHookAdapter(
         CPoint heroPosAfterBossRuneReload,
         Ref<bool> noLoadingData)
     {
-        var levelid = mainId?.ToString() ?? string.Empty;
-        if (levelid == "PrisonStart" || string.IsNullOrEmpty(levelid))
+        // Sub-level transitions bypass full-level voting and lifecycle diagnostics.
+        if (mainId is null)
         {
             orig(arg1, mainId, map, linkId, heroPosAfterBossRuneReload, noLoadingData);
             return;
         }
 
+        var levelid = mainId.ToString() ?? string.Empty;
+
+        void EnterNativeLevel(Ref<bool> loadingData)
+        {
+            this.LogLevelTransition("native-before", arg1, levelid, linkId);
+            orig(arg1, mainId, map, linkId, heroPosAfterBossRuneReload, loadingData);
+            // The constructor starts loading and returns before the target level is ready.
+            this.LogLevelTransition("native-after", arg1, levelid, linkId);
+            this.ObserveLevelEntered(arg1, levelid, linkId);
+        }
+
+        if (levelid == "PrisonStart" || string.IsNullOrEmpty(levelid))
+        {
+            EnterNativeLevel(noLoadingData);
+            return;
+        }
+
         if (isStopping())
         {
-            orig(arg1, mainId, map, linkId, heroPosAfterBossRuneReload, noLoadingData);
+            EnterNativeLevel(noLoadingData);
             return;
         }
 
@@ -128,7 +147,7 @@ internal sealed class GuestGameHookAdapter(
                 hero.unlockControls();
             }
 
-            orig(arg1, mainId, map, linkId, heroPosAfterBossRuneReload, noLoadingData);
+            EnterNativeLevel(noLoadingData);
             return;
         }
 
@@ -138,6 +157,100 @@ internal sealed class GuestGameHookAdapter(
         {
             hero.set_targetable(false);
             hero.lockControlsF(999999);
+        }
+
+        // This constructor is intentionally skipped. A server-driven goto creates another transition.
+        this.LogLevelTransition("vote-held", arg1, levelid, linkId);
+    }
+
+    [System.Diagnostics.Conditional("DEBUG")]
+    private void ObserveLevelEntered(LevelTransition transition, string levelId, int? linkId)
+    {
+        // First entry still belongs to GuestGameLoader; observe only authorized full-level changes.
+        if (isStopping() || !isServerDrivenTransition())
+        {
+            return;
+        }
+
+        this.StopLevelTransitionDiagnostics();
+        try
+        {
+            var previous = transition.onEnteredLevel;
+            var active = true;
+            HlAction? observer = null;
+            observer = new HlAction(() =>
+            {
+                var report = active;
+                if (active)
+                {
+                    this.StopLevelTransitionDiagnostics();
+                }
+
+                // Native behavior must still run if an old callback arrives after cleanup.
+                previous?.Invoke();
+                if (report && !isStopping())
+                {
+                    this.LogLevelTransition("level-entered", transition, levelId, linkId);
+                }
+            });
+
+            this.stopLevelTransitionDiagnostics = () =>
+            {
+                active = false;
+                // Do not overwrite a callback installed by the engine or another owner.
+                if (transition.onEnteredLevel == observer)
+                {
+                    transition.onEnteredLevel = previous;
+                }
+            };
+            transition.onEnteredLevel = observer;
+            this.LogLevelTransition("entered-observer-installed", transition, levelId, linkId);
+        }
+        catch (Exception ex)
+        {
+            this.StopLevelTransitionDiagnostics();
+            this.logger.Warning(ex, "Guest level-entered observer installation failed");
+        }
+    }
+
+    [System.Diagnostics.Conditional("DEBUG")]
+    private void StopLevelTransitionDiagnostics()
+    {
+        var stop = this.stopLevelTransitionDiagnostics;
+        this.stopLevelTransitionDiagnostics = null;
+        try
+        {
+            stop?.Invoke();
+        }
+        catch (Exception ex)
+        {
+            this.logger.Debug(ex, "Guest level-entered observer cleanup failed");
+        }
+    }
+
+    [System.Diagnostics.Conditional("DEBUG")]
+    private void LogLevelTransition(
+        string phase, LevelTransition transition, string levelId, int? linkId)
+    {
+        // Diagnostics must not prevent the native constructor from running.
+        try
+        {
+            var game = Game.Class.ME;
+            var hero = game?.hero;
+            this.logger.Information(
+                "Guest full-level transition {Phase}: transition={TransitionId} target={TargetLevel} link={LinkId} current={CurrentLevel} heroReady={HeroReady} loading={Loading} serverDriven={ServerDriven}",
+                phase,
+                System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(transition),
+                levelId,
+                linkId,
+                game?.curLevel?.map?.id?.ToString(),
+                hero != null && !hero.destroyed && hero.initDone,
+                dc.Main.Class.ME?.isLoading,
+                isServerDrivenTransition());
+        }
+        catch (Exception ex)
+        {
+            this.logger.Debug(ex, "Guest level transition diagnostics unavailable: {Phase}", phase);
         }
     }
 

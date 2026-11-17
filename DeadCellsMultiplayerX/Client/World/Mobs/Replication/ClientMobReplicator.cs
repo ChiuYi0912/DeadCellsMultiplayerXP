@@ -3,6 +3,7 @@ namespace DeadCellsMultiplayerX.Client.World.Mobs.Replication;
 using dc;
 using dc.en;
 using dc.pr;
+using DeadCellsMultiplayerX.Client.Presentation.Combat;
 using DeadCellsMultiplayerX.Client.Session.Guest;
 using DeadCellsMultiplayerX.Client.World.Entities;
 using DeadCellsMultiplayerX.Client.World.Frames;
@@ -29,6 +30,7 @@ internal sealed class ClientMobReplicator(
     private static readonly ILogger Logger = Log.ForContext("SourceContext", "ClientMobReplicator");
 
     private readonly GuestGameSession session = session;
+    private readonly GuestCombatPresentation combat = session.Combat;
     private readonly ClientMobModifierRegistry mobModifiers = mobModifiers;
     private readonly Action<string> requestResync = requestResync;
     private readonly ClientEntityStore store = store;
@@ -172,7 +174,7 @@ internal sealed class ClientMobReplicator(
                         }
                         else
                         {
-                            this.session.ForceNativeDeath(mob);
+                            this.combat.ForceNativeDeath(mob);
                         }
                     }
                 }
@@ -300,7 +302,7 @@ internal sealed class ClientMobReplicator(
                 continue;
             }
 
-            this.session.ForceNativeDeath(mob);
+            this.combat.ForceNativeDeath(mob);
         }
     }
 

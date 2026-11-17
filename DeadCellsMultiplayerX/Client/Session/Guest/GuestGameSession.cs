@@ -1,6 +1,8 @@
 namespace DeadCellsMultiplayerX.Client.Session.Guest;
 
 using System.Diagnostics.CodeAnalysis;
+using dc.cine;
+using dc.en;
 using DeadCellsMultiplayerX.Client.Integration.Events;
 using DeadCellsMultiplayerX.Client.Integration.Hooks;
 using DeadCellsMultiplayerX.Client.Presentation.Combat;
@@ -15,6 +17,10 @@ using DeadCellsMultiplayerX.Networking.Rpc.Contracts;
 using Microsoft.VisualStudio.Threading;
 using ModCore.Events;
 using ModCore.Events.Interfaces.Game;
+using ModCore.Utilities;
+using Nerdbank.MessagePack;
+using PolyType;
+using PolyType.SourceGenerator;
 using Serilog;
 
 /// <summary>Owns one game session, including startup, inbound RPC and game resources.</summary>
@@ -27,6 +33,8 @@ internal sealed partial class GuestGameSession
       IDisposable,
       System.IAsyncDisposable
 {
+    private static readonly MessagePackSerializer FrameSizeSerializer = new();
+
     // Fields
     private readonly Lock gate = new();
     private readonly CancellationTokenSource lifetime = new();
@@ -53,7 +61,6 @@ internal sealed partial class GuestGameSession
     private bool protocolValidated;
     private DebugHUD? debugHud;
     private volatile bool serverDrivenTransition;
-    private int replayVisualDepth;
 
     // Constructor
     public GuestGameSession(
@@ -69,6 +76,7 @@ internal sealed partial class GuestGameSession
         this.gameContext = gameContext;
         this.requestStop = requestStop;
         this.Logger = Log.ForContext<GuestGameSession>();
+        this.Combat = new GuestCombatPresentation(this.Logger);
         this.gameLoader = new GuestGameLoader(gameContext, this.Logger);
         this.localActions = new LocalHeroActionRecorder(this);
 
@@ -135,7 +143,7 @@ internal sealed partial class GuestGameSession
 
     // Internal properties
     internal ClientWorld? ClientWorld { get; private set; }
-    internal CombatDeathGate DeathGate { get; } = new();
+    internal GuestCombatPresentation Combat { get; }
     internal int PendingCommands => this.localActions.Commands.PendingCount;
 
     // Private properties
@@ -164,6 +172,103 @@ internal sealed partial class GuestGameSession
         return this.started.Task;
     }
 
+    // Inbound RPC
+    public Task EnterNewLevel(byte[] data)
+    {
+        lock (this.gate)
+        {
+            ObjectDisposedException.ThrowIf(this.state >= GuestLifetimeState.Stopping, this);
+            // A repeated callback shares the initial load; it cannot launch a second game.
+            return this.loadTask ??= this.LoadGameAsync(data);
+        }
+    }
+
+    /// <summary>
+    /// 服务端调用,用于通知当前客户切换关卡
+    /// </summary>
+    /// <param name="levelid"></param>
+    /// <returns></returns>
+    public Task EnterNextLevel(string levelid)
+    {
+        ObjectDisposedException.ThrowIf(this.IsDisposed, this);
+        this.Logger.Information("Entering next level: {LevelId}", levelid);
+        this.serverDrivenTransition = true;
+        try
+        {
+            LevelTransition.Class.@goto.Invoke(levelid.AsHaxeString());
+        }
+        finally
+        {
+            this.serverDrivenTransition = false;
+        }
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// 服务端每 tick 推送完整世界帧
+    /// </summary>
+    public Task SyncWorldFrame(WorldFrame frame)
+    {
+        if (frame == null || !this.protocolValidated || this.IsDisposed)
+        {
+            return Task.CompletedTask;
+        }
+
+#if DEBUG
+        if (WorldFrameDebug.ConsumeDropServerFrame())
+        {
+            return Task.CompletedTask;
+        }
+
+        if (DebugFlags.Get("netstat-Measure"))
+        {
+            this.MeasureWorldFrame(frame);
+        }
+#endif
+
+        this.ClientWorld?.OnWorldFrame(frame);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// 服务端请求补发本地上传帧
+    /// </summary>
+    public Task<ClientFrameBundle> RequestClientFrames(ClientFrameRangeRequest request)
+        => Task.FromResult(this.IsDisposed ? new ClientFrameBundle { Unavailable = true }
+            : this.Uploader.BuildBundle(request));
+
+    // Game events
+    void IOnFrameUpdate.OnFrameUpdate(double dt)
+    {
+        if (!this.protocolValidated || this.IsDisposed)
+        {
+            return;
+        }
+
+        // 同步 TimeStamp
+        this.Clock.Tick();
+
+        // 世界帧 NACK 调度/超时
+        this.ClientWorld?.Tick(this.SyncedTimeMs);
+    }
+
+    void IOnLocalHeroPostUpdate.OnPostUpdate(Hero hero)
+    {
+        if (!this.IsDisposed)
+        {
+            this.Uploader.CaptureAndUpload(hero);
+        }
+    }
+
+    void IOnLocalHeroInitDone.OnHeroInitDone(Hero hero)
+    {
+        if (!this.IsDisposed)
+        {
+            this.localActions.OnHeroInitialized(hero);
+            this.Uploader.ResetLocalHeroState();
+        }
+    }
+
     // Internal methods
     internal Task SubmitLevelVote(string levelId)
     {
@@ -176,6 +281,31 @@ internal sealed partial class GuestGameSession
             LevelSelected = true,
         });
     }
+
+    /// <summary>
+    /// 仅由时间线交付的帧确认命令；普通推送与补发共用此入口。
+    /// </summary>
+    internal void AcknowledgeCommands(WorldFrame frame)
+        => this.localActions?.Commands.Acknowledge(frame, this.LocalGuid);
+
+    internal void ObserveWorldEpoch(int epoch)
+    {
+        if (this.IsDisposed)
+        {
+            return;
+        }
+
+        this.Uploader.SetEpoch(epoch);
+        this.localActions?.ObserveEpoch(epoch);
+    }
+
+    internal void ObserveServerTime(long serverTimeMs) => this.Clock.ObserveServerTime(serverTimeMs);
+
+    internal void DebugCastSkill(string itemId, int slot)
+        => this.localActions?.DebugCastSkill(itemId, slot);
+
+    internal void DebugUseWeapon(string itemId, int slot, int cycle = 0)
+        => this.localActions?.DebugUseWeapon(itemId, slot, cycle);
 
     // Private methods
     private Task<long> RequestServerTimeAsync() => this.Server.GetTimeStamp();
@@ -278,6 +408,28 @@ internal sealed partial class GuestGameSession
         }
     }
 
+    private async Task LoadGameAsync(byte[] data)
+    {
+        try
+        {
+            await this.gameContext;
+            this.lifetime.Token.ThrowIfCancellationRequested();
+            this.saveData = data;
+            this.loadedGame = await this.gameLoader.LoadSavedGameAsync(this.lifetime.Token);
+            this.TryCreateWorld();
+        }
+        catch (Exception ex)
+        {
+            this.initialWorld.TrySetCanceled();
+            if (!this.IsDisposed)
+            {
+                this.Logger.Error(ex, "Guest game loading failed");
+                this.requestStop(true);
+            }
+            throw;
+        }
+    }
+
     private void InstallGameBindings()
     {
         this.gameHooks = new GuestGameHookAdapter(
@@ -291,13 +443,13 @@ internal sealed partial class GuestGameSession
             new GuestCombatHookAdapter(
                 mob => this.ClientWorld?.IsRemoteMob(mob) == true,
                 () => this.ClientWorld?.IsApplyingServerAreaAffect == true,
-                this.PlayHitVisual),
+                this.Combat),
             new GuestMobHookAdapter(
                 () => this.ClientWorld?.MobModifiers,
                 mob => this.ClientWorld?.IsRemoteMob(mob) == true,
                 mob => this.ClientWorld?.IsDeathSuppressed(mob) == true,
                 () => this.SyncedTimeMs,
-                this.DeathGate),
+                this.Combat),
             new GuestSaveHookAdapter(() => this.saveData),
             this.gameHooks);
 
@@ -308,5 +460,41 @@ internal sealed partial class GuestGameSession
 #if DEBUG
         this.debugHud = DebugHUD.EnsureCreated();
 #endif
+    }
+
+    private void TryCreateWorld()
+    {
+        lock (this.gate)
+        {
+            if (this.state >= GuestLifetimeState.Stopping)
+            {
+                throw new OperationCanceledException(this.lifetime.Token);
+            }
+
+            if (!this.protocolValidated || this.loadedGame == null || this.ClientWorld != null)
+            {
+                return;
+            }
+
+            if (this.loadedGame != Game)
+            {
+                throw new InvalidOperationException("Guest game was replaced during initialization.");
+            }
+
+            this.Combat.ClearDeathPermissions();
+            this.ClientWorld = new ClientWorld(this, this.LocalGuid);
+            this.Uploader.ResetLocalHeroState();
+            this.initialWorld.TrySetResult();
+        }
+    }
+
+    private void MeasureWorldFrame(WorldFrame frame)
+    {
+        var shape = TypeShapeProvider_DeadCellsMultiplayerX.Default
+            .GetTypeShapeOrThrow<WorldFrame>();
+
+        this.LastWorldFrameBytes = FrameSizeSerializer
+            .Serialize(frame, shape)
+            .Length;
     }
 }
