@@ -53,7 +53,7 @@ internal sealed partial class GuestGameSession
             this.hooks = null;
             this.gameHooks = null;
 
-            this.Cleanup(this.localCapture.Dispose, "action capture");
+            this.Cleanup(this.localActions.Dispose, "action recorder");
             this.Cleanup(() => this.ClientWorld?.Dispose(), "replicated world");
             this.ClientWorld = null;
 

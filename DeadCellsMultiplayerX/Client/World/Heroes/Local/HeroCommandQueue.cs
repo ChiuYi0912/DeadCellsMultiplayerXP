@@ -39,9 +39,9 @@ internal sealed class HeroCommandQueue
     }
 
     /// <summary>
-    /// 取出本帧要附带的所有未确认命令。
+    /// 返回本帧要附带的未确认命令快照，不出队，供后续上传帧继续重发。
     /// </summary>
-    public IReadOnlyList<HeroCommand> DrainPending(long nowMs)
+    public IReadOnlyList<HeroCommand> GetPending(long nowMs)
     {
         this.Prune(nowMs);
 

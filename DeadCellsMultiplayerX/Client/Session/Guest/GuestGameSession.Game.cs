@@ -99,7 +99,7 @@ internal sealed partial class GuestGameSession
     /// 仅由时间线交付的帧确认命令；普通推送与补发共用此入口。
     /// </summary>
     internal void AcknowledgeCommands(WorldFrame frame)
-        => this.localCapture?.Commands.Acknowledge(frame, this.LocalGuid);
+        => this.localActions?.Commands.Acknowledge(frame, this.LocalGuid);
 
     /// <summary>
     /// 服务端请求补发本地上传帧
@@ -116,7 +116,7 @@ internal sealed partial class GuestGameSession
         }
 
         this.Uploader.SetEpoch(epoch);
-        this.localCapture?.ObserveEpoch(epoch);
+        this.localActions?.ObserveEpoch(epoch);
     }
 
     internal void ObserveServerTime(long serverTimeMs) => this.Clock.ObserveServerTime(serverTimeMs);
@@ -169,10 +169,10 @@ internal sealed partial class GuestGameSession
     }
 
     internal void DebugCastSkill(string itemId, int slot)
-        => this.localCapture?.DebugCastSkill(itemId, slot);
+        => this.localActions?.DebugCastSkill(itemId, slot);
 
     internal void DebugUseWeapon(string itemId, int slot, int cycle = 0)
-        => this.localCapture?.DebugUseWeapon(itemId, slot, cycle);
+        => this.localActions?.DebugUseWeapon(itemId, slot, cycle);
 
     void IOnFrameUpdate.OnFrameUpdate(double dt)
     {
@@ -200,6 +200,7 @@ internal sealed partial class GuestGameSession
     {
         if (!this.IsDisposed)
         {
+            this.localActions.OnHeroInitialized(hero);
             this.Uploader.ResetLocalHeroState();
         }
     }

@@ -34,7 +34,7 @@ internal sealed partial class GuestGameSession
     private readonly Stream serverStream;
     private readonly Action<bool> requestStop;
     private readonly GuestGameLoader gameLoader;
-    private readonly LocalActionCapture localCapture;
+    private readonly LocalHeroActionRecorder localActions;
     private readonly TaskCompletionSource started =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource initialWorld =
@@ -70,7 +70,7 @@ internal sealed partial class GuestGameSession
         this.requestStop = requestStop;
         this.Logger = Log.ForContext<GuestGameSession>();
         this.gameLoader = new GuestGameLoader(gameContext, this.Logger);
-        this.localCapture = new LocalActionCapture(this);
+        this.localActions = new LocalHeroActionRecorder(this);
 
         // Bind session methods here; they resolve Server only when invoked.
         // Binding Server.Method directly would access RPC before RunStartAsync.
@@ -85,7 +85,7 @@ internal sealed partial class GuestGameSession
             localGuid,
             () => this.SyncedTimeMs,
             this.UploadClientFrameAsync,
-            this.localCapture.Commands.DrainPending,
+            this.localActions.Commands.GetPending,
             () => this.protocolValidated && !this.IsDisposed,
             this.Logger);
     }
@@ -136,7 +136,7 @@ internal sealed partial class GuestGameSession
     // Internal properties
     internal ClientWorld? ClientWorld { get; private set; }
     internal CombatDeathGate DeathGate { get; } = new();
-    internal int PendingCommands => this.localCapture.Commands.PendingCount;
+    internal int PendingCommands => this.localActions.Commands.PendingCount;
 
     // Private properties
     private ILogger Logger { get; }
@@ -301,7 +301,7 @@ internal sealed partial class GuestGameSession
             new GuestSaveHookAdapter(() => this.saveData),
             this.gameHooks);
 
-        this.localCapture.Init();
+        this.localActions.Init();
         this.eventsRegistered = true;
         EventSystem.AddReceiver(this);
 

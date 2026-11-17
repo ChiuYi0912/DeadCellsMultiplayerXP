@@ -26,8 +26,8 @@ internal sealed class RemoteHeroManager(GuestGameSession session, LocalHeroState
     public event Action<string>? HeroRemoved;
     public IEnumerable<RemoteHero> All => this.heroes.Values;
     public int ActionProxyCount => this.heroes.Values.Count(hero => hero.Actions.Proxy != null);
-    private string LocalLevelId => localHero.Context.CurrentLevelId;
-    private int LocalSubLevel => localHero.Context.SubLevelIndex;
+    private string LocalLevelId => localHero.CurrentLevelId;
+    private int LocalSubLevel => localHero.SubLevelIndex;
     private LevelKey LocalLevel => LevelKey.Make(this.LocalLevelId, this.LocalSubLevel);
 
     public void ApplyFrame(WorldFrame frame, WorldFrameTimeline frames)

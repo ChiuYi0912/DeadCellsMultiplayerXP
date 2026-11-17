@@ -49,7 +49,7 @@ internal sealed class ClientWorld : Disposable
     /// <summary>
     /// 本地英雄状态
     /// </summary>
-    private readonly LocalHeroState localHero;
+    private readonly LocalHeroTracker localHero;
 
     /// <summary>
     /// 远端动作结果的去重与延迟派发；实体及代理归 RemoteHero 所有
@@ -69,8 +69,8 @@ internal sealed class ClientWorld : Disposable
             this.frames = new WorldFrameTimeline(session, localGuid);
             this.entityStore = new ClientEntityStore();
 
-            this.localHero = new LocalHeroState(session);
-            this.heroes = new RemoteHeroManager(session, this.localHero, localGuid, this.InterruptRemoteMobSkill);
+            this.localHero = new LocalHeroTracker();
+            this.heroes = new RemoteHeroManager(session, this.localHero.State, localGuid, this.InterruptRemoteMobSkill);
             this.actionReplay = new HeroActionReplay(localGuid, this.heroes.Present);
             this.heroes.HeroRemoved += this.actionReplay.RemoveHero;
             this.MobModifiers = new ClientMobModifierRegistry(
@@ -189,7 +189,7 @@ internal sealed class ClientWorld : Disposable
             }
         }
 
-        var local = this.localHero.Context;
+        var local = this.localHero.State;
         return new ClientWorldStats(
             this.frames.Epoch,
             this.frames.LastFrameAppliedAtMs,
