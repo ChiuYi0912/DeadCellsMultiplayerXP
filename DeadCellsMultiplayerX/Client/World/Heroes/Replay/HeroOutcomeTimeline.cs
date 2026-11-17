@@ -1,7 +1,6 @@
 namespace DeadCellsMultiplayerX.Client.World.Heroes.Replay;
 
 using DeadCellsMultiplayerX.Contracts.Actions;
-using DeadCellsMultiplayerX.Contracts.Snapshots;
 
 /// <summary>
 /// 远端动作结果的呈现时间线。
@@ -9,10 +8,9 @@ using DeadCellsMultiplayerX.Contracts.Snapshots;
 /// </summary>
 internal sealed class HeroOutcomeTimeline
 {
-    private readonly SortedDictionary<long, List<Pending>> pending = [];
+    private readonly SortedDictionary<long, List<HeroOutcome>> pending = [];
 
     public void Enqueue(
-        WorldFrame frame,
         HeroOutcome outcome,
         long presentAtMs)
     {
@@ -21,12 +19,12 @@ internal sealed class HeroOutcomeTimeline
             this.pending[presentAtMs] = list = [];
         }
 
-        list.Add(new Pending(frame, outcome));
+        list.Add(outcome);
     }
 
     public void Drain(
         long nowMs,
-        Action<WorldFrame, HeroOutcome> present)
+        Action<HeroOutcome> present)
     {
         while (this.pending.Count > 0)
         {
@@ -36,18 +34,29 @@ internal sealed class HeroOutcomeTimeline
                 break;
             }
 
-            _ = this.pending.Remove(first.Key);
-
-            foreach (var item in first.Value)
+            var outcome = first.Value[0];
+            first.Value.RemoveAt(0);
+            if (first.Value.Count == 0)
             {
-                present(item.Frame, item.Outcome);
+                this.pending.Remove(first.Key);
             }
+            // Re-read the queue after presentation: native callbacks may remove
+            // this actor or clear the world while a bucket is being drained.
+            present(outcome);
         }
     }
 
     public void Clear() => this.pending.Clear();
 
-    private readonly record struct Pending(
-        WorldFrame Frame,
-        HeroOutcome Outcome);
+    public void RemoveHero(string guid)
+    {
+        foreach (var (time, outcomes) in this.pending.ToArray())
+        {
+            outcomes.RemoveAll(outcome => string.Equals(outcome.CasterGuid, guid, StringComparison.Ordinal));
+            if (outcomes.Count == 0)
+            {
+                this.pending.Remove(time);
+            }
+        }
+    }
 }

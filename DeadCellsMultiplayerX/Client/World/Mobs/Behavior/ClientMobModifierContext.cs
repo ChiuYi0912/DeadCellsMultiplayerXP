@@ -2,7 +2,7 @@ namespace DeadCellsMultiplayerX.Client.World.Mobs.Behavior;
 
 using dc.en;
 using DeadCellsMultiplayerX.Client.Session.Guest;
-using DeadCellsMultiplayerX.Client.World.Heroes.Replay;
+using DeadCellsMultiplayerX.Client.World.Heroes.Remote;
 using DeadCellsMultiplayerX.Engine.Adapters.Mobs.Behavior;
 
 /// <summary>
@@ -13,7 +13,7 @@ internal sealed class ClientMobModifierContext(
     uint netId,
     long tick,
     GuestGameSession session,
-    ClientReplayProxyManager remoteGhost) : IMobModifierContext
+    RemoteHeroManager remoteHeroes) : IMobModifierContext
 {
 
     /// <inheritdoc />
@@ -33,7 +33,7 @@ internal sealed class ClientMobModifierContext(
     /// </summary>
     public GuestGameSession Session { get; } = session;
 
-    public ClientReplayProxyManager RemoteGhost { get; } = remoteGhost;
+    public RemoteHeroManager RemoteHeroes { get; } = remoteHeroes;
 
     /// <inheritdoc />
     public T GetService<T>() where T : class
@@ -43,9 +43,9 @@ internal sealed class ClientMobModifierContext(
             return (T)(object)this.Session;
         }
 
-        if (typeof(T) == typeof(ClientReplayProxyManager))
+        if (typeof(T) == typeof(RemoteHeroManager))
         {
-            return (T)(object)this.RemoteGhost;
+            return (T)(object)this.RemoteHeroes;
         }
 
         return null!;

@@ -35,38 +35,50 @@ internal static class HeroProxyFactory
         }
 
         var hero = new Beheaded(game);
-        hero.init();
-        hero._level = level;
-        hero._targetable = false;
-        hero._team = level.teamHero;
+        try
+        {
+            hero.init();
+            hero._level = level;
+            hero._targetable = false;
+            hero._team = level.teamHero;
 
-        hero.createAttackSource();
-        hero.createAttackTarget();
+            hero.createAttackSource();
+            hero.createAttackTarget();
 
-        hero.life = 1000;
-        hero.maxLife = 1000;
+            hero.life = 1000;
+            hero.maxLife = 1000;
 
-        EnsureOpposing(level.teamHero, level.teamMob);
-        EnsureOpposing(level.teamHero, level.teamProp);
-        EnsureOpposing(level.teamMob, level.teamHero);
-        EnsureOpposing(level.teamProp, level.teamHero);
+            EnsureOpposing(level.teamHero, level.teamMob);
+            EnsureOpposing(level.teamHero, level.teamProp);
+            EnsureOpposing(level.teamMob, level.teamHero);
+            EnsureOpposing(level.teamProp, level.teamHero);
 
-        hero.initSprite(
-            reference.spr.lib,
-            reference.spr.groupName,
-            null, null, null, false, null, null);
+            hero.initSprite(
+                reference.spr.lib,
+                reference.spr.groupName,
+                null, null, null, false, null, null);
 
-        // hero.init() 时 _level 还是 null，Hero.initGfx 里的
-        // heroHead.init(level) 绑定到了 null。这里用真实关卡重新初始化，
-        // 并把 head 的 owner 指向 Ghost 自己，Dispose 才能正常执行。
-        hero.heroHead.init(level, null, Ref<bool>.In(false));
-        hero.heroHead.hero = hero;
-        hero.setHeadDepth(dc.Const.Class.DP_ROOM_MAIN_HERO);
+            hero.heroHead.init(level, null, Ref<bool>.In(false));
+            hero.heroHead.hero = hero;
+            hero.setHeadDepth(dc.Const.Class.DP_ROOM_MAIN_HERO);
 
-        hero.visible = false;
-        hero.spr.visible = false;
+            hero.visible = false;
+            hero.spr.visible = false;
 
-        return hero;
+            return hero;
+        }
+        catch (Exception initializationError)
+        {
+            try
+            {
+                DisposeClient(hero);
+            }
+            catch (Exception cleanupError)
+            {
+                throw new AggregateException(initializationError, cleanupError);
+            }
+            throw;
+        }
     }
 
     /// <summary>
@@ -139,24 +151,60 @@ internal static class HeroProxyFactory
             return;
         }
 
-        if (hero._team != null)
+        var wasDestroyed = hero.destroyed;
+        List<Exception>? errors = null;
+        try
         {
-            if (hero._targetable)
+            if (hero._team != null && hero._targetable)
             {
                 hero.set_targetable(false);
             }
-
-            hero._team.removeMember(hero);
         }
-
-        if (hero._level != null && !hero.destroyed)
+        catch (Exception ex)
         {
-            hero.destroy();
-            hero.dispose();
-            hero._level = null;
+            (errors ??= []).Add(ex);
         }
-
-        hero._team = null;
+        try
+        {
+            hero._team?.removeMember(hero);
+        }
+        catch (Exception ex)
+        {
+            (errors ??= []).Add(ex);
+        }
+        try
+        {
+            if (hero._level != null && !hero.destroyed)
+            {
+                hero.destroy();
+            }
+        }
+        catch (Exception ex)
+        {
+            (errors ??= []).Add(ex);
+        }
+        try
+        {
+            // Preserve the native already-destroyed guard. Partial initialization
+            // still needs dispose even if no level was assigned yet.
+            if (!wasDestroyed)
+            {
+                hero.dispose();
+            }
+        }
+        catch (Exception ex)
+        {
+            (errors ??= []).Add(ex);
+        }
+        finally
+        {
+            hero._level = null;
+            hero._team = null;
+        }
+        if (errors != null)
+        {
+            throw new AggregateException("Client hero proxy cleanup failed", errors);
+        }
     }
 
     /// <summary>Server proxy disposal: uses set_level(null).</summary>

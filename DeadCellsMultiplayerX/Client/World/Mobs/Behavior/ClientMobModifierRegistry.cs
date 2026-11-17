@@ -4,7 +4,7 @@ using dc.en;
 using dc.tool.skill;
 using DeadCellsMultiplayerX.Client.Session.Guest;
 using DeadCellsMultiplayerX.Client.World.Entities;
-using DeadCellsMultiplayerX.Client.World.Heroes.Replay;
+using DeadCellsMultiplayerX.Client.World.Heroes.Remote;
 using DeadCellsMultiplayerX.Client.World.Mobs.Behavior.Shield;
 using DeadCellsMultiplayerX.Client.World.Mobs.Behavior.Zombie;
 using DeadCellsMultiplayerX.Contracts.MobBehavior;
@@ -19,17 +19,17 @@ internal sealed class ClientMobModifierRegistry
 {
     private readonly GuestGameSession session;
     private readonly ClientEntityStore store;
-    private readonly ClientReplayProxyManager ghosts;
+    private readonly RemoteHeroManager heroes;
     private readonly MobModifierRegistry<ClientMobModifierContext> inner = new();
 
     public ClientMobModifierRegistry(
         GuestGameSession session,
         ClientEntityStore store,
-        ClientReplayProxyManager ghosts)
+        RemoteHeroManager heroes)
     {
         this.session = session;
         this.store = store;
-        this.ghosts = ghosts;
+        this.heroes = heroes;
 
         this.inner.Register<GameZombie>(_ => new ZombieClientModifier());
         this.inner.Register<dc.en.mob.Shield>(_ => new ShieldClientModifier());
@@ -55,7 +55,7 @@ internal sealed class ClientMobModifierRegistry
         }
 
         var context = new ClientMobModifierContext(
-            mob, netId, tick, this.session, this.ghosts);
+            mob, netId, tick, this.session, this.heroes);
 
         return this.inner.TryAttach(context);
     }
@@ -162,7 +162,7 @@ internal sealed class ClientMobModifierRegistry
     private Hero? ResolveTargetHero(string guid)
     {
         if (!string.IsNullOrEmpty(guid)
-            && this.ghosts.TryGet(guid, out var ghost)
+            && this.heroes.TryGetActionProxy(guid, out var ghost)
             && ghost.Hero != null
             && !ghost.Hero.destroyed)
         {

@@ -1,4 +1,4 @@
-namespace DeadCellsMultiplayerX.Client.World.Heroes.Replay;
+namespace DeadCellsMultiplayerX.Client.World.Heroes.Remote;
 
 using dc.en.hero;
 using dc.pr;
@@ -11,19 +11,19 @@ using Serilog;
 /// 客户端 Ghost：用于技能/武器重放的隐形 Hero。
 /// 只存在于本地关卡，不参与存档与权威结算。
 /// </summary>
-internal sealed class ClientHeroReplayProxy : IGhostEntity
+internal sealed class RemoteHeroActionProxy : IGhostEntity
 {
     private static readonly ILogger Logger =
-        Log.ForContext("SourceContext", "ClientHeroReplayProxy");
+        Log.ForContext("SourceContext", "RemoteHeroActionProxy");
 
     private bool disposed;
 
-    private ClientHeroReplayProxy(Beheaded hero, string ownerGuid)
+    private RemoteHeroActionProxy(Beheaded hero, string ownerGuid)
     {
         this.Hero = hero;
         this.OwnerGuid = ownerGuid;
-        this.Actions = new ClientHeroPresentationRuntime(hero, ownerGuid);
         this.LevelKey = LevelUtils.KeyOf(hero._level);
+        this.Actions = new ClientHeroPresentationRuntime(hero, ownerGuid);
     }
 
     public Beheaded Hero { get; }
@@ -34,7 +34,7 @@ internal sealed class ClientHeroReplayProxy : IGhostEntity
 
     public bool IsAlive => !this.disposed && this.Hero != null && !this.Hero.destroyed;
 
-    public LevelKey LevelKey { get; private set; }
+    public LevelKey LevelKey { get; }
 
     /// <summary>
     /// Mob 技能需要目标存活时使用的占位生命，避免被本地伤害打死。
@@ -103,21 +103,27 @@ internal sealed class ClientHeroReplayProxy : IGhostEntity
         {
             this.Actions.Dispose();
         }
-        catch (Exception ex) { (errors ??= []).Add(ex); }
+        catch (Exception ex)
+        {
+            (errors ??= []).Add(ex);
+        }
 
         try
         {
             HeroProxyFactory.DisposeClient(this.Hero);
         }
-        catch (Exception ex) { (errors ??= []).Add(ex); }
+        catch (Exception ex)
+        {
+            (errors ??= []).Add(ex);
+        }
         if (errors != null)
         {
             throw new AggregateException("Replay proxy cleanup failed", errors);
         }
-        Logger.Information("ClientHeroReplayProxy disposed: owner={Owner}", this.OwnerGuid);
+        Logger.Information("RemoteHeroActionProxy disposed: owner={Owner}", this.OwnerGuid);
     }
 
-    public static ClientHeroReplayProxy? CreateClient(
+    public static RemoteHeroActionProxy? CreateClient(
         Game? game,
         Level? level,
         string ownerGuid)
@@ -129,6 +135,21 @@ internal sealed class ClientHeroReplayProxy : IGhostEntity
             return null;
         }
 
-        return new ClientHeroReplayProxy(hero, ownerGuid);
+        try
+        {
+            return new RemoteHeroActionProxy(hero, ownerGuid);
+        }
+        catch (Exception initializationError)
+        {
+            try
+            {
+                HeroProxyFactory.DisposeClient(hero);
+            }
+            catch (Exception cleanupError)
+            {
+                throw new AggregateException(initializationError, cleanupError);
+            }
+            throw;
+        }
     }
 }

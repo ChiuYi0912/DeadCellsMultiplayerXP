@@ -52,9 +52,9 @@ internal sealed class ClientWorld : Disposable
     private readonly LocalHeroState localHero;
 
     /// <summary>
-    /// 远端玩家 ClientHeroReplayProxy 生命周期与动作重放
+    /// 远端动作结果的去重与延迟派发；实体及代理归 RemoteHero 所有
     /// </summary>
-    private readonly ClientReplayProxyManager ghosts;
+    private readonly HeroActionReplay actionReplay;
 
     /// <summary>
     /// 服务端权威的动态关卡区域镜像
@@ -69,20 +69,18 @@ internal sealed class ClientWorld : Disposable
             this.frames = new WorldFrameTimeline(session, localGuid);
             this.entityStore = new ClientEntityStore();
 
-            this.ghosts = new ClientReplayProxyManager(session, localGuid);
+            this.localHero = new LocalHeroState(session);
+            this.heroes = new RemoteHeroManager(session, this.localHero, localGuid, this.InterruptRemoteMobSkill);
+            this.actionReplay = new HeroActionReplay(localGuid, this.heroes.Present);
+            this.heroes.HeroRemoved += this.actionReplay.RemoveHero;
             this.MobModifiers = new ClientMobModifierRegistry(
-                session, this.entityStore, this.ghosts);
+                session, this.entityStore, this.heroes);
             this.mobs = new ClientMobReplicator(
                 session, this.MobModifiers, this.frames, this.entityStore);
             this.entityStore.RegisterHandler(this.mobs);
 
             this.entities = new ClientEntityFrameApplier(this.entityStore);
             this.entities.DebugLabels.Register(new MobDebugTextProvider(session));
-
-            this.localHero = new LocalHeroState(session);
-            this.heroes = new RemoteHeroManager(
-                session, this.localHero, localGuid, this.ghosts);
-            this.ghosts.BindRemoteHeroes(this.heroes);
 
             this.areaAffects = new ClientAreaAffectState(session);
 
@@ -118,7 +116,8 @@ internal sealed class ClientWorld : Disposable
         {
             return;
         }
-        this.ghosts.Tick(nowMs);
+        this.heroes.UpdateActionProxies();
+        this.actionReplay.Tick(nowMs);
         this.frames.Tick(nowMs);
         this.entities.Tick(nowMs);
     }
@@ -208,7 +207,7 @@ internal sealed class ClientWorld : Disposable
             this.frames.DroppedOld,
             this.frames.PendingOverflow,
             mobCount,
-            this.ghosts.Count,
+            this.heroes.ActionProxyCount,
             heroCount,
             entityCount,
             pendingSpawns,
@@ -229,10 +228,10 @@ internal sealed class ClientWorld : Disposable
         }
         // 确认不等待视觉重放；补发帧同样经过时间线后到达这里。
         this.acknowledgeCommands(frame);
-        this.ghosts.BeginFrame(frame);
+        this.actionReplay.BeginFrame(frame);
         this.heroes.ApplyFrame(frame, this.frames);
         this.areaAffects.ApplyFrame(frame);
-        this.ghosts.ApplyFrame(frame);
+        this.actionReplay.ApplyFrame(frame);
         this.entities.ApplyFrame(frame);
     }
 
@@ -240,12 +239,31 @@ internal sealed class ClientWorld : Disposable
     {
         this.frames?.FrameApplied -= this.OnFrameApplied;
         this.Cleanup(() => this.frames?.Dispose(), "frame timeline");
+        if (this.heroes != null && this.actionReplay != null)
+        {
+            this.heroes.HeroRemoved -= this.actionReplay.RemoveHero;
+        }
+
+        this.Cleanup(() => this.actionReplay?.Dispose(), "action replay");
         this.Cleanup(() => this.MobModifiers?.Clear(), "mob modifiers");
         this.Cleanup(() => this.entities?.Dispose(), "entities");
         this.Cleanup(() => this.areaAffects?.Reset(), "area effects");
         this.Cleanup(() => this.heroes?.Dispose(), "remote heroes");
-        this.Cleanup(() => this.ghosts?.Dispose(), "replay proxies");
         this.Cleanup(() => this.localHero?.Dispose(), "local hero events");
+    }
+
+    private void InterruptRemoteMobSkill(uint netId)
+    {
+        if (this.IsDisposed || netId == 0 || !this.TryGetRemoteMob(netId, out var mob))
+        {
+            return;
+        }
+
+        var animation = mob.spr?.get_anim();
+        if (animation != null && !animation.destroyed)
+        {
+            animation.stopWithStateAnims();
+        }
     }
 
     private void Cleanup(Action cleanup, string resource)

@@ -40,7 +40,7 @@ internal sealed class ZombieClientModifier : MobModifierBase<GameZombie>
         // Game game = session.Game;
         // Hero hero = game.hero;
 
-        // var ghostmanager = context.ModifierContext.GetService<ClientReplayProxyManager>();
+        // var remoteHeroes = context.ModifierContext.GetService<RemoteHeroManager>();
         // if (ghostmanager.TryGet(evt.TargetGuid, out var ghost))
         // {
         //     ghost.SetPlaceholderVitals();

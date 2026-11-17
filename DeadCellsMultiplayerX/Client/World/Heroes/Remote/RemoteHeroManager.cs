@@ -5,109 +5,79 @@ using DeadCellsMultiplayerX.Client.Integration.Events;
 using DeadCellsMultiplayerX.Client.Session.Guest;
 using DeadCellsMultiplayerX.Client.World.Frames;
 using DeadCellsMultiplayerX.Client.World.Heroes.Local;
-using DeadCellsMultiplayerX.Client.World.Heroes.Replay;
+using DeadCellsMultiplayerX.Contracts.Actions;
+using DeadCellsMultiplayerX.Contracts.Entities;
 using DeadCellsMultiplayerX.Contracts.Snapshots;
-using DeadCellsMultiplayerX.Engine.Utilities;
 using DeadCellsMultiplayerX.Foundation.Lifecycle;
 
-internal sealed class RemoteHeroManager(
-    GuestGameSession session,
-    LocalHeroState localHero,
-    string localGuid,
-    ClientReplayProxyManager ghosts) : DisposableEventReceiver,
-IOnLocalHeroInitDone
+/// <summary>Reconciles remote actors; each actor owns all of its presentation resources.</summary>
+internal sealed class RemoteHeroManager(GuestGameSession session, LocalHeroState localHero,
+    string localGuid, Action<uint> interruptMobSkill) : DisposableEventReceiver, IOnLocalHeroInitDone
 {
-    private readonly GuestGameSession session = session;
-    private readonly LocalHeroState localHero = localHero;
-    private readonly string localGuid = localGuid;
-    private readonly ClientReplayProxyManager ghosts = ghosts;
-
-    /// <summary>
-    /// 存储其他客户端玩家的实体
-    /// </summary>
     private readonly Dictionary<string, RemoteHero> heroes = [];
-
+    private readonly HashSet<string> missingSpawnLogged = [];
+    private int lastEpoch = int.MinValue;
+    private bool clearing;
 #if DEBUG
-    /// <summary>
-    /// 用于调试其他客户端实体的生成
-    /// </summary>
     private readonly Dictionary<string, string> mismatchLogged = [];
-
-    /// <summary>
-    /// 用于调试其他客户端实体的生成信息
-    /// </summary>
     private string lastHeroSetSignature = string.Empty;
 #endif
-    /// <summary>
-    /// 记录生成有误的玩家
-    /// </summary>
-    private readonly HashSet<string> missingSpawnLogged = [];
 
-    /// <summary>
-    /// 已应用到 ClientHeroReplayProxy 的 Loadout 版本
-    /// </summary>
-    private readonly Dictionary<string, uint> appliedLoadoutVersions = [];
+    public event Action<string>? HeroRemoved;
     public IEnumerable<RemoteHero> All => this.heroes.Values;
+    public int ActionProxyCount => this.heroes.Values.Count(hero => hero.Actions.Proxy != null);
+    private string LocalLevelId => localHero.Context.CurrentLevelId;
+    private int LocalSubLevel => localHero.Context.SubLevelIndex;
+    private LevelKey LocalLevel => LevelKey.Make(this.LocalLevelId, this.LocalSubLevel);
 
-    /// <summary>
-    /// 当前客户端位于的关卡id
-    /// </summary>
-    private string LocalLevelId => this.localHero.Context.CurrentLevelId;
-
-    /// <summary>
-    /// 当前客户端位于的子关卡索引
-    /// </summary>
-    private int LocalSubLevel => this.localHero.Context.SubLevelIndex;
-
-    /// <summary>
-    /// 每应用一帧世界快照后做一次存在性对账
-    /// </summary>
-    /// <param name="frame">帧快照</param>
-    /// <param name="frames">帧管理器</param>
     public void ApplyFrame(WorldFrame frame, WorldFrameTimeline frames)
     {
-        if (this.IsDisposed || frame == null)
+        if (this.IsDisposed || this.clearing || frame == null)
         {
             return;
         }
-
 #if DEBUG
         this.LogHeroSet(frame);
 #endif
+        if (frame.Epoch != this.lastEpoch)
+        {
+            this.lastEpoch = frame.Epoch;
+            // A proxy belongs to its actor, including invalidation at epoch changes.
+            foreach (var hero in this.heroes.Values.ToArray())
+            {
+                try
+                {
+                    hero.Actions.ResetProxy();
+                }
+                catch (Exception ex)
+                {
+                    this.Logger.Warning(ex, "Remote action proxy epoch cleanup failed");
+                }
+            }
+        }
 
-        // 静态外观变化时调用
         if (frame.Spawned != null)
         {
             foreach (var spawn in frame.Spawned)
             {
-                if (spawn == null || spawn.GUID == this.localGuid)
-                {
-                    continue;
-                }
-
-                if (this.heroes.TryGetValue(spawn.GUID, out var existing)
-                    && !existing.destroyed
-                    && this.IsLocalLevel(existing))
+                if (spawn != null && this.TryGet(spawn.GUID, out var existing)
+                    && existing.CreatedLevel == this.LocalLevel)
                 {
                     existing.ApplySpawn(spawn);
                 }
-
-                this.PushGhostLoadout(spawn);
             }
         }
 
-        var seen = new HashSet<string>();
+        HashSet<string> seen = [];
         if (frame.Heroes != null)
         {
             foreach (var state in frame.Heroes)
             {
-                if (state == null || state.GUID == this.localGuid)
+                if (state == null || state.GUID == localGuid)
                 {
                     continue;
                 }
-
-                //判断其他客户端是否与玩家在同一关卡,不在即销毁其他客户端实体
-                if (!this.IsLocalLevel(state))
+                if (LevelKey.Make(state.LevelId, state.SubLevelIndex) != this.LocalLevel)
                 {
 #if DEBUG
                     this.LogMismatch(state);
@@ -115,208 +85,210 @@ IOnLocalHeroInitDone
                     this.Despawn(state.GUID);
                     continue;
                 }
-
 #if DEBUG
                 this.mismatchLogged.Remove(state.GUID);
 #endif
                 seen.Add(state.GUID);
-
                 this.heroes.TryGetValue(state.GUID, out var hero);
-
-                // 本地关卡/子关卡已切换但实体仍是旧关卡创建的 先销毁再重建
-                if (hero != null && !this.IsLocalLevel(hero))
+                if (hero != null && (!hero.IsActive || hero.CreatedLevel != this.LocalLevel))
                 {
                     this.Despawn(state.GUID);
                     hero = null;
                 }
-
+                if (!frames.TryGetSpawn(state.GUID, out var spawn))
+                {
+                    if (hero == null && this.missingSpawnLogged.Add(state.GUID))
+                    {
+                        this.Logger.Warning("No spawn for remote hero {Guid} on level {Level}#{SubLevel}",
+                            state.GUID, state.LevelId, state.SubLevelIndex);
+                    }
+                    continue;
+                }
                 if (hero == null)
                 {
-                    if (!frames.TryGetSpawn(state.GUID, out var spawn))
-                    {
-                        if (this.missingSpawnLogged.Add(state.GUID))
-                        {
-                            this.Logger.Warning(
-                                "No spawn for remote hero {Guid} on level {LevelId}#{SubLevelIndex}",
-                                state.GUID, state.LevelId, state.SubLevelIndex);
-                        }
-                        continue;
-                    }
-
-                    hero = this.CreateHero(spawn, frames, state);
+                    this.CreateHero(spawn, frames, state);
                     this.missingSpawnLogged.Remove(state.GUID);
                 }
-
-                var currentLevel = GuestGameSession.Game?.curLevel;
-                if (currentLevel != null)
+                else
                 {
-                    this.ghosts.Ensure(state.GUID, currentLevel);
+                    hero.ApplySpawn(spawn);
                 }
-
-                if (frames.TryGetSpawn(state.GUID, out var stateSpawn))
-                {
-                    this.PushGhostLoadout(stateSpawn);
-                }
-
-                hero.LevelId = state.LevelId;
-                hero.SubLevelIndex = state.SubLevelIndex;
             }
         }
-
-        // 服务端显式移除
         if (frame.Despawned != null)
         {
             foreach (var guid in frame.Despawned)
             {
-                if (string.IsNullOrEmpty(guid) || guid == this.localGuid)
+                if (!string.IsNullOrEmpty(guid) && guid != localGuid)
                 {
-                    continue;
+                    this.Despawn(guid);
                 }
-
-                this.Despawn(guid);
             }
         }
-
-        // 不再出现在权威集合中的实体
-        var toRemove = new List<string>();
-        foreach (var guid in this.heroes.Keys)
-        {
-            if (!seen.Contains(guid))
-            {
-                toRemove.Add(guid);
-            }
-        }
-
-        foreach (var guid in toRemove)
+        foreach (var guid in this.heroes.Keys.Where(guid => !seen.Contains(guid)).ToArray())
         {
             this.Despawn(guid);
         }
     }
 
-    /// <summary>
-    /// 销毁其中一位客户端实体
-    /// </summary>
-    /// <param name="guid">客户id</param>
-    public void Despawn(string guid)
+    public void UpdateActionProxies()
     {
-        this.appliedLoadoutVersions.Remove(guid);
-
-        try
+        if (this.IsDisposed || this.clearing)
         {
-            if (this.heroes.Remove(guid, out var hero))
+            return;
+        }
+        var level = GuestGameSession.Game?.curLevel;
+        if (level == null)
+        {
+            return;
+        }
+        foreach (var hero in this.heroes.Values)
+        {
+            if (ReferenceEquals(hero._level, level))
             {
-                this.Logger.Information("Despawn remote hero {Guid}", guid);
-                hero?.destroy();
+                hero.Actions.FollowOwner();
             }
         }
-        finally { this.ghosts.Remove(guid); }
+    }
+
+    public void Present(HeroOutcome outcome)
+    {
+        var level = GuestGameSession.Game?.curLevel;
+        if (level != null && this.TryGet(outcome.CasterGuid, out var hero)
+            && ReferenceEquals(hero._level, level))
+        {
+            hero.Present(outcome);
+        }
     }
 
     public bool TryGet(string guid, out RemoteHero hero)
-        => this.heroes.TryGetValue(guid, out hero!);
-
-    protected override void MyDispose()
     {
-        // Native destruction must not leave a stopped world's event receiver registered.
-        base.MyDispose();
-        foreach (var h in this.heroes.Values)
+        if (!this.IsDisposed && this.heroes.TryGetValue(guid, out hero!) && hero.IsActive)
+        {
+            return true;
+        }
+        hero = null!;
+        return false;
+    }
+
+    public bool TryGetActionProxy(string guid, out RemoteHeroActionProxy proxy)
+    {
+        if (this.TryGet(guid, out var hero) && hero.Actions.Proxy is { } current)
+        {
+            proxy = current;
+            return true;
+        }
+        proxy = null!;
+        return false;
+    }
+
+    public void Despawn(string guid)
+    {
+        if (!this.heroes.Remove(guid, out var hero))
+        {
+            return;
+        }
+        this.Logger.Information("Despawn remote hero {Guid}", guid);
+        try
+        {
+            this.HeroRemoved?.Invoke(guid);
+        }
+        finally
+        {
+            hero.destroy();
+        }
+    }
+
+    private void CreateHero(HeroSpawn spawn, WorldFrameTimeline frames, HeroDynamic state)
+    {
+        if (this.IsDisposed || this.clearing)
+        {
+            return;
+        }
+        var level = GuestGameSession.Game.curLevel;
+        var hero = new RemoteHero(level, frames, spawn.GUID, () => session.SyncedTimeMs, interruptMobSkill);
+        try
+        {
+            hero.init();
+            hero.ApplySpawn(spawn);
+            hero.SnapToState(state);
+            hero.Actions.FollowOwner();
+            // Native initialization can stop the world before this actor is published.
+            if (this.IsDisposed || this.clearing || !hero.IsActive)
+            {
+                hero.destroy();
+                return;
+            }
+            this.heroes.Add(spawn.GUID, hero);
+            this.Logger.Information("Created remote hero {Guid}: level={Level} position=({X},{Y})",
+                spawn.GUID, hero.CreatedLevel, hero.cx + hero.xr, hero.cy + hero.yr);
+        }
+        catch (Exception initializationError)
         {
             try
             {
-                h?.destroy();
+                hero.destroy();
             }
-            catch (Exception ex) { this.Logger.Warning(ex, "Remote hero cleanup failed"); }
+            catch (Exception cleanupError)
+            {
+                throw new AggregateException(initializationError, cleanupError);
+            }
+            throw;
         }
+    }
 
+    private void ClearHeroes()
+    {
+        if (this.clearing)
+        {
+            return;
+        }
+        this.clearing = true;
+        var previous = this.heroes.ToArray();
         this.heroes.Clear();
-        this.appliedLoadoutVersions.Clear();
+        this.missingSpawnLogged.Clear();
+        try
+        {
+            foreach (var (guid, hero) in previous)
+            {
+                try
+                {
+                    try
+                    {
+                        this.HeroRemoved?.Invoke(guid);
+                    }
+                    finally
+                    {
+                        hero.destroy();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    this.Logger.Warning(ex, "Remote hero cleanup failed: {Guid}", guid);
+                }
+            }
+        }
+        finally
+        {
+            this.clearing = false;
+        }
     }
 
-    /// <summary>
-    /// 把客户端静态数据中的完整装备应用到对应 ClientHeroReplayProxy
-    /// </summary>
-    private void PushGhostLoadout(HeroSpawn spawn)
+    protected override void MyDispose()
     {
-        if (spawn == null)
+        base.MyDispose();
+        this.ClearHeroes();
+        this.HeroRemoved = null;
+    }
+
+    void IOnLocalHeroInitDone.OnHeroInitDone(Hero hero)
+    {
+        if (this.IsDisposed || !ReferenceEquals(hero, GuestGameSession.Game?.hero))
         {
             return;
         }
-
-        if (this.appliedLoadoutVersions.TryGetValue(
-                spawn.GUID, out var appliedVersion)
-            && appliedVersion == spawn.Version)
-        {
-            return;
-        }
-
-        if (!this.ghosts.TryGet(spawn.GUID, out var ghost))
-        {
-            return;
-        }
-
-        ApplyLoadout(ghost, spawn);
-        this.appliedLoadoutVersions[spawn.GUID] = spawn.Version;
+        this.ClearHeroes();
     }
-
-    private static void ApplyLoadout(
-        ClientHeroReplayProxy ghost,
-        HeroSpawn spawn)
-    {
-        if (spawn.Loadout != null)
-        {
-            ghost.Actions.ApplyLoadout(spawn.Loadout);
-        }
-    }
-
-    /// <summary>
-    /// 创建客户实体
-    /// </summary>
-    /// <param name="spawn">客户玩家显示数据</param>
-    /// <param name="frames">帧管理器</param>
-    /// <param name="state">客户实体状态数据</param>
-    /// <returns><see cref="RemoteHero"/></returns>
-    private RemoteHero CreateHero(HeroSpawn spawn, WorldFrameTimeline frames, HeroDynamic state)
-    {
-        var game = GuestGameSession.Game;
-        var level = game.curLevel;
-        var hero = new RemoteHero(this.session, level, frames, spawn.GUID);
-        hero.init();
-        hero.ApplySpawn(spawn);
-        this.heroes[spawn.GUID] = hero;
-
-        var ghost = this.ghosts.Ensure(spawn.GUID, level);
-        if (ghost != null)
-        {
-            ApplyLoadout(ghost, spawn);
-            this.appliedLoadoutVersions[spawn.GUID] = spawn.Version;
-        }
-
-        // 直接用触发创建的新关卡状态摆放,避免用旧关卡插值坐标
-        hero.SnapToState(state.LevelId, state.SubLevelIndex, state.Pos);
-
-        var heroLevel = game.hero?._level;
-        this.Logger.Information(
-            "Created remote hero {Guid}: used={UsedLevel}#{UsedSub} state={StateLevel}#{StateSub} " +
-            "cur={CurLevel}#{CurSub} heroLevel={HeroLevel}#{HeroSub} " +
-            "statePos=({StateX},{StateY}) pos=({X},{Y}) destroyed={Destroyed}",
-            spawn.GUID,
-            LevelId(level), LevelIndex(level),
-            state.LevelId, state.SubLevelIndex,
-            LevelId(game.curLevel), LevelIndex(game.curLevel),
-            LevelId(heroLevel), LevelIndex(heroLevel),
-            state.Pos?.CX + state.Pos?.XR, state.Pos?.CY + state.Pos?.XY,
-            hero.cx + hero.xr, hero.cy + hero.yr,
-            hero.destroyed);
-
-        return hero;
-    }
-
-    private static string LevelId(dc.pr.Level? level)
-        => level?.map?.id?.ToString() ?? "<null>";
-
-    private static int LevelIndex(dc.pr.Level? level)
-        => level?.GetSubLevelIndex() ?? -1;
-
 
 #if DEBUG
     private void LogMismatch(HeroDynamic state)
@@ -370,34 +342,4 @@ IOnLocalHeroInitDone
     }
 #endif
 
-    private bool IsLocalLevel(HeroDynamic state)
-        => state.LevelId == this.LocalLevelId && state.SubLevelIndex == this.LocalSubLevel;
-
-    private bool IsLocalLevel(RemoteHero hero)
-        => hero.CreatedLevelId == this.LocalLevelId
-        && hero.CreatedSubLevelIndex == this.LocalSubLevel;
-
-    void IOnLocalHeroInitDone.OnHeroInitDone(Hero hero)
-    {
-        if (this.IsDisposed || !ReferenceEquals(hero, GuestGameSession.Game?.hero))
-        {
-            return;
-        }
-
-        // 关卡初始化.统一销毁旧关卡的所有 RemoteHero 与 Ghost
-        // 下一帧从世界帧重新创建
-        foreach (var h in this.heroes.Values)
-        {
-            try
-            {
-                h?.destroy();
-            }
-            catch (Exception ex) { this.Logger.Warning(ex, "Remote hero level cleanup failed"); }
-        }
-
-        this.heroes.Clear();
-        this.missingSpawnLogged.Clear();
-        this.appliedLoadoutVersions.Clear();
-        this.ghosts.Clear();
-    }
 }
