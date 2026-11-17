@@ -4,7 +4,7 @@ using DeadCellsMultiplayerX.Contracts.Snapshots;
 
 /// <summary>
 /// Indexes authoritative spawn records and current native instances.
-/// ClientEntityFrameApplier owns creation, retry, repair and destruction.
+/// ClientEntityReplication owns creation, retry, repair and destruction.
 /// </summary>
 internal sealed class ClientEntityStore
 {

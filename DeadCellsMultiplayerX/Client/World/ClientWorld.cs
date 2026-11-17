@@ -1,7 +1,6 @@
 namespace DeadCellsMultiplayerX.Client.World;
 
 using dc.en;
-using DeadCellsMultiplayerX.Client.Presentation.Effects;
 using DeadCellsMultiplayerX.Client.Session.Guest;
 using DeadCellsMultiplayerX.Client.UI.DebugTools;
 using DeadCellsMultiplayerX.Client.World.Entities;
@@ -11,6 +10,7 @@ using DeadCellsMultiplayerX.Client.World.Heroes.Remote;
 using DeadCellsMultiplayerX.Client.World.Heroes.Replay;
 using DeadCellsMultiplayerX.Client.World.Mobs.Behavior;
 using DeadCellsMultiplayerX.Client.World.Mobs.Replication;
+using DeadCellsMultiplayerX.Contracts.Entities;
 using DeadCellsMultiplayerX.Contracts.Snapshots;
 using DeadCellsMultiplayerX.Foundation.Lifecycle;
 
@@ -20,16 +20,16 @@ using DeadCellsMultiplayerX.Foundation.Lifecycle;
 internal sealed class ClientWorld : Disposable
 {
     /// <summary>
-    /// 世界帧管理器，负责接收、应用和驱动世界帧
+    /// 接收、补帧与重同步；缓存数据后交付有序世界帧
     /// </summary>
-    private readonly WorldFrameTimeline frames;
+    private readonly WorldFrameReceiver frameReceiver;
 
     private readonly Action<WorldFrame> acknowledgeCommands;
 
     /// <summary>
     /// 远程英雄管理器，负责维护其他玩家的显示实体
     /// </summary>
-    private readonly RemoteHeroManager heroes;
+    private readonly RemoteHeroManager remoteHeroes;
 
     /// <summary>
     /// 通用实体存储
@@ -39,17 +39,17 @@ internal sealed class ClientWorld : Disposable
     /// <summary>
     /// 通用实体帧管线
     /// </summary>
-    private readonly ClientEntityFrameApplier entities;
+    private readonly ClientEntityReplication entityReplication;
 
     /// <summary>
     /// Mob 同步装置，负责服务端怪物的生成、状态同步与销毁
     /// </summary>
-    private readonly ClientMobReplicator mobs;
+    private readonly ClientMobReplicator remoteMobs;
 
     /// <summary>
     /// 本地英雄状态
     /// </summary>
-    private readonly LocalHeroTracker localHero;
+    private readonly LocalHeroTracker localHeroTracker;
 
     /// <summary>
     /// 远端动作结果的去重与延迟派发；实体及代理归 RemoteHero 所有
@@ -66,25 +66,26 @@ internal sealed class ClientWorld : Disposable
         try
         {
             this.acknowledgeCommands = session.AcknowledgeCommands;
-            this.frames = new WorldFrameTimeline(session, localGuid);
+            this.frameReceiver = new WorldFrameReceiver(session);
             this.entityStore = new ClientEntityStore();
 
-            this.localHero = new LocalHeroTracker();
-            this.heroes = new RemoteHeroManager(session, this.localHero.State, localGuid, this.InterruptRemoteMobSkill);
-            this.actionReplay = new HeroActionReplay(localGuid, this.heroes.Present);
-            this.heroes.HeroRemoved += this.actionReplay.RemoveHero;
+            this.localHeroTracker = new LocalHeroTracker();
+            this.remoteHeroes = new RemoteHeroManager(session, this.localHeroTracker.State, localGuid, this.InterruptRemoteMobSkill,
+                this.frameReceiver.History, this.frameReceiver.HeroSpawns);
+            this.actionReplay = new HeroActionReplay(localGuid, this.remoteHeroes.Present);
+            this.remoteHeroes.HeroRemoved += this.actionReplay.RemoveHero;
             this.MobModifiers = new ClientMobModifierRegistry(
-                session, this.entityStore, this.heroes);
-            this.mobs = new ClientMobReplicator(
-                session, this.MobModifiers, this.frames, this.entityStore);
-            this.entities = new ClientEntityFrameApplier(this.entityStore);
-            this.entities.RegisterHandler(this.mobs);
-            this.entities.DebugLabels.Register(new MobDebugTextProvider(session));
+                session, this.entityStore, this.remoteHeroes);
+            this.remoteMobs = new ClientMobReplicator(
+                session, this.MobModifiers, this.frameReceiver.History, this.entityStore, this.frameReceiver.RequestResync);
+            this.entityReplication = new ClientEntityReplication(this.entityStore);
+            this.entityReplication.RegisterHandler(this.remoteMobs);
+            this.entityReplication.DebugLabels.Register(new MobDebugTextProvider(session));
 
             this.areaAffects = new ClientAreaAffectState(session);
 
-            this.frames.FrameApplied += this.OnFrameApplied;
-            this.frames.Start();
+            this.frameReceiver.FrameDelivered += this.ApplyDeliveredFrame;
+            this.frameReceiver.Start();
         }
         catch
         {
@@ -102,7 +103,7 @@ internal sealed class ClientWorld : Disposable
     {
         if (!this.IsDisposed)
         {
-            this.frames.OnFrame(frame);
+            this.frameReceiver.Receive(frame);
         }
     }
 
@@ -115,16 +116,28 @@ internal sealed class ClientWorld : Disposable
         {
             return;
         }
-        this.heroes.UpdateActionProxies();
+        this.remoteHeroes.UpdateActionProxies();
+        if (this.IsDisposed)
+        {
+            return;
+        }
         this.actionReplay.Tick(nowMs);
-        this.frames.Tick(nowMs);
-        this.entities.Tick(nowMs);
+        if (this.IsDisposed)
+        {
+            return;
+        }
+        this.frameReceiver.Tick(nowMs);
+        if (this.IsDisposed)
+        {
+            return;
+        }
+        this.entityReplication.Tick(nowMs);
     }
 
     /// <summary>
     /// 当前世界帧 epoch
     /// </summary>
-    internal int Epoch => this.frames.Epoch;
+    internal int Epoch => this.frameReceiver.Epoch;
 
     /// <summary>
     /// 客户端 mob 修改器入口
@@ -139,9 +152,9 @@ internal sealed class ClientWorld : Disposable
     /// <summary>
     /// 判断实体是否为服务端同步的怪物
     /// </summary>
-    internal bool IsRemoteMob(Mob mob) => this.mobs.IsRemoteMob(mob);
+    internal bool IsRemoteMob(Mob mob) => this.remoteMobs.IsRemoteMob(mob);
 
-    internal bool IsDeathSuppressed(Mob mob) => this.mobs.IsDeathSuppressed(mob);
+    internal bool IsDeathSuppressed(Mob mob) => this.remoteMobs.IsDeathSuppressed(mob);
 
     /// <summary>
     /// 查询 NetId 对应的远端 mob。
@@ -164,49 +177,40 @@ internal sealed class ClientWorld : Disposable
     internal ClientWorldStats CaptureStats()
     {
         var mobCount = 0;
-        foreach (var mob in this.mobs.All)
-        {
-            if (!mob.destroyed)
-            {
-                mobCount++;
-            }
-        }
-
-        var heroCount = 0;
-        foreach (var _ in this.heroes.All)
-        {
-            heroCount++;
-        }
-
+        var heroCount = this.remoteHeroes.Count;
         var entityCount = 0;
         var pendingSpawns = 0;
         foreach (var record in this.entityStore.Records)
         {
             entityCount++;
+            if (record.Kind == EntityKind.Mob && record.Native is Mob { destroyed: false })
+            {
+                mobCount++;
+            }
             if (!record.Created)
             {
                 pendingSpawns++;
             }
         }
 
-        var local = this.localHero.State;
+        var local = this.localHeroTracker.State;
         return new ClientWorldStats(
-            this.frames.Epoch,
-            this.frames.LastFrameAppliedAtMs,
-            this.frames.AppliedFramesPerSecond,
-            this.frames.HasBaseline,
-            this.frames.LastDeliveredSequence,
-            this.frames.PendingCount,
-            this.frames.BufferedFrames,
-            this.frames.GapCount,
-            this.frames.NackSent,
-            this.frames.BundleReceived,
-            this.frames.ResyncCount,
-            this.frames.SkippedFrames,
-            this.frames.DroppedOld,
-            this.frames.PendingOverflow,
+            this.frameReceiver.Epoch,
+            this.frameReceiver.LastFrameAppliedAtMs,
+            this.frameReceiver.AppliedFramesPerSecond,
+            this.frameReceiver.HasBaseline,
+            this.frameReceiver.LastDeliveredSequence,
+            this.frameReceiver.PendingCount,
+            this.frameReceiver.BufferedFrames,
+            this.frameReceiver.GapCount,
+            this.frameReceiver.NackSent,
+            this.frameReceiver.BundleReceived,
+            this.frameReceiver.ResyncCount,
+            this.frameReceiver.SkippedFrames,
+            this.frameReceiver.DroppedOld,
+            this.frameReceiver.PendingOverflow,
             mobCount,
-            this.heroes.ActionProxyCount,
+            this.remoteHeroes.ActionProxyCount,
             heroCount,
             entityCount,
             pendingSpawns,
@@ -219,7 +223,7 @@ internal sealed class ClientWorld : Disposable
     /// <summary>
     /// 在世界帧应用完成后，将帧数据应用到远程英雄与怪物
     /// </summary>
-    private void OnFrameApplied(WorldFrame frame)
+    private void ApplyDeliveredFrame(WorldFrame frame)
     {
         if (this.IsDisposed)
         {
@@ -227,28 +231,46 @@ internal sealed class ClientWorld : Disposable
         }
         // 确认不等待视觉重放；补发帧同样经过时间线后到达这里。
         this.acknowledgeCommands(frame);
+        if (this.IsDisposed)
+        {
+            return;
+        }
         this.actionReplay.BeginFrame(frame);
-        this.heroes.ApplyFrame(frame, this.frames);
+        this.remoteHeroes.ApplyFrame(frame);
+        if (this.IsDisposed)
+        {
+            return;
+        }
         this.areaAffects.ApplyFrame(frame);
+        if (this.IsDisposed)
+        {
+            return;
+        }
         this.actionReplay.ApplyFrame(frame);
-        this.entities.ApplyFrame(frame);
+        this.entityReplication.ApplyFrame(frame);
     }
 
     protected override void MyDispose()
     {
-        this.frames?.FrameApplied -= this.OnFrameApplied;
-        this.Cleanup(() => this.frames?.Dispose(), "frame timeline");
-        if (this.heroes != null && this.actionReplay != null)
+        this.frameReceiver?.FrameDelivered -= this.ApplyDeliveredFrame;
+        this.DisposeSafely(this.frameReceiver, "world frame receiver");
+        if (this.remoteHeroes != null && this.actionReplay != null)
         {
-            this.heroes.HeroRemoved -= this.actionReplay.RemoveHero;
+            this.remoteHeroes.HeroRemoved -= this.actionReplay.RemoveHero;
         }
-
-        this.Cleanup(() => this.actionReplay?.Dispose(), "action replay");
-        this.Cleanup(() => this.MobModifiers?.Clear(), "mob modifiers");
-        this.Cleanup(() => this.entities?.Dispose(), "entities");
-        this.Cleanup(() => this.areaAffects?.Reset(), "area effects");
-        this.Cleanup(() => this.heroes?.Dispose(), "remote heroes");
-        this.Cleanup(() => this.localHero?.Dispose(), "local hero events");
+        this.DisposeSafely(this.actionReplay, "action replay");
+        try
+        {
+            this.MobModifiers?.Clear();
+        }
+        catch (Exception ex)
+        {
+            this.Logger.Warning(ex, "Mob modifier cleanup failed");
+        }
+        this.DisposeSafely(this.entityReplication, "entity replication");
+        this.DisposeSafely(this.areaAffects, "area affects");
+        this.DisposeSafely(this.remoteHeroes, "remote heroes");
+        this.DisposeSafely(this.localHeroTracker, "local hero tracker");
     }
 
     private void InterruptRemoteMobSkill(uint netId)
@@ -265,12 +287,4 @@ internal sealed class ClientWorld : Disposable
         }
     }
 
-    private void Cleanup(Action cleanup, string resource)
-    {
-        try
-        {
-            cleanup();
-        }
-        catch (Exception ex) { this.Logger.Warning(ex, "World cleanup failed: {Resource}", resource); }
-    }
 }

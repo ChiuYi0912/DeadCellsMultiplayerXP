@@ -1,4 +1,4 @@
-namespace DeadCellsMultiplayerX.Client.Presentation.Effects;
+namespace DeadCellsMultiplayerX.Client.World;
 
 using dc.hl.types;
 using dc.pr;
@@ -13,7 +13,7 @@ using Serilog;
 /// <summary>
 /// 客户端动态 LevelAreaAffect 快照镜像
 /// </summary>
-internal sealed class ClientAreaAffectState(GuestGameSession session)
+internal sealed class ClientAreaAffectState(GuestGameSession session) : IDisposable
 {
     private const int MAX_ENTRIES = 512;
     private const double AREA_FPS = 60.0;
@@ -28,6 +28,7 @@ internal sealed class ClientAreaAffectState(GuestGameSession session)
     /// </summary>
     private readonly Dictionary<string, LevelAreaAffect> owned = [];
     private int lastEpoch = int.MinValue;
+    private bool disposed;
 
     /// <summary>
     /// 当前是否正在应用服务端快照
@@ -39,7 +40,7 @@ internal sealed class ClientAreaAffectState(GuestGameSession session)
     /// </summary>
     public void ApplyFrame(WorldFrame frame)
     {
-        if (frame == null)
+        if (this.disposed || frame == null)
         {
             return;
         }
@@ -74,6 +75,10 @@ internal sealed class ClientAreaAffectState(GuestGameSession session)
 
         for (var i = 0; i < count; i++)
         {
+            if (this.disposed)
+            {
+                return;
+            }
             var state = states[i];
             if (state == null)
             {
@@ -124,6 +129,12 @@ internal sealed class ClientAreaAffectState(GuestGameSession session)
             }
 
             this.ApplyState(affect, level, state, remainingSec);
+            // Native init can close the world before this new affect becomes owned.
+            if (this.disposed)
+            {
+                Clear(affect);
+                return;
+            }
             this.owned[key] = affect;
         }
 
@@ -131,9 +142,17 @@ internal sealed class ClientAreaAffectState(GuestGameSession session)
     }
 
     /// <summary>
-    /// 清理全部记录 用于 epoch关卡切换
+    /// 关闭区域镜像并释放本世界拥有的原生区域
     /// </summary>
-    public void Reset() => this.RemoveAllOwned();
+    public void Dispose()
+    {
+        if (this.disposed)
+        {
+            return;
+        }
+        this.disposed = true;
+        this.RemoveAllOwned();
+    }
 
     private void ApplyState(
         LevelAreaAffect affect,
@@ -204,12 +223,13 @@ internal sealed class ClientAreaAffectState(GuestGameSession session)
 
     private void RemoveAllOwned()
     {
-        foreach (var affect in this.owned.Values)
+        var previous = this.owned.Values.ToArray();
+        this.owned.Clear();
+        foreach (var affect in previous)
         {
             Clear(affect);
         }
 
-        this.owned.Clear();
     }
 
     private static void Clear(LevelAreaAffect affect)

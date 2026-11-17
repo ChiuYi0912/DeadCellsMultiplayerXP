@@ -22,16 +22,17 @@ using LevelMob = dc.level.Mob;
 internal sealed class ClientMobReplicator(
     GuestGameSession session,
     ClientMobModifierRegistry mobModifiers,
-    WorldFrameTimeline frames,
-    ClientEntityStore store) : IClientEntityKindHandler
+    WorldFrameHistory history,
+    ClientEntityStore store,
+    Action<string> requestResync) : IClientEntityKindHandler
 {
     private static readonly ILogger Logger = Log.ForContext("SourceContext", "ClientMobReplicator");
 
     private readonly GuestGameSession session = session;
     private readonly ClientMobModifierRegistry mobModifiers = mobModifiers;
-    private readonly WorldFrameTimeline frames = frames;
+    private readonly Action<string> requestResync = requestResync;
     private readonly ClientEntityStore store = store;
-    private readonly ClientMobStateApplier states = new(session, mobModifiers, frames);
+    private readonly ClientMobStateApplier states = new(session, mobModifiers, history);
     private readonly HashSet<Mob> suppressedDeaths = [with(ReferenceEqualityComparer.Instance)];
 
     private readonly HashSet<LevelKey> authoritativeLevels = [];
@@ -227,7 +228,7 @@ internal sealed class ClientMobReplicator(
 
             if (this.store.GetRecord(dynamic.NetId) == null)
             {
-                this.frames.RequestResync("mob spawn missing");
+                this.requestResync("mob spawn missing");
             }
         }
         this.LogFirstFrame(frame);

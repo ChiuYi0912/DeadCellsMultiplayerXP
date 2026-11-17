@@ -72,7 +72,7 @@ public partial class DebugHUD : IEventReceiver, IClientDebugHookSink, IDisposabl
         Rtt,
         Offset,
         Mobs,
-        Ghosts,
+        ActionProxies,
         Heroes,
         Entities,
         PendingCommands,
@@ -260,7 +260,7 @@ public partial class DebugHUD : IEventReceiver, IClientDebugHookSink, IDisposabl
         // 实体
         var entityRow = NewMetricRow(parent);
         Add(entityRow, MetricKind.Mobs, "mobs=", "", Thresholds((upper, neutral)));
-        Add(entityRow, MetricKind.Ghosts, "ghosts=", "", Thresholds((upper, neutral)));
+        Add(entityRow, MetricKind.ActionProxies, "proxies=", "", Thresholds((upper, neutral)));
         Add(entityRow, MetricKind.Heroes, "heroes=", "", Thresholds((upper, neutral)));
         Add(entityRow, MetricKind.Entities, "entities=", "", Thresholds((upper, neutral)));
         Add(entityRow, MetricKind.Spawn, "pendingSpawn=", "", Thresholds((1, green), (upper, yellow)));
@@ -438,7 +438,7 @@ public partial class DebugHUD : IEventReceiver, IClientDebugHookSink, IDisposabl
 
         this.expectedEntityLimit = expected;
 
-        this.ApplyEntityLimit(MetricKind.Ghosts, expected);
+        this.ApplyEntityLimit(MetricKind.ActionProxies, expected);
         this.ApplyEntityLimit(MetricKind.Heroes, expected);
     }
 
@@ -489,7 +489,7 @@ public partial class DebugHUD : IEventReceiver, IClientDebugHookSink, IDisposabl
             MetricKind.Rtt => snapshot.RttMs < 0 ? 0 : ClampInt(snapshot.RttMs),
             MetricKind.Offset => ClampSignedInt(snapshot.OffsetMs),
             MetricKind.Mobs => snapshot.Mobs,
-            MetricKind.Ghosts => snapshot.Ghosts,
+            MetricKind.ActionProxies => snapshot.ActionProxies,
             MetricKind.Heroes => snapshot.Heroes,
             MetricKind.Entities => snapshot.Entities,
             MetricKind.PendingCommands => snapshot.PendingCommands,

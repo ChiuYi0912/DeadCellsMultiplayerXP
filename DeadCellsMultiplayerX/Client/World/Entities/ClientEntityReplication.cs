@@ -9,7 +9,7 @@ using DeadCellsMultiplayerX.Contracts.Snapshots;
 /// Owns entity lifetimes: spawn, retry, native replacement, reconciliation and cleanup.
 /// Kind handlers supply native behavior; the store only maintains indexes.
 /// </summary>
-internal sealed class ClientEntityFrameApplier(ClientEntityStore store) : IDisposable
+internal sealed class ClientEntityReplication(ClientEntityStore store) : IDisposable
 {
     private readonly Dictionary<EntityKind, IClientEntityKindHandler> handlers = [];
     private int lastEpoch = -1;

@@ -121,19 +121,19 @@ internal static class DebugConsoleCommands
     [ConsoleMethod("dcmp-worldframe-stats", "打印客户端世界帧统计")]
     public static void WorldFrameStats(TextWriter writer)
     {
-        var manager = WorldFrameDebug.ClientManager;
-        if (manager == null)
+        var receiver = WorldFrameDebug.Receiver;
+        if (receiver == null)
         {
-            writer.WriteLine("WorldFrameTimeline not available.");
+            writer.WriteLine("WorldFrameReceiver not available.");
             return;
         }
 
-        writer.WriteLine($"epoch={manager.Epoch} baseline={manager.HasBaseline} " +
-                         $"lastSeq={manager.LastDeliveredSequence} pending={manager.PendingCount}");
-        writer.WriteLine($"gap={manager.GapCount} nack={manager.NackSent} " +
-                         $"bundle={manager.BundleReceived} skipped={manager.SkippedFrames} " +
-                         $"resync={manager.ResyncCount} droppedOld={manager.DroppedOld} " +
-                         $"overflow={manager.PendingOverflow}");
+        writer.WriteLine($"epoch={receiver.Epoch} baseline={receiver.HasBaseline} " +
+                         $"lastSeq={receiver.LastDeliveredSequence} pending={receiver.PendingCount}");
+        writer.WriteLine($"gap={receiver.GapCount} nack={receiver.NackSent} " +
+                         $"bundle={receiver.BundleReceived} skipped={receiver.SkippedFrames} " +
+                         $"resync={receiver.ResyncCount} droppedOld={receiver.DroppedOld} " +
+                         $"overflow={receiver.PendingOverflow}");
     }
 
     [ConsoleMethod("mob", "")]

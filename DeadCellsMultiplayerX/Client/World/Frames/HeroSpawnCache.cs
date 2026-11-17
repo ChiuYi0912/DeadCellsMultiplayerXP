@@ -5,7 +5,7 @@ using DeadCellsMultiplayerX.Contracts.Snapshots;
 /// <summary>
 /// 远端英雄静态数据索引；由世界帧与重同步基线共同维护。
 /// </summary>
-internal sealed class FrameSpawnIndex
+internal sealed class HeroSpawnCache
 {
     private readonly Dictionary<string, HeroSpawn> spawns = [];
 

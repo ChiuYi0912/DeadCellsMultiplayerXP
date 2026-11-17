@@ -9,11 +9,11 @@ using DeadCellsMultiplayerX.Engine.Adapters.Snapshots;
 
 /// <summary>Applies sampled motion, animation, affects and vitals; does not create, kill or repair mobs.</summary>
 internal sealed class ClientMobStateApplier(
-    GuestGameSession session, ClientMobModifierRegistry mobModifiers, WorldFrameTimeline frames)
+    GuestGameSession session, ClientMobModifierRegistry mobModifiers, WorldFrameHistory history)
 {
     private readonly GuestGameSession session = session;
     private readonly ClientMobModifierRegistry mobModifiers = mobModifiers;
-    private readonly WorldFrameTimeline frames = frames;
+    private readonly WorldFrameHistory history = history;
     private readonly ClientMobAffectState affectState = new();
 
     public void ApplyInterpolated(uint netId, Mob mob, long nowMs)
@@ -24,7 +24,7 @@ internal sealed class ClientMobStateApplier(
         {
             return;
         }
-        if (!this.frames.TryGetEntityBracket(
+        if (!this.history.TryGetEntityBracket(
                 netId, nowSec,
                 out var prev, out var next,
                 out var alpha, out var renderTimeSec))

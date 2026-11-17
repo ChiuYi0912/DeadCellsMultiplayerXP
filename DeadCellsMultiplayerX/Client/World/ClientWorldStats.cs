@@ -16,7 +16,7 @@ internal readonly record struct ClientWorldStats(
     int DroppedOld,
     int PendingOverflow,
     int Mobs,
-    int Ghosts,
+    int ActionProxies,
     int Heroes,
     int Entities,
     int PendingSpawns,

@@ -3,7 +3,7 @@ namespace DeadCellsMultiplayerX.Client.World.Frames;
 /// <summary>
 /// 世界帧应用时间与一秒窗口帧率统计。
 /// </summary>
-internal sealed class FrameTimelineStats
+internal sealed class FrameDeliveryStats
 {
     private long rateWindowStartMs = -1;
     private int rateFrames;

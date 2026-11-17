@@ -17,7 +17,7 @@ using Serilog;
 internal sealed class RemoteHero : KingSkin, IHxbitSerializable<RemoteHero.IHxData>
 {
     private static readonly ILogger Logger = Log.ForContext<RemoteHero>();
-    private readonly WorldFrameTimeline frames;
+    private readonly WorldFrameHistory history;
     private readonly Func<long> syncedTimeMs;
     private readonly Action<uint> interruptMobSkill;
     private LevelKey targetLevel;
@@ -25,11 +25,11 @@ internal sealed class RemoteHero : KingSkin, IHxbitSerializable<RemoteHero.IHxDa
     private bool loggedFirstTick;
     private bool loggedLevelWait;
 
-    public RemoteHero(Level level, WorldFrameTimeline frames, string guid,
+    public RemoteHero(Level level, WorldFrameHistory history, string guid,
         Func<long> syncedTimeMs, Action<uint> interruptMobSkill, int x = 0, int y = 0)
         : base(level, x, y)
     {
-        this.frames = frames;
+        this.history = history;
         this.Guid = guid;
         this.syncedTimeMs = syncedTimeMs;
         this.interruptMobSkill = interruptMobSkill;
@@ -97,7 +97,7 @@ internal sealed class RemoteHero : KingSkin, IHxbitSerializable<RemoteHero.IHxDa
             return;
         }
         var nowSec = this.SyncedTimeMs / 1000.0;
-        if (this.frames.TryGetHeroBracket(this.Guid, nowSec,
+        if (this.history.TryGetHeroBracket(this.Guid, nowSec,
                 out var previous, out var next, out var alpha, out var renderTimeSec))
         {
             if (LevelKey.Make(previous.LevelId, previous.SubLevelIndex) != this.targetLevel)

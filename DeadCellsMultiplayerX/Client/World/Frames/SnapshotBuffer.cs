@@ -1,12 +1,8 @@
 namespace DeadCellsMultiplayerX.Client.World.Frames;
 
 /// <summary>
-/// A generic, timestamp-based snapshot buffer for interpolating any state type
-/// <typeparamref name="T"/>. Unlike <see cref="SnapshotInterpolationBuffer"/> (which is hard-wired
-/// to the arena's <see cref="PlayerState"/> and a fixed 30 Hz tick), this buffer keys snapshots by
-/// a <c>double</c> timestamp (seconds) and only computes the bracketing snapshots plus the
-/// interpolation alpha. The type-specific Lerp is left to the caller, because it depends on how the
-/// caller's state is laid out (e.g. Dead Cells double pixel coordinates).
+/// Timestamp-ordered snapshots of <typeparamref name="T"/>. Computes only the bracketing
+/// samples and interpolation alpha; callers apply their own position/state interpolation.
 /// </summary>
 public sealed class SnapshotBuffer<T>(double interpolationDelaySeconds)
 {

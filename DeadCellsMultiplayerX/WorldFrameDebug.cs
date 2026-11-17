@@ -11,7 +11,7 @@ internal static class WorldFrameDebug
     public static int DropServerFrames { get; set; }
     public static int SkipClientUploads { get; set; }
     public static bool ForceResync { get; set; }
-    public static WorldFrameTimeline? ClientManager { get; set; }
+    public static WorldFrameReceiver? Receiver { get; set; }
 
     public static bool ConsumeDropServerFrame()
     {

@@ -12,7 +12,7 @@ using DeadCellsMultiplayerX.Foundation.Lifecycle;
 
 /// <summary>Reconciles remote actors; each actor owns all of its presentation resources.</summary>
 internal sealed class RemoteHeroManager(GuestGameSession session, LocalHeroState localHero,
-    string localGuid, Action<uint> interruptMobSkill) : DisposableEventReceiver, IOnLocalHeroInitDone
+    string localGuid, Action<uint> interruptMobSkill, WorldFrameHistory history, HeroSpawnCache heroSpawns) : DisposableEventReceiver, IOnLocalHeroInitDone
 {
     private readonly Dictionary<string, RemoteHero> heroes = [];
     private readonly HashSet<string> missingSpawnLogged = [];
@@ -24,13 +24,14 @@ internal sealed class RemoteHeroManager(GuestGameSession session, LocalHeroState
 #endif
 
     public event Action<string>? HeroRemoved;
+    public int Count => this.heroes.Count;
     public IEnumerable<RemoteHero> All => this.heroes.Values;
     public int ActionProxyCount => this.heroes.Values.Count(hero => hero.Actions.Proxy != null);
     private string LocalLevelId => localHero.CurrentLevelId;
     private int LocalSubLevel => localHero.SubLevelIndex;
     private LevelKey LocalLevel => LevelKey.Make(this.LocalLevelId, this.LocalSubLevel);
 
-    public void ApplyFrame(WorldFrame frame, WorldFrameTimeline frames)
+    public void ApplyFrame(WorldFrame frame)
     {
         if (this.IsDisposed || this.clearing || frame == null)
         {
@@ -95,7 +96,7 @@ internal sealed class RemoteHeroManager(GuestGameSession session, LocalHeroState
                     this.Despawn(state.GUID);
                     hero = null;
                 }
-                if (!frames.TryGetSpawn(state.GUID, out var spawn))
+                if (!heroSpawns.TryGet(state.GUID, out var spawn))
                 {
                     if (hero == null && this.missingSpawnLogged.Add(state.GUID))
                     {
@@ -106,7 +107,7 @@ internal sealed class RemoteHeroManager(GuestGameSession session, LocalHeroState
                 }
                 if (hero == null)
                 {
-                    this.CreateHero(spawn, frames, state);
+                    this.CreateHero(spawn, state);
                     this.missingSpawnLogged.Remove(state.GUID);
                 }
                 else
@@ -199,14 +200,14 @@ internal sealed class RemoteHeroManager(GuestGameSession session, LocalHeroState
         }
     }
 
-    private void CreateHero(HeroSpawn spawn, WorldFrameTimeline frames, HeroDynamic state)
+    private void CreateHero(HeroSpawn spawn, HeroDynamic state)
     {
         if (this.IsDisposed || this.clearing)
         {
             return;
         }
         var level = GuestGameSession.Game.curLevel;
-        var hero = new RemoteHero(level, frames, spawn.GUID, () => session.SyncedTimeMs, interruptMobSkill);
+        var hero = new RemoteHero(level, history, spawn.GUID, () => session.SyncedTimeMs, interruptMobSkill);
         try
         {
             hero.init();

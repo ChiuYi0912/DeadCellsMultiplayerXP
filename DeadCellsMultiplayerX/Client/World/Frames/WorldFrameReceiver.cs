@@ -10,7 +10,7 @@ using Serilog;
 /// 负责 epoch 校验、乱序重排、缺口补发与重同步；
 /// 已应用帧的插值历史、静态数据索引与帧统计由独立协作者维护。
 /// </summary>
-internal sealed class WorldFrameTimeline : IDisposable
+internal sealed class WorldFrameReceiver : IDisposable
 {
     /// <summary>
     /// 乱序待处理帧上限。
@@ -48,12 +48,12 @@ internal sealed class WorldFrameTimeline : IDisposable
     private const long RESYNC_RETRY_MS = 1000;
 
     private static readonly ILogger Logger =
-        Log.ForContext("SourceContext", "WorldFrameTimeline");
+        Log.ForContext("SourceContext", "WorldFrameReceiver");
 
     private readonly GuestGameSession session;
-    private readonly WorldFrameHistory history = new();
-    private readonly FrameSpawnIndex spawns = new();
-    private readonly FrameTimelineStats stats = new();
+    public WorldFrameHistory History { get; } = new();
+    public HeroSpawnCache HeroSpawns { get; } = new();
+    private readonly FrameDeliveryStats stats = new();
 
     /// <summary>
     /// 序列/缺口/NACK 状态机；客户端接收策略在构造函数中显式给出。
@@ -77,7 +77,7 @@ internal sealed class WorldFrameTimeline : IDisposable
     /// </summary>
     private bool loggedFirstFrame;
 
-    public WorldFrameTimeline(GuestGameSession session, string localGuid)
+    public WorldFrameReceiver(GuestGameSession session)
     {
         this.session = session;
 
@@ -98,7 +98,7 @@ internal sealed class WorldFrameTimeline : IDisposable
                 SkipOnUnavailable = false,
             },
             frame => frame.Sequence,
-            this.ApplyFrame,
+            this.DeliverFrame,
             hasBaseline: false,
             requestFrames: this.RequestFramesAsync,
             requestResync: this.RequestResync,
@@ -106,13 +106,13 @@ internal sealed class WorldFrameTimeline : IDisposable
             {
                 if (payload is WorldResync resync)
                 {
-                    this.OnResync(resync);
+                    this.ApplyResync(resync);
                 }
             },
             log: message => Logger.Warning("{Message}", message));
 
 #if DEBUG
-        WorldFrameDebug.ClientManager = this;
+        WorldFrameDebug.Receiver = this;
 #endif
     }
 
@@ -184,12 +184,12 @@ internal sealed class WorldFrameTimeline : IDisposable
     /// <summary>
     /// 渲染历史中缓存的帧数
     /// </summary>
-    public int BufferedFrames => this.history.Count;
+    public int BufferedFrames => this.History.Count;
 
     /// <summary>
     /// 连续帧写入时间线后触发
     /// </summary>
-    public event Action<WorldFrame>? FrameApplied;
+    public event Action<WorldFrame>? FrameDelivered;
 
     public void Start()
     {
@@ -202,7 +202,7 @@ internal sealed class WorldFrameTimeline : IDisposable
     /// <summary>
     /// 服务端广播入口
     /// </summary>
-    public void OnFrame(WorldFrame frame)
+    public void Receive(WorldFrame frame)
     {
         if (this.disposed || frame == null)
         {
@@ -220,9 +220,19 @@ internal sealed class WorldFrameTimeline : IDisposable
             this.RequestResync(previousEpoch < 0 ? "initial" : "epoch changed");
         }
 
+        if (this.disposed || frame.Epoch != this.Epoch)
+        {
+            return;
+        }
+        var current = this.generation;
+
         // 用最新服务端时间校正本地时钟
         this.session.ObserveServerTime((long)frame.ServerTimeMs);
 
+        if (this.disposed || this.generation != current)
+        {
+            return;
+        }
         // 序列/去重/乱序由共享 sequencer 处理
         this.sequencer.Receive(frame);
     }
@@ -249,41 +259,13 @@ internal sealed class WorldFrameTimeline : IDisposable
         // 轮询异步请求结果 避免阻塞游戏线程
         this.PollResync();
 
+        if (this.disposed)
+        {
+            return;
+        }
         // 序列/缺口/NACK 状态机共享实现
         this.sequencer.Tick(nowMs);
     }
-
-    /// <summary>
-    /// 在世界帧中查找英雄前后状态
-    /// </summary>
-    public bool TryGetHeroBracket(
-        string guid,
-        double nowSec,
-        out HeroDynamic previous,
-        out HeroDynamic next,
-        out double alpha,
-        out double renderTimeSec)
-        => this.history.TryGetHeroBracket(
-            guid, nowSec, out previous, out next, out alpha, out renderTimeSec);
-
-    /// <summary>
-    /// 在世界帧中查找怪物前后状态
-    /// </summary>
-    public bool TryGetEntityBracket(
-        uint netId,
-        double nowSec,
-        out EntityDynamic previous,
-        out EntityDynamic next,
-        out double alpha,
-        out double renderTimeSec)
-        => this.history.TryGetEntityBracket(
-            netId, nowSec, out previous, out next, out alpha, out renderTimeSec);
-
-    /// <summary>
-    /// 尝试获取英雄静态数据
-    /// </summary>
-    public bool TryGetSpawn(string guid, out HeroSpawn spawn)
-        => this.spawns.TryGet(guid, out spawn);
 
     /// <summary>
     /// 请求全量世界基线
@@ -325,7 +307,16 @@ internal sealed class WorldFrameTimeline : IDisposable
 
         try
         {
-            this.resyncTask = this.session.Server.RequestWorldResync(this.Epoch);
+            var current = this.generation;
+            var request = this.session.Server.RequestWorldResync(this.Epoch);
+            if (this.disposed || current != this.generation)
+            {
+                _ = ObserveDiscardedResyncAsync(request);
+            }
+            else
+            {
+                this.resyncTask = request;
+            }
         }
         catch (Exception ex)
         {
@@ -351,8 +342,8 @@ internal sealed class WorldFrameTimeline : IDisposable
     {
         this.generation++;
         this.DiscardResyncRequest();
-        this.history.Clear();
-        this.spawns.Clear();
+        this.History.Clear();
+        this.HeroSpawns.Clear();
         this.Epoch = -1;
         this.sequencer.Reset();
         this.lastResyncRequestLocalMs = 0;
@@ -368,12 +359,12 @@ internal sealed class WorldFrameTimeline : IDisposable
         }
         this.disposed = true;
         this.ResetCore();
-        FrameApplied = null;
+        FrameDelivered = null;
 
 #if DEBUG
-        if (WorldFrameDebug.ClientManager == this)
+        if (WorldFrameDebug.Receiver == this)
         {
-            WorldFrameDebug.ClientManager = null;
+            WorldFrameDebug.Receiver = null;
         }
 #endif
     }
@@ -381,7 +372,7 @@ internal sealed class WorldFrameTimeline : IDisposable
     /// <summary>
     /// 应用全量世界基线
     /// </summary>
-    public void OnResync(WorldResync resync)
+    public void ApplyResync(WorldResync resync)
     {
         if (this.disposed || resync == null)
         {
@@ -401,14 +392,18 @@ internal sealed class WorldFrameTimeline : IDisposable
             return;
         }
 
+        var current = this.generation;
+
         this.session.ObserveServerTime((long)resync.ServerTimeMs);
 
+        if (this.disposed || current != this.generation)
+        {
+            return;
+        }
         // 基线覆盖当前状态 清空旧时间线与缓存
-        this.history.Clear();
-        this.spawns.Clear();
+        this.History.Clear();
+        this.HeroSpawns.Clear();
         this.sequencer.AdoptBaseline(resync.Sequence);
-
-        this.spawns.AddRange(resync.Spawns);
 
         // 将基线包装成普通世界帧 统一走 ApplyFrame
         var baseline = new WorldFrame
@@ -453,7 +448,9 @@ internal sealed class WorldFrameTimeline : IDisposable
             }
 
             this.Epoch = epoch;
+            var current = this.generation;
             this.session.ObserveWorldEpoch(epoch);
+            return !this.disposed && this.generation == current && this.Epoch == epoch;
         }
 
         return true;
@@ -502,7 +499,7 @@ internal sealed class WorldFrameTimeline : IDisposable
         this.resyncTask = null;
         if (task.IsCompletedSuccessfully)
         {
-            this.OnResync(task.Result);
+            this.ApplyResync(task.Result);
         }
         else if (task.IsFaulted)
         {
@@ -529,21 +526,26 @@ internal sealed class WorldFrameTimeline : IDisposable
             await task.ConfigureAwait(false);
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex) { Logger.Warning(ex, "Discarded world resync request failed"); }
+        catch (Exception ex)
+        {
+            Logger.Warning(ex, "Discarded world resync request failed");
+        }
     }
 
     /// <summary>
     /// 应用连续帧
     /// </summary>
-    private void ApplyFrame(WorldFrame frame)
+    private void DeliverFrame(WorldFrame frame)
     {
         if (this.disposed || frame == null || frame.Epoch != this.Epoch)
         {
             return;
         }
 
-        this.history.Add(frame, frame.ServerTimeMs / 1000.0);
-        this.spawns.AddRange(frame.Spawned);
+        var current = this.generation;
+
+        this.History.Add(frame, frame.ServerTimeMs / 1000.0);
+        this.HeroSpawns.AddRange(frame.Spawned);
 
         // 首帧日志用于确认世界帧链路正常
         if (!this.loggedFirstFrame)
@@ -556,9 +558,16 @@ internal sealed class WorldFrameTimeline : IDisposable
 
         // 校验静态数据后通知实体做存在性对账
         this.ValidateSpawns(frame);
-        FrameApplied?.Invoke(frame);
+        if (this.disposed || this.generation != current)
+        {
+            return;
+        }
+        FrameDelivered?.Invoke(frame);
 
-        this.stats.NoteApplied(Environment.TickCount64);
+        if (!this.disposed && this.generation == current)
+        {
+            this.stats.NoteApplied(Environment.TickCount64);
+        }
     }
 
     /// <summary>
@@ -581,7 +590,7 @@ internal sealed class WorldFrameTimeline : IDisposable
                 continue;
             }
 
-            if (!this.spawns.TryGet(hero.GUID, out var spawn))
+            if (!this.HeroSpawns.TryGet(hero.GUID, out var spawn))
             {
                 this.RequestResync("spawn missing");
                 return;
