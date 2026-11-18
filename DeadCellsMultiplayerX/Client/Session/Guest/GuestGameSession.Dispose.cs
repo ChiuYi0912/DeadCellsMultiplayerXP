@@ -18,12 +18,12 @@ internal sealed partial class GuestGameSession
         {
             if (this.state >= GuestLifetimeState.Stopping)
             {
-                return this.stopped.Task;
+                return this.shutdownCompleted.Task;
             }
 
             if (this.state == GuestLifetimeState.Created)
             {
-                this.started.TrySetCanceled();
+                this.startupCompleted.TrySetCanceled();
             }
 
             this.state = GuestLifetimeState.Stopping;
@@ -33,7 +33,7 @@ internal sealed partial class GuestGameSession
         this.Cleanup(this.lifetime.Cancel, "session cancellation");
         this.Cleanup(() => this.channel?.Dispose(), "server RPC close");
         _ = this.FinishStopAsync();
-        return this.stopped.Task;
+        return this.shutdownCompleted.Task;
     }
 
     private async Task FinishStopAsync()
@@ -48,14 +48,14 @@ internal sealed partial class GuestGameSession
             // Close it before joining producers so a pending RPC can finish.
             var startingChannel = this.channel;
             this.Cleanup(() => startingChannel?.Dispose(), "server RPC close");
-            await this.ObserveShutdownAsync(this.started.Task);
+            await this.ObserveShutdownAsync(this.startupCompleted.Task);
             if (!ReferenceEquals(startingChannel, this.channel))
             {
                 this.Cleanup(() => this.channel?.Dispose(), "late server RPC close");
             }
-            if (this.loadTask != null)
+            if (this.initialLoadTask != null)
             {
-                await this.ObserveShutdownAsync(this.loadTask);
+                await this.ObserveShutdownAsync(this.initialLoadTask);
             }
             if (this.levelVoteTask != null)
             {
@@ -63,13 +63,13 @@ internal sealed partial class GuestGameSession
             }
             // Native constructors/destructors can reenter shutdown. Keep their hooks
             // installed until the in-progress ownership operation has unwound.
-            if (this.creatingWorld != null)
+            if (this.worldCreationCompleted != null)
             {
-                await this.creatingWorld.Task;
+                await this.worldCreationCompleted.Task;
             }
-            if (this.releasingWorld != null)
+            if (this.worldReleaseCompleted != null)
             {
-                await this.releasingWorld.Task;
+                await this.worldReleaseCompleted.Task;
             }
 
             await this.gameContext;
@@ -86,10 +86,10 @@ internal sealed partial class GuestGameSession
             this.Cleanup(this.ReleaseWorld, "replicated world");
 
             // World teardown still needs the mob/death hooks and their world lookup.
-            this.Cleanup(() => this.hooks?.Dispose(), "session hooks");
-            this.hooks = null;
-            this.Cleanup(() => this.gameHooks?.Dispose(), "game signal");
-            this.gameHooks = null;
+            this.Cleanup(() => this.sessionHooks?.Dispose(), "session hooks");
+            this.sessionHooks = null;
+            this.Cleanup(() => this.gameHookAdapter?.Dispose(), "game signal");
+            this.gameHookAdapter = null;
 
             this.Cleanup(this.Combat.ClearDeathPermissions, "death permissions");
             this.Cleanup(this.Uploader.Clear, "upload buffer");
@@ -112,7 +112,7 @@ internal sealed partial class GuestGameSession
 
             this.Server = null;
             this.saveData = null;
-            this.loadedGame = null;
+            this.initialGame = null;
             this.channel = null;
         }
         catch (Exception ex)
@@ -128,34 +128,7 @@ internal sealed partial class GuestGameSession
                 this.state = GuestLifetimeState.Stopped;
             }
 
-            this.stopped.TrySetResult();
-        }
-    }
-
-    /// <summary>
-    /// Releases the current world on the game thread. The session's world lookup
-    /// remains valid until native teardown finishes, including reentrant callbacks.
-    /// </summary>
-    private void ReleaseWorld()
-    {
-        var world = this.ClientWorld;
-        if (world == null || this.releasingWorld != null)
-        {
-            return;
-        }
-
-        var release = this.releasingWorld = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        try
-        {
-            world.BaselineApplied -= this.OnWorldBaselineApplied;
-            world.Dispose();
-        }
-        finally
-        {
-            this.ClientWorld = null;
-            this.worldGeneration = 0;
-            this.releasingWorld = null;
-            release.TrySetResult();
+            this.shutdownCompleted.TrySetResult();
         }
     }
 

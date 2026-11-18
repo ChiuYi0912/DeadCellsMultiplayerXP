@@ -35,40 +35,44 @@ internal sealed partial class GuestGameSession
 {
     private static readonly MessagePackSerializer FrameSizeSerializer = new();
 
-    // Fields
+    // Session lifetime and transport
     private readonly Lock gate = new();
     private readonly CancellationTokenSource lifetime = new();
     private readonly SynchronizationContext gameContext;
     private readonly Stream serverStream;
     private readonly Action<bool> requestStop;
-    private readonly GuestGameLoader gameLoader;
-    private readonly LocalHeroActionRecorder localActions;
-    private readonly GuestLevelTransition levelLifecycle = new();
-    private readonly TaskCompletionSource started =
+    private readonly TaskCompletionSource startupCompleted =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
-    private readonly TaskCompletionSource initialWorldStarted =
+    private readonly TaskCompletionSource shutdownCompleted =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
-    private readonly TaskCompletionSource stopped =
-        new(TaskCreationOptions.RunContinuationsAsynchronously);
-
     private GuestLifetimeState state;
     private GuestRpcChannel? channel;
-    private GuestSessionHooks? hooks;
-    private GuestGameHookAdapter? gameHooks;
-    private GuestLevelEntrySubscription? levelEntry;
-    private Task? loadTask;
-    private Task? levelVoteTask;
-    private dc.pr.Game? loadedGame;
-    private byte[]? saveData;
-    private bool eventsRegistered;
-    private TaskCompletionSource? creatingWorld;
-    private TaskCompletionSource? releasingWorld;
-    private long worldGeneration;
-    private bool protocolValidated;
-    private DebugHUD? debugHud;
-    private volatile string? serverTransitionTarget;
 
-    // Constructor
+    // Initial save loading
+    private readonly GuestGameLoader gameLoader;
+    private readonly TaskCompletionSource initialWorldStarted =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private Task? initialLoadTask;
+    private dc.pr.Game? initialGame;
+    private byte[]? saveData;
+    private bool protocolValidated;
+
+    // Game bindings and local actions
+    private readonly LocalHeroActionRecorder localActions;
+    private GuestSessionHooks? sessionHooks;
+    private GuestGameHookAdapter? gameHookAdapter;
+    private bool eventsRegistered;
+    private DebugHUD? debugHud;
+
+    // Level and world lifecycle
+    private readonly GuestLevelTransition levelLifecycle = new();
+    private GuestLevelEntrySubscription? levelEntrySubscription;
+    private Task? levelVoteTask;
+    private volatile string? serverTransitionTarget;
+    private TaskCompletionSource? worldCreationCompleted;
+    private TaskCompletionSource? worldReleaseCompleted;
+    private long worldGeneration;
+
     public GuestGameSession(
         string localGuid,
         LobbyInfo lobbyInfo,
@@ -87,7 +91,7 @@ internal sealed partial class GuestGameSession
         this.localActions = new LocalHeroActionRecorder(this);
 
         // Bind session methods here; they resolve Server only when invoked.
-        // Binding Server.Method directly would access RPC before RunStartAsync.
+        // Binding Server.Method directly would access RPC before RunStartupAsync.
         this.Clock = new GuestClockSync(
             () => this.IsDisposed,
             () => this.protocolValidated && !this.IsDisposed,
@@ -168,7 +172,7 @@ internal sealed partial class GuestGameSession
     private GuestClockSync Clock { get; }
     private GuestFrameUploader Uploader { get; }
 
-    // Public methods
+    // Session startup and initial loading
     public Task StartAsync()
     {
         lock (this.gate)
@@ -179,14 +183,173 @@ internal sealed partial class GuestGameSession
 
             if (this.state != GuestLifetimeState.Created)
             {
-                return this.started.Task;
+                return this.startupCompleted.Task;
             }
 
             this.state = GuestLifetimeState.Starting;
         }
 
-        _ = this.RunStartAsync();
-        return this.started.Task;
+        _ = this.RunStartupAsync();
+        return this.startupCompleted.Task;
+    }
+
+    private async Task RunStartupAsync()
+    {
+        try
+        {
+            await this.gameContext;
+            this.lifetime.Token.ThrowIfCancellationRequested();
+            this.InstallGameBindings();
+
+            // Save upload can invoke EnterNewLevel before its response arrives.
+            // Hooks and the RPC target must be ready before the server can call back.
+            this.StartRpcListening();
+            await this.ValidateAndRegisterGuestAsync();
+            await this.gameContext;
+            this.lifetime.Token.ThrowIfCancellationRequested();
+
+            // EnterNewLevel may already have supplied the game while validation was in flight.
+            this.protocolValidated = true;
+            this.TryStartInitialWorld();
+            await this.UploadOwnerSaveAsync();
+
+            await this.initialWorldStarted.Task.WaitAsync(this.lifetime.Token);
+
+            lock (this.gate)
+            {
+                if (this.state >= GuestLifetimeState.Stopping)
+                {
+                    throw new OperationCanceledException(this.lifetime.Token);
+                }
+
+                this.state = GuestLifetimeState.Active;
+            }
+
+            this.startupCompleted.TrySetResult();
+        }
+        catch (Exception ex)
+        {
+            if (this.lifetime.IsCancellationRequested || ex is OperationCanceledException)
+            {
+                this.startupCompleted.TrySetCanceled(this.lifetime.Token);
+            }
+            else
+            {
+                this.startupCompleted.TrySetException(ex);
+            }
+
+            if (!this.IsDisposed)
+            {
+                this.Logger.Error(ex, "Guest game initialization failed");
+                this.requestStop(true);
+            }
+        }
+    }
+
+    private void InstallGameBindings()
+    {
+        this.gameHookAdapter = new GuestGameHookAdapter(
+            this.Logger,
+            () => this.IsDisposed,
+            () => this.levelLifecycle.Phase == GuestLevelPhase.InitialLoading,
+            () => this.serverTransitionTarget,
+            this.SubmitLevelVote,
+            this.TryBeginNativeLevelTransition,
+            this.OnNativeLevelConstructed,
+            () => this.requestStop(false));
+
+        this.sessionHooks = new GuestSessionHooks(
+            new GuestCombatHookAdapter(
+                mob => this.ClientWorld?.IsRemoteMob(mob) == true,
+                () => this.ClientWorld?.IsApplyingServerAreaAffect == true,
+                this.Combat),
+            new GuestMobHookAdapter(
+                () => this.ClientWorld?.MobModifiers,
+                mob => this.ClientWorld?.IsRemoteMob(mob) == true,
+                mob => this.ClientWorld?.IsDeathSuppressed(mob) == true,
+                () => this.SyncedTimeMs,
+                this.Combat),
+            new GuestSaveHookAdapter(() => this.saveData),
+            this.gameHookAdapter);
+
+        this.localActions.Init();
+        this.eventsRegistered = true;
+        EventSystem.AddReceiver(this);
+
+#if DEBUG
+        this.debugHud = DebugHUD.EnsureCreated();
+#endif
+    }
+
+    private void StartRpcListening()
+    {
+        this.channel = new GuestRpcChannel(this.serverStream, "guest-server", this.Logger);
+        var rpc = this.channel.Rpc;
+        rpc.AddLocalRpcTarget(this);
+        this.Server = rpc.Attach<IServerRPC>();
+        rpc.SynchronizationContext = this.gameContext;
+        rpc.Disconnected += this.OnDisconnected;
+        rpc.StartListening();
+        this.lifetime.Token.ThrowIfCancellationRequested();
+    }
+
+    private async Task ValidateAndRegisterGuestAsync()
+    {
+        var hello = await this.Server.Hello(new HelloRequest
+        {
+            MAJOR = ProtocolVersion.Major,
+            MINOR = ProtocolVersion.Minor,
+            ModVersion = VersionUtils.ModVersion.ToString(),
+            Capabilities = ProtocolVersion.SupportedCapabilities,
+        });
+        this.lifetime.Token.ThrowIfCancellationRequested();
+
+        if (!hello.Accepted)
+        {
+            throw new InvalidOperationException($"Guest handshake rejected: {hello.Reason}");
+        }
+        if (!await this.Server.CheckVersion(VersionUtils.ModVersion.ToString()))
+        {
+            throw new InvalidOperationException("Guest game version mismatch.");
+        }
+
+        this.lifetime.Token.ThrowIfCancellationRequested();
+        await this.Server.SetGuestInfo(this.LobbyInfo.Guests[this.LocalGuid]);
+    }
+
+    private async Task UploadOwnerSaveAsync()
+    {
+        if (this.LobbyInfo.Owner != this.LocalGuid)
+        {
+            return;
+        }
+
+        var path = Path.GetFullPath("save/" + dc.tool.Save.Class.fileName(null).ToString());
+        var data = await File.ReadAllBytesAsync(path, this.lifetime.Token);
+        this.lifetime.Token.ThrowIfCancellationRequested();
+        await this.Server.UploadSavedata(data);
+    }
+
+    private async Task LoadInitialGameAsync(byte[] data)
+    {
+        try
+        {
+            await this.gameContext;
+            this.lifetime.Token.ThrowIfCancellationRequested();
+            this.saveData = data;
+            this.initialGame = await this.gameLoader.LoadSavedGameAsync(this.lifetime.Token);
+            this.TryStartInitialWorld();
+        }
+        catch (Exception ex)
+        {
+            this.initialWorldStarted.TrySetCanceled();
+            if (!this.IsDisposed)
+            {
+                this.Logger.Error(ex, "Guest game loading failed");
+                this.requestStop(true);
+            }
+            throw;
+        }
     }
 
     // Inbound RPC
@@ -196,15 +359,11 @@ internal sealed partial class GuestGameSession
         {
             ObjectDisposedException.ThrowIf(this.state >= GuestLifetimeState.Stopping, this);
             // A repeated callback shares the initial load; it cannot launch a second game.
-            return this.loadTask ??= this.LoadGameAsync(data);
+            return this.initialLoadTask ??= this.LoadInitialGameAsync(data);
         }
     }
 
-    /// <summary>
-    /// 服务端调用,用于通知当前客户切换关卡
-    /// </summary>
-    /// <param name="levelid"></param>
-    /// <returns></returns>
+    /// <summary>Runs the native transition authorized by the server.</summary>
     public Task EnterNextLevel(string levelid)
     {
         ObjectDisposedException.ThrowIf(this.IsDisposed, this);
@@ -253,8 +412,12 @@ internal sealed partial class GuestGameSession
     /// 服务端请求补发本地上传帧
     /// </summary>
     public Task<ClientFrameBundle> RequestClientFrames(ClientFrameRangeRequest request)
-        => Task.FromResult(!this.CanUploadFrames ? new ClientFrameBundle { Unavailable = true }
-            : this.Uploader.BuildBundle(request));
+    {
+        var bundle = this.CanUploadFrames
+            ? this.Uploader.BuildBundle(request)
+            : new ClientFrameBundle { Unavailable = true };
+        return Task.FromResult(bundle);
+    }
 
     // Game events
     void IOnFrameUpdate.OnFrameUpdate(double dt)
@@ -264,10 +427,8 @@ internal sealed partial class GuestGameSession
             return;
         }
 
-        // 同步 TimeStamp
         this.Clock.Tick();
 
-        // 世界帧 NACK 调度/超时
         if (this.CanTickWorld)
         {
             this.ClientWorld?.Tick(this.SyncedTimeMs);
@@ -291,7 +452,7 @@ internal sealed partial class GuestGameSession
         }
     }
 
-    // Internal methods
+    // Level transitions
     internal async Task SubmitLevelVote(string levelId)
     {
         await this.gameContext;
@@ -309,13 +470,7 @@ internal sealed partial class GuestGameSession
             if (game?.hero != null)
             {
                 game.controller.manualLock = true;
-                var vp = game.curLevel.viewport;
-                if (vp != null && !vp.destroyed)
-                {
-                    vp.stopTracking();
-                }
-
-                game.hero.clean();
+                game.hero._targetable = false;
             }
             this.Logger.Information("Guest waiting for level selection: generation={Generation} vote={LevelId}", generation, levelId);
         }
@@ -361,9 +516,9 @@ internal sealed partial class GuestGameSession
         {
             return;
         }
-        // Phase 0 confirmed that native entry completes after the constructor returns.
+        // Install after native construction; loadNewLevel preserves this subscription.
         this.ClearLevelEntrySubscription();
-        this.levelEntry = new GuestLevelEntrySubscription(transition,
+        this.levelEntrySubscription = new GuestLevelEntrySubscription(transition,
             () => this.OnNativeLevelEntered(generation, transition, game, levelId));
     }
 
@@ -376,214 +531,17 @@ internal sealed partial class GuestGameSession
         }
         this.ClearLevelEntrySubscription();
         this.Logger.Information("Guest native level entered: generation={Generation} target={LevelId}", generation, levelId);
-        this.CreateWorld(game, this.levelLifecycle.MinimumEpochExclusive);
+        this.CreateAndStartWorld(game, this.levelLifecycle.MinimumEpochExclusive);
     }
 
     private void ClearLevelEntrySubscription()
     {
-        var entry = this.levelEntry;
-        this.levelEntry = null;
+        var entry = this.levelEntrySubscription;
+        this.levelEntrySubscription = null;
         this.Cleanup(() => entry?.Dispose(), "level entry subscription");
     }
 
-    private void OnWorldBaselineApplied(ClientWorld world, int epoch)
-    {
-        if (this.IsDisposed || !ReferenceEquals(world, this.ClientWorld) || world.IsDisposed
-            || !this.levelLifecycle.TryCompleteBaseline(this.worldGeneration, epoch))
-        {
-            return;
-        }
-        var generation = this.worldGeneration;
-        if (!this.IsDisposed && this.levelLifecycle.Generation == generation
-            && this.levelLifecycle.Phase == GuestLevelPhase.Ready)
-        {
-            this.Logger.Information("Guest level ready: generation={Generation} epoch={Epoch} level={LevelId}",
-                generation, epoch, this.levelLifecycle.TargetLevelId);
-        }
-    }
-
-    /// <summary>
-    /// 仅由时间线交付的帧确认命令；普通推送与补发共用此入口。
-    /// </summary>
-    internal void AcknowledgeCommands(WorldFrame frame)
-        => this.localActions?.Commands.Acknowledge(frame, this.LocalGuid);
-
-    internal void ObserveWorldEpoch(int epoch)
-    {
-        if (this.IsDisposed || !this.levelLifecycle.TryAcceptWorldEpoch(this.levelLifecycle.Generation, epoch))
-        {
-            return;
-        }
-        this.Uploader.SetEpoch(epoch);
-        this.localActions?.ObserveEpoch(epoch);
-    }
-
-    internal void ObserveServerTime(long serverTimeMs) => this.Clock.ObserveServerTime(serverTimeMs);
-
-    internal void DebugCastSkill(string itemId, int slot)
-        => this.localActions?.DebugCastSkill(itemId, slot);
-
-    internal void DebugUseWeapon(string itemId, int slot, int cycle = 0)
-        => this.localActions?.DebugUseWeapon(itemId, slot, cycle);
-
-    // Private methods
-    private Task<long> RequestServerTimeAsync() => this.Server.GetTimeStamp();
-
-    private Task UploadClientFrameAsync(ClientWorldFrame frame)
-        => this.Server.UploadClientWorldFrame(frame);
-
-    private async Task RunStartAsync()
-    {
-        try
-        {
-            await this.gameContext;
-            this.lifetime.Token.ThrowIfCancellationRequested();
-            this.InstallGameBindings();
-
-            // UploadSavedata can invoke EnterNewLevel before its response arrives.
-            // Publish the RPC target and install save/game hooks before listening.
-            this.channel = new GuestRpcChannel(
-                this.serverStream,
-                "guest-server",
-                this.Logger);
-
-            var rpc = this.channel.Rpc;
-            rpc.AddLocalRpcTarget(this);
-            this.Server = rpc.Attach<IServerRPC>();
-            rpc.SynchronizationContext = this.gameContext;
-            rpc.Disconnected += this.OnDisconnected;
-            rpc.StartListening();
-            this.lifetime.Token.ThrowIfCancellationRequested();
-
-            var hello = await this.Server.Hello(new HelloRequest
-            {
-                MAJOR = ProtocolVersion.Major,
-                MINOR = ProtocolVersion.Minor,
-                ModVersion = VersionUtils.ModVersion.ToString(),
-                Capabilities = ProtocolVersion.SupportedCapabilities,
-            });
-
-            this.lifetime.Token.ThrowIfCancellationRequested();
-
-            if (!hello.Accepted)
-            {
-                throw new InvalidOperationException(
-                    $"Guest handshake rejected: {hello.Reason}");
-            }
-
-            if (!await this.Server.CheckVersion(VersionUtils.ModVersion.ToString()))
-            {
-                throw new InvalidOperationException("Guest game version mismatch.");
-            }
-
-            this.lifetime.Token.ThrowIfCancellationRequested();
-            await this.Server.SetGuestInfo(this.LobbyInfo.Guests[this.LocalGuid]);
-            await this.gameContext;
-            this.lifetime.Token.ThrowIfCancellationRequested();
-
-            this.protocolValidated = true;
-            this.TryStartInitialWorld();
-
-            if (this.LobbyInfo.Owner == this.LocalGuid)
-            {
-                var path = Path.GetFullPath(
-                    "save/" + dc.tool.Save.Class.fileName(null).ToString());
-
-                var data = await File.ReadAllBytesAsync(path, this.lifetime.Token);
-                this.lifetime.Token.ThrowIfCancellationRequested();
-                await this.Server.UploadSavedata(data);
-            }
-
-            await this.initialWorldStarted.Task.WaitAsync(this.lifetime.Token);
-
-            lock (this.gate)
-            {
-                if (this.state >= GuestLifetimeState.Stopping)
-                {
-                    throw new OperationCanceledException(this.lifetime.Token);
-                }
-
-                this.state = GuestLifetimeState.Active;
-            }
-
-            this.started.TrySetResult();
-        }
-        catch (Exception ex)
-        {
-            if (this.lifetime.IsCancellationRequested || ex is OperationCanceledException)
-            {
-                this.started.TrySetCanceled(this.lifetime.Token);
-            }
-            else
-            {
-                this.started.TrySetException(ex);
-            }
-
-            if (!this.IsDisposed)
-            {
-                this.Logger.Error(ex, "Guest game initialization failed");
-                this.requestStop(true);
-            }
-        }
-    }
-
-    private async Task LoadGameAsync(byte[] data)
-    {
-        try
-        {
-            await this.gameContext;
-            this.lifetime.Token.ThrowIfCancellationRequested();
-            this.saveData = data;
-            this.loadedGame = await this.gameLoader.LoadSavedGameAsync(this.lifetime.Token);
-            this.TryStartInitialWorld();
-        }
-        catch (Exception ex)
-        {
-            this.initialWorldStarted.TrySetCanceled();
-            if (!this.IsDisposed)
-            {
-                this.Logger.Error(ex, "Guest game loading failed");
-                this.requestStop(true);
-            }
-            throw;
-        }
-    }
-
-    private void InstallGameBindings()
-    {
-        this.gameHooks = new GuestGameHookAdapter(
-            this.Logger,
-            () => this.IsDisposed,
-            () => this.levelLifecycle.Phase == GuestLevelPhase.InitialLoading,
-            () => this.serverTransitionTarget,
-            this.SubmitLevelVote,
-            this.TryBeginNativeLevelTransition,
-            this.OnNativeLevelConstructed,
-            () => this.requestStop(false));
-
-        this.hooks = new GuestSessionHooks(
-            new GuestCombatHookAdapter(
-                mob => this.ClientWorld?.IsRemoteMob(mob) == true,
-                () => this.ClientWorld?.IsApplyingServerAreaAffect == true,
-                this.Combat),
-            new GuestMobHookAdapter(
-                () => this.ClientWorld?.MobModifiers,
-                mob => this.ClientWorld?.IsRemoteMob(mob) == true,
-                mob => this.ClientWorld?.IsDeathSuppressed(mob) == true,
-                () => this.SyncedTimeMs,
-                this.Combat),
-            new GuestSaveHookAdapter(() => this.saveData),
-            this.gameHooks);
-
-        this.localActions.Init();
-        this.eventsRegistered = true;
-        EventSystem.AddReceiver(this);
-
-#if DEBUG
-        this.debugHud = DebugHUD.EnsureCreated();
-#endif
-    }
-
+    // World ownership
     private void TryStartInitialWorld()
     {
         dc.pr.Game game;
@@ -594,12 +552,12 @@ internal sealed partial class GuestGameSession
                 throw new OperationCanceledException(this.lifetime.Token);
             }
 
-            if (!this.protocolValidated || this.loadedGame == null
-                || this.ClientWorld != null || this.creatingWorld != null)
+            if (!this.protocolValidated || this.initialGame == null
+                || this.ClientWorld != null || this.worldCreationCompleted != null)
             {
                 return;
             }
-            game = this.loadedGame;
+            game = this.initialGame;
         }
 
         var levelId = game.curLevel?.map?.id?.ToString() ?? string.Empty;
@@ -608,25 +566,25 @@ internal sealed partial class GuestGameSession
         {
             return;
         }
-        this.CreateWorld(game);
+        this.CreateAndStartWorld(game);
         // Only the initial startup path completes this signal. A later world
         // replacement must not change startup completion or wait for a baseline.
         this.initialWorldStarted.TrySetResult();
     }
 
-    private ClientWorld CreateWorld(dc.pr.Game game, int minimumEpochExclusive = -1)
+    private void CreateAndStartWorld(dc.pr.Game game, int minimumEpochExclusive = -1)
     {
         CancellationToken cancellationToken;
         TaskCompletionSource creation;
         lock (this.gate)
         {
             ObjectDisposedException.ThrowIf(this.state >= GuestLifetimeState.Stopping, this);
-            if (this.ClientWorld != null || this.creatingWorld != null)
+            if (this.ClientWorld != null || this.worldCreationCompleted != null)
             {
                 throw new InvalidOperationException("A guest world already exists or is being created.");
             }
             cancellationToken = this.lifetime.Token;
-            creation = this.creatingWorld = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            creation = this.worldCreationCompleted = new(TaskCreationOptions.RunContinuationsAsynchronously);
         }
 
         ClientWorld? world = null;
@@ -661,7 +619,6 @@ internal sealed partial class GuestGameSession
             {
                 throw new OperationCanceledException("Guest world was released during startup.", cancellationToken);
             }
-            return world;
         }
         catch (Exception ex)
         {
@@ -688,11 +645,85 @@ internal sealed partial class GuestGameSession
         {
             lock (this.gate)
             {
-                this.creatingWorld = null;
+                this.worldCreationCompleted = null;
             }
             creation.TrySetResult();
         }
     }
+
+    /// <summary>
+    /// Releases the current world on the game thread. The session's world lookup
+    /// remains valid until native teardown finishes, including reentrant callbacks.
+    /// </summary>
+    private void ReleaseWorld()
+    {
+        var world = this.ClientWorld;
+        if (world == null || this.worldReleaseCompleted != null)
+        {
+            return;
+        }
+
+        var release = this.worldReleaseCompleted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        try
+        {
+            world.BaselineApplied -= this.OnWorldBaselineApplied;
+            world.Dispose();
+        }
+        finally
+        {
+            this.ClientWorld = null;
+            this.worldGeneration = 0;
+            this.worldReleaseCompleted = null;
+            release.TrySetResult();
+        }
+    }
+
+    private void OnWorldBaselineApplied(ClientWorld world, int epoch)
+    {
+        if (this.IsDisposed || !ReferenceEquals(world, this.ClientWorld) || world.IsDisposed
+            || !this.levelLifecycle.TryCompleteBaseline(this.worldGeneration, epoch))
+        {
+            return;
+        }
+        var generation = this.worldGeneration;
+        if (!this.IsDisposed && this.levelLifecycle.Generation == generation
+            && this.levelLifecycle.Phase == GuestLevelPhase.Ready)
+        {
+            this.Logger.Information("Guest level ready: generation={Generation} epoch={Epoch} level={LevelId}",
+                generation, epoch, this.levelLifecycle.TargetLevelId);
+        }
+    }
+
+    // World data and outbound RPC
+    /// <summary>
+    /// 仅由时间线交付的帧确认命令；普通推送与补发共用此入口。
+    /// </summary>
+    internal void AcknowledgeCommands(WorldFrame frame)
+        => this.localActions.Commands.Acknowledge(frame, this.LocalGuid);
+
+    internal void ObserveWorldEpoch(int epoch)
+    {
+        if (this.IsDisposed || !this.levelLifecycle.TryAcceptWorldEpoch(this.levelLifecycle.Generation, epoch))
+        {
+            return;
+        }
+        this.Uploader.SetEpoch(epoch);
+        this.localActions.ObserveEpoch(epoch);
+    }
+
+    internal void ObserveServerTime(long serverTimeMs) => this.Clock.ObserveServerTime(serverTimeMs);
+
+    private Task<long> RequestServerTimeAsync() => this.Server.GetTimeStamp();
+
+    private Task UploadClientFrameAsync(ClientWorldFrame frame)
+        => this.Server.UploadClientWorldFrame(frame);
+
+    // Diagnostics
+    internal void DebugCastSkill(string itemId, int slot)
+        => this.localActions.DebugCastSkill(itemId, slot);
+
+    internal void DebugUseWeapon(string itemId, int slot, int cycle = 0)
+        => this.localActions.DebugUseWeapon(itemId, slot, cycle);
 
     private void MeasureWorldFrame(WorldFrame frame)
     {
