@@ -26,7 +26,8 @@ internal sealed class GuestGameLoader(SynchronizationContext gameContext, ILogge
             cancellationToken.ThrowIfCancellationRequested();
             loadedGame = Game.Class.ME;
             if (loadedGame?.curLevel != null && loadedGame.subLevels != null
-                && loadedGame.hero != null && !Main.Class.ME.isLoading)
+                && loadedGame.hero != null && !loadedGame.hero.destroyed && loadedGame.hero.initDone
+                && !Main.Class.ME.isLoading)
             {
                 break;
             }

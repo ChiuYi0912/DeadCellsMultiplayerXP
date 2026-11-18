@@ -41,7 +41,8 @@ internal sealed partial class GuestGameSession
         try
         {
             await this.gameContext;
-            this.LevelLifecycle?.Stop();
+            this.levelLifecycle.Stop();
+            this.ClearLevelEntrySubscription();
 
             // Startup may have published the channel after the first stop request.
             // Close it before joining producers so a pending RPC can finish.
@@ -55,6 +56,20 @@ internal sealed partial class GuestGameSession
             if (this.loadTask != null)
             {
                 await this.ObserveShutdownAsync(this.loadTask);
+            }
+            if (this.levelVoteTask != null)
+            {
+                await this.ObserveShutdownAsync(this.levelVoteTask);
+            }
+            // Native constructors/destructors can reenter shutdown. Keep their hooks
+            // installed until the in-progress ownership operation has unwound.
+            if (this.creatingWorld != null)
+            {
+                await this.creatingWorld.Task;
+            }
+            if (this.releasingWorld != null)
+            {
+                await this.releasingWorld.Task;
             }
 
             await this.gameContext;
@@ -124,20 +139,23 @@ internal sealed partial class GuestGameSession
     private void ReleaseWorld()
     {
         var world = this.ClientWorld;
-        if (world == null || this.releasingWorld)
+        if (world == null || this.releasingWorld != null)
         {
             return;
         }
 
-        this.releasingWorld = true;
+        var release = this.releasingWorld = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         try
         {
+            world.BaselineApplied -= this.OnWorldBaselineApplied;
             world.Dispose();
         }
         finally
         {
             this.ClientWorld = null;
-            this.releasingWorld = false;
+            this.worldGeneration = 0;
+            this.releasingWorld = null;
+            release.TrySetResult();
         }
     }
 

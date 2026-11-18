@@ -16,9 +16,6 @@ internal enum GuestLevelPhase
 internal sealed class GuestLevelTransition
 {
     private object? nativeTransition;
-    private object? restrictedHero;
-    private bool ownsControlLock;
-    private bool ownsTargetabilityChange;
 
     public GuestLevelPhase Phase { get; private set; } = GuestLevelPhase.InitialLoading;
     public long Generation { get; private set; } = 1;
@@ -38,11 +35,6 @@ internal sealed class GuestLevelTransition
                 && this.AcceptedEpoch >= this.CandidateEpoch));
 
     public bool CanRecordActions => !this.IsStopped && this.Phase == GuestLevelPhase.Ready;
-    public bool CanRestoreInteraction => !this.IsStopped && this.Phase == GuestLevelPhase.Ready;
-
-    public bool CanRepairHeroTargetability(object hero)
-        => this.CanRestoreInteraction
-            && !(ReferenceEquals(hero, this.restrictedHero) && this.ownsTargetabilityChange);
 
     public bool CanApplyWorldEpoch(int epoch)
     {
@@ -72,7 +64,7 @@ internal sealed class GuestLevelTransition
         return true;
     }
 
-    public bool TryCompleteInitialLoad(long generation, string levelId, object? hero = null)
+    public bool TryCompleteInitialLoad(long generation, string levelId)
     {
         if (!this.IsCurrent(generation) || this.Phase != GuestLevelPhase.InitialLoading
             || string.IsNullOrEmpty(levelId))
@@ -80,12 +72,11 @@ internal sealed class GuestLevelTransition
             return false;
         }
         this.TargetLevelId = levelId;
-        this.restrictedHero = hero;
         this.Phase = GuestLevelPhase.SyncingWorld;
         return true;
     }
 
-    public bool TryBeginWaitingForServer(string levelId, int currentEpoch, object? hero, out long generation)
+    public bool TryBeginWaitingForServer(string levelId, int currentEpoch, out long generation)
     {
         generation = this.Generation;
         if (this.IsStopped || this.Phase != GuestLevelPhase.Ready
@@ -95,23 +86,8 @@ internal sealed class GuestLevelTransition
         }
         this.BeginTransition(currentEpoch);
         this.TargetLevelId = levelId;
-        this.restrictedHero = hero;
         this.Phase = GuestLevelPhase.WaitingForServer;
         generation = this.Generation;
-        return true;
-    }
-
-    /// <summary>Records only native restrictions the caller actually applied to this hero.</summary>
-    public bool TryRecordHeroRestrictions(long generation, object hero, bool controlsLocked, bool targetabilityChanged)
-    {
-        if (!this.IsCurrent(generation)
-            || this.Phase is not (GuestLevelPhase.WaitingForServer or GuestLevelPhase.SyncingWorld)
-            || hero == null || !ReferenceEquals(hero, this.restrictedHero))
-        {
-            return false;
-        }
-        this.ownsControlLock |= controlsLocked;
-        this.ownsTargetabilityChange |= targetabilityChanged;
         return true;
     }
 
@@ -140,7 +116,7 @@ internal sealed class GuestLevelTransition
         return true;
     }
 
-    public bool TryCompleteNativeLoad(long generation, object transition, string levelId, object? hero)
+    public bool TryCompleteNativeLoad(long generation, object transition, string levelId)
     {
         if (!this.IsCurrent(generation) || this.Phase != GuestLevelPhase.LoadingNative
             || !ReferenceEquals(transition, this.nativeTransition)
@@ -149,12 +125,6 @@ internal sealed class GuestLevelTransition
             return false;
         }
         this.nativeTransition = null;
-        if (!ReferenceEquals(hero, this.restrictedHero))
-        {
-            // A replacement hero must not inherit ownership of the previous hero's locks.
-            this.ClearHeroRestrictions();
-            this.restrictedHero = hero;
-        }
         this.Phase = GuestLevelPhase.SyncingWorld;
         return true;
     }
@@ -186,22 +156,6 @@ internal sealed class GuestLevelTransition
         return true;
     }
 
-    public bool TryTakeHeroRestrictions(
-        long generation, object hero, out bool unlockControls, out bool restoreTargetability)
-    {
-        unlockControls = false;
-        restoreTargetability = false;
-        if (!this.IsCurrent(generation) || !this.CanRestoreInteraction
-            || hero == null || !ReferenceEquals(hero, this.restrictedHero))
-        {
-            return false;
-        }
-        unlockControls = this.ownsControlLock;
-        restoreTargetability = this.ownsTargetabilityChange;
-        this.ClearHeroRestrictions();
-        return unlockControls || restoreTargetability;
-    }
-
     public void Stop()
     {
         if (this.IsStopped)
@@ -212,7 +166,6 @@ internal sealed class GuestLevelTransition
         this.Generation++;
         this.TargetLevelId = null;
         this.nativeTransition = null;
-        this.ClearHeroRestrictions();
     }
 
     private bool IsCurrent(long generation) => !this.IsStopped && generation == this.Generation;
@@ -227,13 +180,5 @@ internal sealed class GuestLevelTransition
             this.CandidateEpoch = -1;
         }
         this.nativeTransition = null;
-        this.ClearHeroRestrictions();
-    }
-
-    private void ClearHeroRestrictions()
-    {
-        this.restrictedHero = null;
-        this.ownsControlLock = false;
-        this.ownsTargetabilityChange = false;
     }
 }

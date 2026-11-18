@@ -36,6 +36,11 @@ internal sealed class GuestSessionHooks : IDisposable
             () => Hook_Game.init -= game.GameInit);
 
         this.group.Subscribe(
+            () => Hook_LevelTransition.loadNewLevel += GuestGameHookAdapter.LevelTransition_loadNewLevel,
+            () => Hook_LevelTransition.loadNewLevel -= GuestGameHookAdapter.LevelTransition_loadNewLevel
+        );
+
+        this.group.Subscribe(
             () => Hook_Mob.aiLocked += mob.AiLocked,
             () => Hook_Mob.aiLocked -= mob.AiLocked);
 

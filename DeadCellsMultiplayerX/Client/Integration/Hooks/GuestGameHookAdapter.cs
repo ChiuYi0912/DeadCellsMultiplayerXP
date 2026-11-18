@@ -1,11 +1,16 @@
 namespace DeadCellsMultiplayerX.Client.Integration.Hooks;
 
+using dc;
+using dc.achievements;
 using dc.cine;
 using dc.en;
+using dc.hl.types;
+using dc.level;
 using dc.pr;
 using dc.tool;
 using DeadCellsMultiplayerX.Client.Integration.Events;
 using DeadCellsMultiplayerX.Client.UI.DebugTools;
+using HashlinkNET.Native.Impl;
 using HaxeProxy.Runtime;
 using ModCore.Events;
 using ModCore.Utilities;
@@ -18,8 +23,11 @@ using Serilog;
 internal sealed class GuestGameHookAdapter(
     ILogger logger,
     Func<bool> isStopping,
-    Func<bool> isServerDrivenTransition,
+    Func<bool> isInitialLoading,
+    Func<string?> authorizedLevelId,
     Func<string, Task> submitLevelVote,
+    Func<LevelTransition, string, (long Generation, Game Game)?> tryBeginLevelTransition,
+    Action<long, LevelTransition, Game, string> onLevelConstructed,
     Action quit) : IDisposable
 {
     private readonly ILogger logger = logger
@@ -28,18 +36,25 @@ internal sealed class GuestGameHookAdapter(
             ?? throw new ArgumentNullException(nameof(quit));
     private Game? ownedGame;
     private HlAction<Hero>? heroInitialized;
-    private Action? stopLevelTransitionDiagnostics;
 
-    public void Dispose()
+    public void Dispose() => this.RemovePreviousSignal();
+
+    private void RemovePreviousSignal()
     {
-        this.StopLevelTransitionDiagnostics();
         var game = this.ownedGame;
         var callback = this.heroInitialized;
         this.ownedGame = null;
         this.heroInitialized = null;
         if (game != null && callback != null)
         {
-            game.gameSignals.heroInitDone.remove(callback);
+            try
+            {
+                game.gameSignals.heroInitDone.remove(callback);
+            }
+            catch (Exception ex)
+            {
+                this.logger.Warning(ex, "Guest hero signal unsubscribe failed");
+            }
         }
     }
 
@@ -91,174 +106,133 @@ internal sealed class GuestGameHookAdapter(
         }
     }
 
-    private void RemovePreviousSignal()
-    {
-        try
-        { this.Dispose(); }
-        catch (Exception ex) { this.logger.Warning(ex, "Guest hero signal unsubscribe failed"); }
-    }
-
     public void LevelTransitionCtor(
         Hook__LevelTransition.orig___constructor__ orig,
-        LevelTransition arg1,
-        dc.String mainId,
-        dc.level.LevelMap map,
+        LevelTransition self,
+        String mainId,
+        LevelMap map,
         int? linkId,
         CPoint heroPosAfterBossRuneReload,
         Ref<bool> noLoadingData)
     {
-        // Sub-level transitions bypass full-level voting and lifecycle diagnostics.
-        if (mainId is null)
+        if (mainId is null || isStopping() || isInitialLoading())
         {
-            orig(arg1, mainId, map, linkId, heroPosAfterBossRuneReload, noLoadingData);
+            // Saved-game entry and sub-levels keep their native path.
+            orig(self, mainId, map, linkId, heroPosAfterBossRuneReload, noLoadingData);
             return;
         }
 
-        var levelid = mainId.ToString() ?? string.Empty;
-
-        void EnterNativeLevel(Ref<bool> loadingData)
+        var levelId = mainId.ToString() ?? string.Empty;
+        var authorized = authorizedLevelId();
+        if (authorized == null)
         {
-            this.LogLevelTransition("native-before", arg1, levelid, linkId);
-            orig(arg1, mainId, map, linkId, heroPosAfterBossRuneReload, loadingData);
-            // The constructor starts loading and returns before the target level is ready.
-            this.LogLevelTransition("native-after", arg1, levelid, linkId);
-            this.ObserveLevelEntered(arg1, levelid, linkId);
-        }
-
-        if (levelid == "PrisonStart" || string.IsNullOrEmpty(levelid))
-        {
-            EnterNativeLevel(noLoadingData);
+            _ = this.SubmitVoteAsync(levelId);
             return;
         }
 
-        if (isStopping())
+        if (!string.Equals(levelId, authorized, StringComparison.Ordinal))
         {
-            EnterNativeLevel(noLoadingData);
+            this.logger.Warning("Ignoring unauthorized level: {LevelId}; expected {Authorized}", levelId, authorized);
+            return;
+        }
+        var context = tryBeginLevelTransition(self, levelId);
+        if (context == null)
+        {
             return;
         }
 
-        var hero = Game.Class.ME.hero;
+        orig(self, mainId, map, linkId, heroPosAfterBossRuneReload, noLoadingData);
+        onLevelConstructed(context.Value.Generation, self, context.Value.Game, levelId);
+    }
 
-        if (isServerDrivenTransition())
+    public static void LevelTransition_loadNewLevel(
+           Hook_LevelTransition.orig_loadNewLevel orig, LevelTransition self)
+    {
+        if (self.heroPosAfterBossRuneReload != null)
         {
-            if (hero != null && !hero.destroyed)
+            var seed = Game.Class.ME.curLevel.map?.seed;
+            Game.Class.ME.loadMainLevel(self, self.mainId, Ref<bool>.In(true), seed);
+        }
+        else if (self.mainId != null)
+        {
+            Game.Class.ME.loadMainLevel(self, self.mainId, default, null);
+        }
+        else
+        {
+            Game.Class.ME.activateSubLevel(self.map, self.linkId,
+                Ref<bool>.In(true), Ref<bool>.In(self.playAfterZDoorCine));
+        }
+
+        Lib_std.gc_major.Invoke();
+
+        if (self.get_isADlcPLevel())
+        {
+            self.onEnteredLevel ??= new HlAction(() => { });
+#pragma warning disable CA1806 // 不要忽略方法结果
+            self.onEnteredLevel += () => new PurpleLevelIntro(self.mainId, Game.Class.ME.hero);
+#pragma warning restore CA1806 // 不要忽略方法结果
+        }
+
+        Main.Class.ME.fadeOut(Ref<double>.In(self.multFade));
+        self.afterTransitionCine();
+        if (self.walk == null && self.jump == null && self.climb == null && self.onEnteredLevel != null)
+        {
+            self.onEnteredLevel.Invoke();
+        }
+
+        if (self.heroPosAfterBossRuneReload != null)
+        {
+            var flaskRoom = FindFlaskRoom(Game.Class.ME.curLevel.map?.rooms!);
+            if (flaskRoom != null)
             {
-                hero.set_targetable(true);
-                hero.unlockControls();
+                Game.Class.ME.hero.setPosCase(
+                    flaskRoom.x + self.heroPosAfterBossRuneReload.cx,
+                    flaskRoom.y + self.heroPosAfterBossRuneReload.cy, null!, null!);
+                Game.Class.ME.curLevel.afterBossRuneReload();
             }
-
-            EnterNativeLevel(noLoadingData);
-            return;
         }
 
-        _ = this.SubmitVoteAsync(levelid);
-
-        if (hero != null && !hero.destroyed)
+        if (self.giveGentlemanAchievement)
         {
-            hero.set_targetable(false);
-            hero.lockControlsF(999999);
+            Achievements.Class.setAchievement(new EAchievement.FEAT_PRISON_NOBREAK_DOOR(), default);
         }
 
-        // This constructor is intentionally skipped. A server-driven goto creates another transition.
-        this.LogLevelTransition("vote-held", arg1, levelid, linkId);
+        self.onLoad?.Invoke();
     }
 
-    [System.Diagnostics.Conditional("DEBUG")]
-    private void ObserveLevelEntered(LevelTransition transition, string levelId, int? linkId)
+    private static Room FindFlaskRoom(ArrayObj rooms)
     {
-        // First entry still belongs to GuestGameLoader; observe only authorized full-level changes.
-        if (isStopping() || !isServerDrivenTransition())
+        if (rooms == null)
         {
-            return;
+            return null!;
         }
 
-        this.StopLevelTransitionDiagnostics();
-        try
+        for (var i = 0; i < rooms.length; i++)
         {
-            var previous = transition.onEnteredLevel;
-            var active = true;
-            HlAction? observer = null;
-            observer = new HlAction(() =>
+            Room room = rooms.getDyn(i);
+            if (room != null && room.rType.ToString() == "FlaskRoom")
             {
-                var report = active;
-                if (active)
-                {
-                    this.StopLevelTransitionDiagnostics();
-                }
-
-                // Native behavior must still run if an old callback arrives after cleanup.
-                previous?.Invoke();
-                if (report && !isStopping())
-                {
-                    this.LogLevelTransition("level-entered", transition, levelId, linkId);
-                }
-            });
-
-            this.stopLevelTransitionDiagnostics = () =>
-            {
-                active = false;
-                // Do not overwrite a callback installed by the engine or another owner.
-                if (transition.onEnteredLevel == observer)
-                {
-                    transition.onEnteredLevel = previous;
-                }
-            };
-            transition.onEnteredLevel = observer;
-            this.LogLevelTransition("entered-observer-installed", transition, levelId, linkId);
+                return room;
+            }
         }
-        catch (Exception ex)
-        {
-            this.StopLevelTransitionDiagnostics();
-            this.logger.Warning(ex, "Guest level-entered observer installation failed");
-        }
+        return null!;
     }
 
-    [System.Diagnostics.Conditional("DEBUG")]
-    private void StopLevelTransitionDiagnostics()
-    {
-        var stop = this.stopLevelTransitionDiagnostics;
-        this.stopLevelTransitionDiagnostics = null;
-        try
-        {
-            stop?.Invoke();
-        }
-        catch (Exception ex)
-        {
-            this.logger.Debug(ex, "Guest level-entered observer cleanup failed");
-        }
-    }
-
-    [System.Diagnostics.Conditional("DEBUG")]
-    private void LogLevelTransition(
-        string phase, LevelTransition transition, string levelId, int? linkId)
-    {
-        // Diagnostics must not prevent the native constructor from running.
-        try
-        {
-            var game = Game.Class.ME;
-            var hero = game?.hero;
-            this.logger.Information(
-                "Guest full-level transition {Phase}: transition={TransitionId} target={TargetLevel} link={LinkId} current={CurrentLevel} heroReady={HeroReady} loading={Loading} serverDriven={ServerDriven}",
-                phase,
-                System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(transition),
-                levelId,
-                linkId,
-                game?.curLevel?.map?.id?.ToString(),
-                hero != null && !hero.destroyed && hero.initDone,
-                dc.Main.Class.ME?.isLoading,
-                isServerDrivenTransition());
-        }
-        catch (Exception ex)
-        {
-            this.logger.Debug(ex, "Guest level transition diagnostics unavailable: {Phase}", phase);
-        }
-    }
 
     private async Task SubmitVoteAsync(string levelId)
     {
         try
-        { await submitLevelVote(levelId); }
-        catch (Exception ex) when (isStopping()) { this.logger.Debug(ex, "Level vote canceled during exit"); }
-        catch (Exception ex) { this.logger.Warning(ex, "Level vote failed"); }
+        {
+            await submitLevelVote(levelId);
+        }
+        catch (Exception ex) when (isStopping())
+        {
+            this.logger.Debug(ex, "Level vote canceled during exit");
+        }
+        catch (Exception ex)
+        {
+            // A failed response does not prove that the server rejected the vote.
+            this.logger.Warning(ex, "Level vote failed; still waiting for server selection: {LevelId}", levelId);
+        }
     }
 }
