@@ -58,6 +58,7 @@ internal sealed partial class GuestGameSession
     private dc.pr.Game? loadedGame;
     private byte[]? saveData;
     private bool eventsRegistered;
+    private bool releasingWorld;
     private bool protocolValidated;
     private DebugHUD? debugHud;
     private volatile bool serverDrivenTransition;

@@ -29,9 +29,9 @@ internal sealed partial class GuestGameSession
             this.state = GuestLifetimeState.Stopping;
         }
 
-        this.lifetime.Cancel();
         this.Uploader.MarkDisposed();
-        this.channel?.Dispose();
+        this.Cleanup(this.lifetime.Cancel, "session cancellation");
+        this.Cleanup(() => this.channel?.Dispose(), "server RPC close");
         _ = this.FinishStopAsync();
         return this.stopped.Task;
     }
@@ -42,41 +42,52 @@ internal sealed partial class GuestGameSession
         {
             await this.gameContext;
 
+            // Startup may have published the channel after the first stop request.
+            // Close it before joining producers so a pending RPC can finish.
+            var startingChannel = this.channel;
+            this.Cleanup(() => startingChannel?.Dispose(), "server RPC close");
+            await this.ObserveShutdownAsync(this.started.Task);
+            if (!ReferenceEquals(startingChannel, this.channel))
+            {
+                this.Cleanup(() => this.channel?.Dispose(), "late server RPC close");
+            }
+            if (this.loadTask != null)
+            {
+                await this.ObserveShutdownAsync(this.loadTask);
+            }
+
+            await this.gameContext;
+
+            // Resource-producing startup/loading has finished. Nothing can install
+            // another event receiver, hook or world after this cleanup pass.
             if (this.eventsRegistered)
             {
                 this.Cleanup(() => EventSystem.RemoveReceiver(this), "game events");
                 this.eventsRegistered = false;
             }
 
+            this.Cleanup(this.localActions.Dispose, "action recorder");
+            this.Cleanup(this.ReleaseWorld, "replicated world");
+
+            // World teardown still needs the mob/death hooks and their world lookup.
             this.Cleanup(() => this.hooks?.Dispose(), "session hooks");
-            this.Cleanup(() => this.gameHooks?.Dispose(), "game signal");
             this.hooks = null;
+            this.Cleanup(() => this.gameHooks?.Dispose(), "game signal");
             this.gameHooks = null;
 
-            this.Cleanup(this.localActions.Dispose, "action recorder");
-            this.Cleanup(() => this.ClientWorld?.Dispose(), "replicated world");
-            this.ClientWorld = null;
-
-            this.Combat.ClearDeathPermissions();
-            this.Uploader.Clear();
+            this.Cleanup(this.Combat.ClearDeathPermissions, "death permissions");
+            this.Cleanup(this.Uploader.Clear, "upload buffer");
 
             this.Cleanup(() => this.debugHud?.Dispose(), "debug HUD");
             this.debugHud = null;
 
-            // Each producer sees cancellation/closed RPC before we join it.
-            await this.ObserveShutdownAsync(this.started.Task);
+            await this.CleanupAsync(this.Clock.CompleteAsync, "clock sample");
+            await this.CleanupAsync(this.Uploader.CompleteAsync, "frame upload");
 
-            if (this.loadTask != null)
+            var channel = this.channel;
+            if (channel != null)
             {
-                await this.ObserveShutdownAsync(this.loadTask);
-            }
-
-            await this.Clock.CompleteAsync();
-            await this.Uploader.CompleteAsync();
-
-            if (this.channel != null)
-            {
-                await this.channel.DisposeAsync();
+                await this.CleanupAsync(() => channel.DisposeAsync().AsTask(), "server RPC shutdown");
             }
             else
             {
@@ -94,7 +105,7 @@ internal sealed partial class GuestGameSession
         }
         finally
         {
-            this.lifetime.Dispose();
+            this.Cleanup(this.lifetime.Dispose, "session cancellation source");
 
             lock (this.gate)
             {
@@ -102,6 +113,30 @@ internal sealed partial class GuestGameSession
             }
 
             this.stopped.TrySetResult();
+        }
+    }
+
+    /// <summary>
+    /// Releases the current world on the game thread. The session's world lookup
+    /// remains valid until native teardown finishes, including reentrant callbacks.
+    /// </summary>
+    private void ReleaseWorld()
+    {
+        var world = this.ClientWorld;
+        if (world == null || this.releasingWorld)
+        {
+            return;
+        }
+
+        this.releasingWorld = true;
+        try
+        {
+            world.Dispose();
+        }
+        finally
+        {
+            this.ClientWorld = null;
+            this.releasingWorld = false;
         }
     }
 
@@ -125,6 +160,18 @@ internal sealed partial class GuestGameSession
         try
         {
             cleanup();
+        }
+        catch (Exception ex)
+        {
+            this.Logger.Warning(ex, "Guest cleanup failed: {Resource}", resource);
+        }
+    }
+
+    private async Task CleanupAsync(Func<Task> cleanup, string resource)
+    {
+        try
+        {
+            await cleanup();
         }
         catch (Exception ex)
         {
