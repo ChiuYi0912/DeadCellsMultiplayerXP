@@ -144,7 +144,6 @@ internal sealed partial class GuestGameSession
         }
     }
 
-    public bool ServerDrivenTransition => this.serverTransitionTarget != null;
     public bool UploadBroken => this.Uploader.UploadBroken;
     public int LastWorldFrameBytes { get; private set; }
     public long SyncedTimeMs => this.Clock.SyncedTimeMs;

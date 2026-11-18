@@ -4,10 +4,11 @@ using dc.en;
 using dc.pr;
 using DeadCellsMultiplayerX.Contracts.Actions;
 using DeadCellsMultiplayerX.Contracts.Snapshots;
+using DeadCellsMultiplayerX.Engine.Utilities;
 using Serilog;
 
 /// <summary>
-/// Owns the local frame capture buffer, upload backpressure and upload-failure
+/// Collects native hero state and owns upload backpressure and upload-failure
 /// state. The session supplies identity, time, RPC and upload permission;
 /// this class does not own hooks or world state.
 /// </summary>
@@ -19,7 +20,6 @@ internal sealed class GuestFrameUploader(
     Func<bool> canUploadFrames,
     ILogger logger)
 {
-
     private readonly ClientFrameSendBuffer sendBuffer = new(pendingCommands);
 
     private readonly string guid = guid
@@ -42,7 +42,6 @@ internal sealed class GuestFrameUploader(
 
     public Task CompleteAsync() => this.uploadTask ?? Task.CompletedTask;
 
-
     /// <summary>Captures the local hero and sends at most one in-flight frame.</summary>
     public void CaptureAndUpload(Hero hero)
     {
@@ -52,21 +51,24 @@ internal sealed class GuestFrameUploader(
         }
 
         var game = Game.Class.ME;
-        if (hero != game?.hero || hero.destroyed)
+        if (hero != game?.hero || hero.destroyed || !hero.initDone || hero.spr == null)
         {
             return;
         }
 
-        if (!this.sendBuffer.Capture(hero, this.guid, this.syncedTimeMs()))
+        var epoch = this.sendBuffer.Epoch;
+        var capturedTimeMs = this.syncedTimeMs();
+        var (spawn, state) = HeroUtils.Collect(hero, this.guid, capturedTimeMs);
+
+        // Native reads can reenter level loading. Publish only a still-current capture.
+        if (!this.canUploadFrames() || this.disposed || this.UploadBroken
+            || this.sendBuffer.Epoch != epoch || game != Game.Class.ME
+            || hero != game?.hero || hero.destroyed)
         {
             return;
         }
 
-        // Native state collection may reenter game code and change level permission.
-        if (!this.canUploadFrames() || this.disposed || this.UploadBroken)
-        {
-            return;
-        }
+        this.sendBuffer.StoreCapture(spawn, state, capturedTimeMs);
 
         if (this.uploadTask != null && !this.uploadTask.IsCompleted)
         {
@@ -109,7 +111,7 @@ internal sealed class GuestFrameUploader(
         }
     }
 
-    private void HandleUploadFailure(Exception? ex)
+    private void HandleUploadFailure(Exception ex)
     {
         if (this.disposed)
         {
@@ -132,6 +134,6 @@ internal sealed class GuestFrameUploader(
         this.lastUploadErrorLogMs = now;
         this.logger.Warning(
             "UploadClientWorldFrame failed: {Message}",
-            ex?.Message ?? "unknown");
+            ex.Message);
     }
 }

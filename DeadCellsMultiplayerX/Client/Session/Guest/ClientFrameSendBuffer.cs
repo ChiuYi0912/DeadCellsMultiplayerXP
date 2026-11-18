@@ -1,14 +1,11 @@
 namespace DeadCellsMultiplayerX.Client.Session.Guest;
 
-using dc.en;
 using DeadCellsMultiplayerX.Contracts.Actions;
 using DeadCellsMultiplayerX.Contracts.Snapshots;
-using DeadCellsMultiplayerX.Engine.Utilities;
 
 /// <summary>
 /// 客户端发送缓冲
-/// 每帧采集本地世界状态
-/// 供服务端 NACK 补发
+/// 保存最新采集结果，组装上传帧并保留服务端 NACK 补发历史；不读取原生游戏对象。
 /// </summary>
 internal sealed class ClientFrameSendBuffer(Func<long, IReadOnlyList<HeroCommand>> pendingCommands)
 {
@@ -71,11 +68,6 @@ internal sealed class ClientFrameSendBuffer(Func<long, IReadOnlyList<HeroCommand
     private long capturedTimeMs;
 
     /// <summary>
-    /// 是否存在尚未发送的采集结果
-    /// </summary>
-    private bool hasCapture;
-
-    /// <summary>
     /// 当前回显的服务端世界 epoch
     /// </summary>
     public int Epoch { get; private set; }
@@ -83,28 +75,16 @@ internal sealed class ClientFrameSendBuffer(Func<long, IReadOnlyList<HeroCommand
     /// <summary>
     /// 最近一次发送的帧序号
     /// </summary>
-    public long LastSequence { get; private set; } = -1;
+    private long lastSequence = -1;
 
     /// <summary>
-    /// 每帧采集当前本地英雄状态,失败时下一帧会重试
+    /// 保存上传器采集的最新状态；上传请求在途时允许覆盖尚未组帧的结果。
     /// </summary>
-    /// <param name="hero"></param>
-    /// <param name="guid">客户guid</param>
-    /// <param name="syncedTimeMs">同步时间</param>
-    /// <returns></returns>
-    public bool Capture(Hero hero, string guid, long syncedTimeMs)
+    public void StoreCapture(HeroSpawn spawn, HeroDynamic state, long syncedTimeMs)
     {
-        if (hero == null || hero.destroyed || !hero.initDone || hero.spr == null)
-        {
-            return false;
-        }
-
-        var (spawn, dyn) = HeroUtils.Collect(hero, guid, syncedTimeMs);
         this.capturedSpawn = spawn;
-        this.capturedDynamic = dyn;
+        this.capturedDynamic = state;
         this.capturedTimeMs = syncedTimeMs;
-        this.hasCapture = true;
-        return true;
     }
 
     /// <summary>
@@ -112,12 +92,12 @@ internal sealed class ClientFrameSendBuffer(Func<long, IReadOnlyList<HeroCommand
     /// </summary>
     public ClientWorldFrame? BuildFrameAndRecord()
     {
-        if (!this.hasCapture || this.capturedDynamic == null)
+        if (this.capturedDynamic == null)
         {
             return null;
         }
 
-        var sequence = this.LastSequence + 1;
+        var sequence = this.lastSequence + 1;
         var frame = ++this.frameId;
 
         var upload = new HeroUpload
@@ -155,7 +135,7 @@ internal sealed class ClientFrameSendBuffer(Func<long, IReadOnlyList<HeroCommand
             this.firstSequence = sequence;
         }
 
-        this.LastSequence = sequence;
+        this.lastSequence = sequence;
 
         if (this.history.Count > MAX_HISTORY)
         {
@@ -163,9 +143,7 @@ internal sealed class ClientFrameSendBuffer(Func<long, IReadOnlyList<HeroCommand
             this.firstSequence = this.history[0].Sequence;
         }
 
-        this.hasCapture = false;
-        this.capturedSpawn = null;
-        this.capturedDynamic = null;
+        this.ClearCapture();
         return result;
     }
 
@@ -185,13 +163,13 @@ internal sealed class ClientFrameSendBuffer(Func<long, IReadOnlyList<HeroCommand
 
         if (this.history.Count == 0
             || request.FromSequence < this.firstSequence
-            || request.ToSequence > this.LastSequence)
+            || request.ToSequence > this.lastSequence)
         {
             bundle.Unavailable = true;
         }
 
         var start = Math.Max(request.FromSequence, this.firstSequence);
-        var end = Math.Min(request.ToSequence, this.LastSequence);
+        var end = Math.Min(request.ToSequence, this.lastSequence);
         for (var seq = start; seq <= end; seq++)
         {
             var index = (int)(seq - this.firstSequence);
@@ -218,7 +196,7 @@ internal sealed class ClientFrameSendBuffer(Func<long, IReadOnlyList<HeroCommand
         this.Epoch = epoch;
         this.history.Clear();
         this.firstSequence = 0;
-        this.LastSequence = -1;
+        this.lastSequence = -1;
         this.frameId = 0;
         this.lastSpawn = null;
         this.framesSinceSpawn = 0;
@@ -240,7 +218,7 @@ internal sealed class ClientFrameSendBuffer(Func<long, IReadOnlyList<HeroCommand
     {
         this.history.Clear();
         this.firstSequence = 0;
-        this.LastSequence = -1;
+        this.lastSequence = -1;
         this.frameId = 0;
         this.lastSpawn = null;
         this.framesSinceSpawn = 0;
@@ -249,8 +227,8 @@ internal sealed class ClientFrameSendBuffer(Func<long, IReadOnlyList<HeroCommand
 
     private void ClearCapture()
     {
-        this.hasCapture = false;
         this.capturedSpawn = null;
         this.capturedDynamic = null;
+        this.capturedTimeMs = 0;
     }
 }
