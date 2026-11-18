@@ -6,28 +6,23 @@ using dc.pr;
 using DeadCellsMultiplayerX.Foundation.Lifecycle;
 using DeadCellsMultiplayerX.Server.Core;
 using DeadCellsMultiplayerX.Server.Integration.Events;
+using Microsoft.VisualStudio.Threading;
 using ModCore.Events;
 using ModCore.Utilities;
 
 /// <summary>
 /// 这个类的所有 Method 应该在主线程执行
 /// </summary>
-internal sealed class ServerMainThread : DisposableEventReceiver
+internal sealed class ServerMainThread(SynchronizationContext gameContext, Thread gameThread) : DisposableEventReceiver
 {
+    public string? SavePath { get; private set; }
 
-    public string? SavePath { get; set; }
-
-    private static void CheckMainThread()
+    private void CheckMainThread()
     {
-        if (Thread.CurrentThread != ServerMain.Instance.MainThread)
+        if (Thread.CurrentThread != gameThread)
         {
-            throw new InvalidOperationException();
+            throw new InvalidOperationException("Native server game operations must run on the game thread.");
         }
-    }
-    private static Task RunOnMainThread()
-    {
-        SynchronizationContext.SetSynchronizationContext(ModCore.Modules.Game.SynchronizationContext);
-        return Task.Delay(1);
     }
 
     /// <summary>
@@ -35,9 +30,9 @@ internal sealed class ServerMainThread : DisposableEventReceiver
     /// </summary>
     public async Task LaunchGame()
     {
-        await RunOnMainThread();
-
-        CheckMainThread();
+        await gameContext;
+        this.CheckMainThread();
+        this.DisposeToken.ThrowIfCancellationRequested();
 
         this.SavePath = null;
 
@@ -47,9 +42,10 @@ internal sealed class ServerMainThread : DisposableEventReceiver
 
         while (true)
         {
-            await Task.Delay(1);
+            await Task.Delay(1, this.DisposeToken);
+            await gameContext;
             this.DisposeToken.ThrowIfCancellationRequested();
-            CheckMainThread();
+            this.CheckMainThread();
             var g = Game.Class.ME;
 
             if (g == null ||
@@ -80,17 +76,19 @@ internal sealed class ServerMainThread : DisposableEventReceiver
             throw new ArgumentException("Level id is required.", nameof(levelId));
         }
 
-        await RunOnMainThread();
-        CheckMainThread();
+        await gameContext;
+        this.CheckMainThread();
+        this.DisposeToken.ThrowIfCancellationRequested();
 
         this.Logger.Information("Server entering next level: {LevelId}", levelId);
         LevelTransition.Class.@goto.Invoke(levelId.AsHaxeString());
 
         while (true)
         {
-            await Task.Delay(1);
+            await Task.Delay(1, this.DisposeToken);
+            await gameContext;
             this.DisposeToken.ThrowIfCancellationRequested();
-            CheckMainThread();
+            this.CheckMainThread();
 
             var game = Game.Class.ME;
             if (game == null ||
@@ -110,6 +108,9 @@ internal sealed class ServerMainThread : DisposableEventReceiver
 
     public async Task EnterNewLevel()
     {
+        await gameContext;
+        this.CheckMainThread();
+        this.DisposeToken.ThrowIfCancellationRequested();
         this.Logger.Information("Entering new level...");
 
         this.Logger.Information("Saving game...");
@@ -119,7 +120,10 @@ internal sealed class ServerMainThread : DisposableEventReceiver
         while (Main.Class.ME.waitToSave)
         {
             this.DisposeToken.ThrowIfCancellationRequested();
-            await Task.Delay(1);
+            await Task.Delay(1, this.DisposeToken);
+            await gameContext;
+            this.CheckMainThread();
+            this.DisposeToken.ThrowIfCancellationRequested();
             Main.Class.ME.writeSave();
         }
 

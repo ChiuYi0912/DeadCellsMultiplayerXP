@@ -9,6 +9,7 @@ using DeadCellsMultiplayerX.Engine.Serialization;
 using DeadCellsMultiplayerX.Foundation.Versioning;
 using DeadCellsMultiplayerX.Networking.Rpc.Contracts;
 using DeadCellsMultiplayerX.Server.Core;
+using Microsoft.VisualStudio.Threading;
 using ModCore.Utilities;
 
 internal sealed partial class ServerGuestConnection : IServerRPC
@@ -87,24 +88,36 @@ internal sealed partial class ServerGuestConnection : IServerRPC
             this.Logger.Error(
                 "Dismatch version: guid={Guid} ver={Ver}",
                 this.ConnectionGuid, version);
-            Task.Delay(TimeSpan.FromSeconds(5)).ContinueWith(_ =>
-            {
-                if (this.rpc == null)
-                {
-                    return;
-                }
-                if (!this.rpc.IsDisposed)
-                {
-                    this.Dispose();
-                }
-            });
+            _ = this.DisconnectAfterVersionMismatchAsync();
             return Task.FromResult(false);
         }
         return Task.FromResult(true);
     }
 
+    private async Task DisconnectAfterVersionMismatchAsync()
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(5), this.DisposeToken).ConfigureAwait(false);
+            await this.Session.GameContext;
+            if (!this.IsDisposed && !this.Session.IsDisposed && !this.rpc.IsDisposed)
+            {
+                this.Dispose();
+            }
+        }
+        catch (OperationCanceledException) when (this.IsDisposed)
+        {
+        }
+        catch (Exception ex)
+        {
+            this.Logger.Warning(ex, "Version mismatch disconnect failed");
+        }
+    }
+
     public Task SetGuestInfo(GuestInfo info)
     {
+        this.Session.VerifyGameThread();
+        ObjectDisposedException.ThrowIf(this.IsDisposed || this.Session.IsDisposed, this);
         if (info == null)
         {
             return Task.CompletedTask;
@@ -153,6 +166,8 @@ internal sealed partial class ServerGuestConnection : IServerRPC
 
     public Task<byte[]> RequestAreaInfo(IServerRPC.AreaInfoRequest request)
     {
+        this.Session.VerifyGameThread();
+        ObjectDisposedException.ThrowIf(this.IsDisposed || this.Session.IsDisposed, this);
         var rect = request.Rect;
         if (rect.X < 0)
         {
@@ -240,12 +255,27 @@ internal sealed partial class ServerGuestConnection : IServerRPC
 
     public Task UploadClientWorldFrame(ClientWorldFrame frame)
     {
+        this.Session.VerifyGameThread();
+        if (this.IsDisposed || this.Session.IsDisposed)
+        {
+            return Task.CompletedTask;
+        }
         this.Session.ClientFrames.OnFrame(this.ConnectionGuid, frame);
         return Task.CompletedTask;
     }
 
-    public Task<WorldFrameBundle> RequestWorldFrames(WorldFrameRangeRequest request) => Task.FromResult(this.Session.Broadcaster.GetFrames(request, this.Session.CurrentTimeStamp));
+    public Task<WorldFrameBundle> RequestWorldFrames(WorldFrameRangeRequest request)
+    {
+        this.Session.VerifyGameThread();
+        ObjectDisposedException.ThrowIf(this.IsDisposed || this.Session.IsDisposed, this);
+        return Task.FromResult(this.Session.Broadcaster.GetFrames(request, this.Session.CurrentTimeStamp));
+    }
 
-    public Task<WorldResync> RequestWorldResync(int knownEpoch) => Task.FromResult(this.Session.Broadcaster.BuildResync(this.Session.CurrentTimeStamp));
+    public Task<WorldResync> RequestWorldResync(int knownEpoch)
+    {
+        this.Session.VerifyGameThread();
+        ObjectDisposedException.ThrowIf(this.IsDisposed || this.Session.IsDisposed, this);
+        return Task.FromResult(this.Session.Broadcaster.BuildResync(this.Session.CurrentTimeStamp));
+    }
 
 }

@@ -29,15 +29,44 @@ internal sealed class ServerSession : DisposableEventReceiver,
     private ServerMainThread? mainThread;
     private readonly ServerTimeSystem timeSystem = new();
     private readonly Dictionary<string, ServerGuestConnection> guests = [];
+    private readonly Thread gameThread = Thread.CurrentThread;
+
+    internal SynchronizationContext GameContext { get; } =
+        ModCore.Modules.Game.SynchronizationContext ?? throw new InvalidOperationException(
+            "Game synchronization context is not available.");
+
+    internal bool IsGameThread => Thread.CurrentThread == this.gameThread;
+
+    internal void VerifyGameThread()
+    {
+        if (!this.IsGameThread)
+        {
+            throw new InvalidOperationException("Server game state must be accessed on the game thread.");
+        }
+    }
 
     public long CurrentTimeStamp => this.timeSystem.Now;
 
     /// <summary>
     /// 当前已连接玩家。作为交互名册与 Ghost tick 的唯一来源。
     /// </summary>
-    public IReadOnlyCollection<string> ConnectedGuestIds => this.guests.Keys;
+    public IReadOnlyCollection<string> ConnectedGuestIds
+    {
+        get
+        {
+            this.VerifyGameThread();
+            return this.guests.Keys;
+        }
+    }
 
-    public IReadOnlyCollection<ServerGuestConnection> ConnectedGuests => this.guests.Values;
+    public IReadOnlyCollection<ServerGuestConnection> ConnectedGuests
+    {
+        get
+        {
+            this.VerifyGameThread();
+            return this.guests.Values;
+        }
+    }
 
     /// <summary>
     /// 关卡投票/切换的网络边界与交互入口。
@@ -67,10 +96,13 @@ internal sealed class ServerSession : DisposableEventReceiver,
 
     public async Task Init()
     {
-        await Task.Yield().ConfigureAwait(false);
-
-        this.mainThread = new();
+        await this.GameContext;
+        this.VerifyGameThread();
+        this.DisposeToken.ThrowIfCancellationRequested();
+        this.mainThread = new(this.GameContext, this.gameThread);
         this.timeSystem.Start();
+
+        await Task.Yield().ConfigureAwait(false);
         this.outPipe.WriteByte(0x32);
 
         this.Logger.Information("Waiting host...");
@@ -145,32 +177,15 @@ internal sealed class ServerSession : DisposableEventReceiver,
     /// runs on an IO continuation; mutating the guest lists from there races
     /// with <see cref="IOnFrameUpdate.OnFrameUpdate"/>.
     /// </summary>
-    private Task AcceptGuestOnMainThreadAsync(Stream stream, string guestGuid)
+    private async Task AcceptGuestOnMainThreadAsync(Stream stream, string guestGuid)
     {
-        var context = ModCore.Modules.Game.SynchronizationContext ?? throw new InvalidOperationException(
-                "Game synchronization context is not available; refusing to mutate server state off-thread.");
-
-        var completion = new TaskCompletionSource(
-            TaskCreationOptions.RunContinuationsAsynchronously);
-
-        context.Post(_ =>
-        {
-            try
-            {
-                this.AcceptGuest(stream, guestGuid);
-                completion.SetResult();
-            }
-            catch (Exception ex)
-            {
-                completion.SetException(ex);
-            }
-        }, null);
-
-        return completion.Task;
+        await this.GameContext;
+        this.AcceptGuest(stream, guestGuid);
     }
 
     private void AcceptGuest(Stream stream, string guestGuid)
     {
+        this.VerifyGameThread();
         if (this.IsDisposed)
         {
             stream.Dispose();
@@ -203,10 +218,14 @@ internal sealed class ServerSession : DisposableEventReceiver,
     /// 按连接 GUID 查找客户端连接
     /// </summary>
     public bool TryGetGuest(string guid, out ServerGuestConnection guest)
-        => this.guests.TryGetValue(guid, out guest!);
+    {
+        this.VerifyGameThread();
+        return this.guests.TryGetValue(guid, out guest!);
+    }
 
     public void RemoveGuest(ServerGuestConnection guest)
     {
+        this.VerifyGameThread();
         if (guest == null)
         {
             return;
@@ -224,6 +243,11 @@ internal sealed class ServerSession : DisposableEventReceiver,
 
     void IOnFrameUpdate.OnFrameUpdate(double dt)
     {
+        if (this.IsDisposed)
+        {
+            return;
+        }
+        this.VerifyGameThread();
         this.timeSystem.Tick();
 
         try
@@ -247,6 +271,8 @@ internal sealed class ServerSession : DisposableEventReceiver,
     /// </summary>
     public void BeginLevelEpoch()
     {
+        this.VerifyGameThread();
+        ObjectDisposedException.ThrowIf(this.IsDisposed, this);
         // 关卡本体已在事件前加载 怪物也已完成注册 此处不能清空寄存器
         this.AreaAffects.Clear();
         this.Broadcaster.BeginEpoch(this.CurrentTimeStamp);
@@ -255,6 +281,31 @@ internal sealed class ServerSession : DisposableEventReceiver,
 
     protected override void MyDispose()
     {
+        if (this.IsGameThread)
+        {
+            this.DisposeOnGameThread();
+            return;
+        }
+
+        // A disconnect/process-exit callback must not block waiting for the game thread.
+        _ = this.DisposeOnGameThreadAsync().ContinueWith(
+            task => this.Logger.Error(task.Exception, "Server session dispose failed"),
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted,
+            TaskScheduler.Default);
+    }
+
+    protected override ValueTask MyDisposeAsync() => new(this.DisposeOnGameThreadAsync());
+
+    private async Task DisposeOnGameThreadAsync()
+    {
+        await this.GameContext;
+        this.DisposeOnGameThread();
+    }
+
+    private void DisposeOnGameThread()
+    {
+        this.VerifyGameThread();
         this.Broadcaster.Clear();
         this.ClientFrames.Clear();
         this.Entities.ResetWorld();

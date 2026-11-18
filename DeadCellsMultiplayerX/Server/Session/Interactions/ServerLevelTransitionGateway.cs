@@ -2,6 +2,7 @@ namespace DeadCellsMultiplayerX.Server.Session.Interactions;
 
 using DeadCellsMultiplayerX.Contracts.Lobby;
 using DeadCellsMultiplayerX.Server.Interactions;
+using Microsoft.VisualStudio.Threading;
 using Serilog;
 
 
@@ -67,6 +68,9 @@ internal sealed class ServerLevelTransitionGateway
         CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(levelId);
+        await this.session.GameContext;
+        this.session.VerifyGameThread();
+        ObjectDisposedException.ThrowIf(this.session.IsDisposed, this.session);
         this.logger.Warning("Forcing level transition: {Level}", levelId);
         await this.transition.ForceAsync(levelId, cancellationToken);
     }
@@ -75,6 +79,9 @@ internal sealed class ServerLevelTransitionGateway
         string actor,
         string? levelId)
     {
+        await this.session.GameContext;
+        this.session.VerifyGameThread();
+        ObjectDisposedException.ThrowIf(this.session.IsDisposed, this.session);
         var dispatch = await this.transition.SubmitAsync(
             actor,
             levelId ?? string.Empty,

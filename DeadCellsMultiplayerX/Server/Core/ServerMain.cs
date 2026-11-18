@@ -79,7 +79,18 @@ internal sealed class ServerMain : Module<ServerMain>,
 
     void IOnGameExit.OnGameExit() => this.DisposeSession();
 
-    private void OnProcessExit(object? sender, EventArgs e) => this.DisposeSession();
+    private void OnProcessExit(object? sender, EventArgs e)
+    {
+        if (Thread.CurrentThread == this.MainThread)
+        {
+            this.DisposeSession();
+            return;
+        }
+
+        // Queue session and hook teardown together, so hooks remain installed until
+        // native cleanup finishes. Never wait here: the game loop may have stopped.
+        this.Session?.GameContext.Post(_ => this.DisposeSession(), null);
+    }
 
     /// <summary>
     /// The server worker is a process-scoped singleton.  Explicit teardown is
@@ -88,6 +99,10 @@ internal sealed class ServerMain : Module<ServerMain>,
     /// </summary>
     private void DisposeSession()
     {
+        if (Thread.CurrentThread != this.MainThread)
+        {
+            throw new InvalidOperationException("Server native teardown must run on the game thread.");
+        }
         try
         {
             this.Session?.Dispose();

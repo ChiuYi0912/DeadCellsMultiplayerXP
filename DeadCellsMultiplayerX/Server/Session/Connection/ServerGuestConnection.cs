@@ -9,6 +9,7 @@ using DeadCellsMultiplayerX.Foundation.Lifecycle;
 using DeadCellsMultiplayerX.Networking.Rpc.Contracts;
 using DeadCellsMultiplayerX.Networking.Transport;
 using DeadCellsMultiplayerX.Server.Integration.Events;
+using Microsoft.VisualStudio.Threading;
 using ModCore.Events;
 using ModCore.Modules;
 using Serilog;
@@ -35,6 +36,7 @@ internal sealed partial class ServerGuestConnection :
 
     public ServerGuestConnection(ServerSession session, Stream connection, string connectionGuid)
     {
+        session.VerifyGameThread();
         this.Session = session;
         this.ConnectionGuid = connectionGuid
             ?? throw new ArgumentNullException(nameof(connectionGuid));
@@ -47,7 +49,7 @@ internal sealed partial class ServerGuestConnection :
 
         this.Guest = this.rpc.Attach<IGuestRPC>();
 
-        this.rpc.SynchronizationContext = Game.SynchronizationContext;
+        this.rpc.SynchronizationContext = session.GameContext;
 
         this.rpc.Disconnected += this.Rpc_Disconnected;
 
@@ -68,6 +70,30 @@ internal sealed partial class ServerGuestConnection :
 
     protected override void MyDispose()
     {
+        if (this.Session.IsGameThread)
+        {
+            this.DisposeOnGameThread();
+            return;
+        }
+
+        _ = this.DisposeOnGameThreadAsync().ContinueWith(
+            task => this.Logger.Error(task.Exception, "Guest connection dispose failed"),
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted,
+            TaskScheduler.Default);
+    }
+
+    protected override ValueTask MyDisposeAsync() => new(this.DisposeOnGameThreadAsync());
+
+    private async Task DisposeOnGameThreadAsync()
+    {
+        await this.Session.GameContext;
+        this.DisposeOnGameThread();
+    }
+
+    private void DisposeOnGameThread()
+    {
+        this.Session.VerifyGameThread();
         this.Session.RemoveGuest(this);
 
         base.MyDispose();
@@ -103,6 +129,11 @@ internal sealed partial class ServerGuestConnection :
 
     void IOnServerEnterNewLevel.OnServerEnterNewLevel()
     {
+        if (this.IsDisposed || this.Session.IsDisposed)
+        {
+            return;
+        }
+        this.Session.VerifyGameThread();
         Debug.Assert(this.Main.SavePath != null);
 
         this.Guest.EnterNewLevel(File.ReadAllBytes(this.Main.SavePath));
