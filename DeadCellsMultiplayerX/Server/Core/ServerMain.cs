@@ -3,6 +3,7 @@ namespace DeadCellsMultiplayerX.Server.Core;
 using dc;
 using DeadCellsMultiplayerX.Server.Integration.Hooks;
 using DeadCellsMultiplayerX.Server.Session;
+using Microsoft.VisualStudio.Threading;
 using ModCore;
 using ModCore.Events.Interfaces.Game;
 using ModCore.Utilities;
@@ -33,8 +34,11 @@ internal sealed class ServerMain : Module<ServerMain>,
     private readonly string savePath = Path.GetTempFileName();
     private static readonly ILogger Log = Serilog.Log.ForContext("SourceContext", "ServerMain");
     private ServerHookBootstrap? hookBootstrap;
+    private Task? sessionTask;
+    private Task? shutdownTask;
 
     internal ServerSession? Session { get; private set; }
+    internal bool IsStopping { get; private set; }
 
     /// <summary>
     /// 临时存档路径。
@@ -49,7 +53,35 @@ internal sealed class ServerMain : Module<ServerMain>,
     /// <summary>
     /// 在 TitleScreen 创建会话后挂载。
     /// </summary>
-    internal void AttachSession(ServerSession newSession) => this.Session = newSession;
+    internal void AttachSession(ServerSession newSession)
+    {
+        newSession.VerifyGameThread();
+        if (this.IsStopping || this.Session != null)
+        {
+            throw new InvalidOperationException("Server cannot attach another session.");
+        }
+        this.Session = newSession;
+        this.sessionTask = this.ObserveSessionAsync(newSession);
+    }
+
+    private async Task ObserveSessionAsync(ServerSession session)
+    {
+        try
+        {
+            await session.Init();
+        }
+        catch (OperationCanceledException) when (session.IsDisposed) { }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Server session init failed");
+            session.Dispose();
+        }
+
+        // Keep the session reachable by hooks until native and transport cleanup finishes.
+        await session.Completion;
+        await session.GameContext;
+        if (ReferenceEquals(this.Session, session)) this.Session = null;
+    }
 
     /// <summary>
     /// 初始化服务器
@@ -103,19 +135,20 @@ internal sealed class ServerMain : Module<ServerMain>,
         {
             throw new InvalidOperationException("Server native teardown must run on the game thread.");
         }
-        try
-        {
-            this.Session?.Dispose();
-        }
-        catch (Exception ex)
-        {
-            Log.Error(ex, "Server session dispose failed");
-        }
-        finally
-        {
-            this.Session = null;
-        }
+        if (this.shutdownTask != null) return;
+        this.IsStopping = true;
+        this.shutdownTask = this.FinishShutdownAsync();
+    }
 
+    private async Task FinishShutdownAsync()
+    {
+        var session = this.Session;
+        if (session != null)
+        {
+            await session.DisposeAsync();
+            if (this.sessionTask != null) await this.sessionTask;
+            await session.GameContext;
+        }
         try
         {
             this.hookBootstrap?.Dispose();
@@ -127,6 +160,7 @@ internal sealed class ServerMain : Module<ServerMain>,
         finally
         {
             this.hookBootstrap = null;
+            AppDomain.CurrentDomain.ProcessExit -= this.OnProcessExit;
         }
     }
 }

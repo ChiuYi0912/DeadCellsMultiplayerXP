@@ -13,16 +13,12 @@ using DeadCellsMultiplayerX.Server.Session;
 using Hashlink.Proxy.Clousre;
 using HaxeProxy.Runtime;
 using ModCore.Utilities;
-using Serilog;
 
 /// <summary>
 /// 进程级生命周期、资源与存档 Hook 路由。
 /// </summary>
 internal sealed class ServerLifecycleHookRouter(ServerMain server) : IServerLifecycleHookSink
 {
-    private static readonly ILogger Logger =
-        Log.ForContext("SourceContext", "ServerLifecycleHookRouter");
-
     private readonly ServerMain server = server;
     private Sound? soundEmpty;
 
@@ -89,24 +85,13 @@ internal sealed class ServerLifecycleHookRouter(ServerMain server) : IServerLife
     {
         orig(self, titleLib, bgType);
 
-        if (this.server.Session != null)
+        if (this.server.IsStopping || this.server.Session != null)
         {
             return;
         }
 
         var session = new ServerSession();
         this.server.AttachSession(session);
-        _ = session.Init().ContinueWith(
-            t =>
-            {
-                if (t.Exception?.InnerException is OperationCanceledException)
-                {
-                    return;
-                }
-
-                Logger.Error(t.Exception, "Server session init failed");
-            },
-            TaskContinuationOptions.OnlyOnFaulted);
     }
 
     public bool? OnGetSteamCloudStatus(HashlinkClosure orig) => null;

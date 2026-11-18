@@ -8,7 +8,6 @@ using DeadCellsMultiplayerX.Contracts.Snapshots;
 using DeadCellsMultiplayerX.Engine.Serialization;
 using DeadCellsMultiplayerX.Foundation.Versioning;
 using DeadCellsMultiplayerX.Networking.Rpc.Contracts;
-using DeadCellsMultiplayerX.Server.Core;
 using Microsoft.VisualStudio.Threading;
 using ModCore.Utilities;
 
@@ -19,6 +18,8 @@ internal sealed partial class ServerGuestConnection : IServerRPC
     /// </summary>
     public Task<HelloResponse> Hello(HelloRequest request)
     {
+        this.Session.VerifyGameThread();
+        ObjectDisposedException.ThrowIf(this.IsDisposed || this.Session.IsDisposed, this);
         var response = new HelloResponse
         {
             ServerMajor = ProtocolVersion.Major,
@@ -83,12 +84,14 @@ internal sealed partial class ServerGuestConnection : IServerRPC
 
     public Task<bool> CheckVersion(string version)
     {
+        this.Session.VerifyGameThread();
+        ObjectDisposedException.ThrowIf(this.IsDisposed || this.Session.IsDisposed, this);
         if (Version.Parse(version) != VersionUtils.ModVersion)
         {
             this.Logger.Error(
                 "Dismatch version: guid={Guid} ver={Ver}",
                 this.ConnectionGuid, version);
-            _ = this.DisconnectAfterVersionMismatchAsync();
+            this.versionDisconnectTask ??= this.DisconnectAfterVersionMismatchAsync();
             return Task.FromResult(false);
         }
         return Task.FromResult(true);
@@ -100,7 +103,7 @@ internal sealed partial class ServerGuestConnection : IServerRPC
         {
             await Task.Delay(TimeSpan.FromSeconds(5), this.DisposeToken).ConfigureAwait(false);
             await this.Session.GameContext;
-            if (!this.IsDisposed && !this.Session.IsDisposed && !this.rpc.IsDisposed)
+            if (!this.IsDisposed && !this.Session.IsDisposed && this.rpc?.IsDisposed == false)
             {
                 this.Dispose();
             }
@@ -138,30 +141,24 @@ internal sealed partial class ServerGuestConnection : IServerRPC
         return Task.CompletedTask;
     }
 
-    public async Task UploadSavedata(byte[] data)
+    public Task UploadSavedata(byte[] data)
     {
-        await Task.Delay(1).ConfigureAwait(false);
-
-        var savePath = ServerMain.Instance.SavePath;
-
-        await File.WriteAllBytesAsync(savePath, data);
-
-        this.Logger.Information("Saving savedata to {path}", savePath);
-
-        this.Logger.Information("Building game...");
-
-        await this.Main.LaunchGame();
-
-        await Task.Delay(1).ConfigureAwait(false);
+        this.Session.VerifyGameThread();
+        ObjectDisposedException.ThrowIf(this.IsDisposed || this.Session.IsDisposed, this);
+        return this.Session.LoadSavedGameAsync(data).WaitAsync(this.DisposeToken);
     }
 
     public async Task<byte[]> DownloadSavedata()
     {
+        await this.Session.GameContext;
+        ObjectDisposedException.ThrowIf(this.IsDisposed || this.Session.IsDisposed, this);
         while (string.IsNullOrEmpty(this.Main.SavePath))
         {
-            await Task.Yield();
+            await Task.Delay(1, this.DisposeToken).ConfigureAwait(false);
+            await this.Session.GameContext;
+            this.DisposeToken.ThrowIfCancellationRequested();
         }
-        return File.ReadAllBytes(this.Main.SavePath);
+        return await File.ReadAllBytesAsync(this.Main.SavePath, this.DisposeToken).ConfigureAwait(false);
     }
 
     public Task<byte[]> RequestAreaInfo(IServerRPC.AreaInfoRequest request)

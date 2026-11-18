@@ -101,14 +101,14 @@ internal static class StreamUtils
     }
 
 
-    public static async Task<string> ReadGuestGuidAsync(Stream stream)
+    public static async Task<string> ReadGuestGuidAsync(Stream stream, CancellationToken cancellationToken = default)
     {
         const int guidLength = 36;
         var buf = new byte[guidLength];
         var read = 0;
         while (read < guidLength)
         {
-            var n = await stream.ReadAsync(buf.AsMemory(read, guidLength - read))
+            var n = await stream.ReadAsync(buf.AsMemory(read, guidLength - read), cancellationToken)
                                 .ConfigureAwait(false);
             if (n == 0)
             {

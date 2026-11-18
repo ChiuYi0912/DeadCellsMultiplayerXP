@@ -1,9 +1,7 @@
 namespace DeadCellsMultiplayerX.Server.Session;
 
-using System.IO.Pipes;
-using DeadCellsMultiplayerX.Foundation.Lifecycle;
 using DeadCellsMultiplayerX.Networking.Time;
-using DeadCellsMultiplayerX.Networking.Transport;
+using DeadCellsMultiplayerX.Server.Core;
 using DeadCellsMultiplayerX.Server.Integration.Events;
 using DeadCellsMultiplayerX.Server.Replication.Areas;
 using DeadCellsMultiplayerX.Server.Replication.Entities;
@@ -13,23 +11,35 @@ using DeadCellsMultiplayerX.Server.Session.Connection;
 using DeadCellsMultiplayerX.Server.Session.Interactions;
 using DeadCellsMultiplayerX.Server.World.Actors;
 using Microsoft.VisualStudio.Threading;
+using ModCore.Events;
 using ModCore.Events.Interfaces.Game;
 using Nerdbank.Streams;
+using Serilog;
 
-internal sealed class ServerSession : DisposableEventReceiver,
-    IOnFrameUpdate,
-    IOnServerEnterNewLevel
+internal sealed class ServerSession : IEventReceiver, IOnFrameUpdate, IOnServerEnterNewLevel,
+    IDisposable, System.IAsyncDisposable
 {
-    private readonly AnonymousPipeClientStream outPipe = new(PipeDirection.Out, Environment.GetEnvironmentVariable("DCMP_HOST_IN_PIPE")!);
-    private readonly AnonymousPipeClientStream inPipe = new(PipeDirection.In, Environment.GetEnvironmentVariable("DCMP_HOST_OUT_PIPE")!);
-
-    private MultiplexingStream? multiplexingStream;
-    private MultiplexingStream.Channel? mainChannel;
-    private Stream? mainChannelReader;
-    private ServerMainThread? mainThread;
+    private readonly Lock gate = new();
+    private readonly CancellationTokenSource lifetime = new();
+    private readonly TaskCompletionSource initialized = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly ServerTransport transport;
     private readonly ServerTimeSystem timeSystem = new();
     private readonly Dictionary<string, ServerGuestConnection> guests = [];
+    // Keep ownership after roster removal until RPC dispatch and transport cleanup finish.
+    private readonly HashSet<ServerGuestConnection> connections = [];
     private readonly Thread gameThread = Thread.CurrentThread;
+    private Task? loadTask;
+    private ServerMainThread? mainThread;
+    private bool initializationStarted;
+    private bool stopping;
+    private bool eventsRegistered;
+
+    public ILogger Logger { get; } = Log.ForContext<ServerSession>();
+    public CancellationToken DisposeToken { get; }
+    public bool IsDisposed => Volatile.Read(ref this.stopping);
+    internal Task Completion => this.stopped.Task;
+    public long CurrentTimeStamp => this.timeSystem.Now;
 
     internal SynchronizationContext GameContext { get; } =
         ModCore.Modules.Game.SynchronizationContext ?? throw new InvalidOperationException(
@@ -45,11 +55,6 @@ internal sealed class ServerSession : DisposableEventReceiver,
         }
     }
 
-    public long CurrentTimeStamp => this.timeSystem.Now;
-
-    /// <summary>
-    /// 当前已连接玩家。作为交互名册与 Ghost tick 的唯一来源。
-    /// </summary>
     public IReadOnlyCollection<string> ConnectedGuestIds
     {
         get
@@ -68,11 +73,7 @@ internal sealed class ServerSession : DisposableEventReceiver,
         }
     }
 
-    /// <summary>
-    /// 关卡投票/切换的网络边界与交互入口。
-    /// </summary>
     internal ServerLevelTransitionGateway LevelTransitions { get; }
-
     public ClientFrameCollector ClientFrames { get; } = new();
     public ServerEntityRegistry Entities { get; } = new();
     public ServerEntityHandlerRegistry EntityHandlers { get; } = new();
@@ -80,143 +81,94 @@ internal sealed class ServerSession : DisposableEventReceiver,
     public EntityFrameBuilder EntityPublisher { get; }
     public WorldFramePublisher Broadcaster { get; }
     public ServerActorManager Ghosts { get; }
+    public ServerMainThread Main => this.mainThread ?? throw new InvalidOperationException("Server game is not initialized.");
 
     public ServerSession()
     {
+        this.DisposeToken = this.lifetime.Token;
+        this.transport = new(this.Logger);
         this.EntityHandlers.Register(new ServerMobEntityHandler(this.Entities));
         this.EntityPublisher = new EntityFrameBuilder(this.Entities, this.EntityHandlers);
         this.Ghosts = new ServerActorManager(this);
         this.ClientFrames.CommandsReceived += this.Ghosts.HandleCommands;
         this.Broadcaster = new WorldFramePublisher(this.ClientFrames, this.EntityPublisher, this.Ghosts, this.AreaAffects);
-
         this.LevelTransitions = new ServerLevelTransitionGateway(this, this.Logger);
+        EventSystem.AddReceiver(this);
+        this.eventsRegistered = true;
     }
 
-    public ServerMainThread Main => this.mainThread ?? throw new InvalidOperationException();
-
-    public async Task Init()
+    /// <summary>Starts the Host transport and completes when initial guest admission ends.</summary>
+    public Task Init()
     {
-        await this.GameContext;
-        this.VerifyGameThread();
-        this.DisposeToken.ThrowIfCancellationRequested();
-        this.mainThread = new(this.GameContext, this.gameThread);
-        this.timeSystem.Start();
-
-        await Task.Yield().ConfigureAwait(false);
-        this.outPipe.WriteByte(0x32);
-
-        this.Logger.Information("Waiting host...");
-        this.multiplexingStream = await MultiplexingStream.CreateAsync(
-            FullDuplexStream.Splice(this.inPipe, this.outPipe),
-            new MultiplexingStream.Options()
-            {
-                ProtocolMajorVersion = 3
-            }
-            );
-
-        await Task.Delay(10);
-
-        this.Logger.Information("Binding main channel...");
-
-        this.mainChannel = await this.multiplexingStream.AcceptChannelAsync("main");
-        this.mainChannelReader = this.mainChannel.AsStream();
-
-        this.Logger.Information("Waiting guests...");
-        await this.WaitGuestConnect();
-    }
-
-    /// <summary>
-    /// 等待 Guest 连接
-    /// </summary>
-    /// <returns></returns>
-    private async Task WaitGuestConnect()
-    {
-        await Task.Yield().ConfigureAwait(false);
-
-        var reader = this.mainChannelReader
-            ?? throw new InvalidOperationException("Server main channel is not initialized.");
-        var mux = this.multiplexingStream
-            ?? throw new InvalidOperationException("Server multiplexing stream is not initialized.");
-
-        var numBuffer = new byte[4];
-        while (true)
+        lock (this.gate)
         {
+            ObjectDisposedException.ThrowIf(this.IsDisposed, this);
+            if (this.initializationStarted)
+            {
+                return this.initialized.Task;
+            }
+            this.initializationStarted = true;
+        }
+        _ = this.RunInitializationAsync();
+        return this.initialized.Task;
+    }
+
+    private async Task RunInitializationAsync()
+    {
+        try
+        {
+            await this.GameContext;
+            this.VerifyGameThread();
             this.DisposeToken.ThrowIfCancellationRequested();
-            await reader.ReadAtLeastAsync(
-                numBuffer, 4, throwOnEndOfStream: true, this.DisposeToken);
-
-            var channelId = BitConverter.ToInt32(numBuffer);
-            if (channelId == -1)
-            {
-                break; // 加载完成
-            }
-
-            this.Logger.Information("Connecting from channel {id}", channelId);
-
-            // IO stays off the game thread.  The channel/GUID handshake is
-            // transport work; only the resulting registration below mutates
-            // ServerSession state and must run on the game synchronization context.
-            var channel = mux.AcceptChannel(channelId);
-            var stream = channel.AsStream();
-            var guestGuid = await StreamUtils.ReadGuestGuidAsync(stream);
-
-            try
-            {
-                await this.AcceptGuestOnMainThreadAsync(stream, guestGuid);
-            }
-            catch (Exception ex)
-            {
-                this.Logger.Error(ex, "Failed to accept guest {guid}", guestGuid);
-                stream.Dispose();
-            }
+            this.mainThread = new(this.GameContext, this.gameThread);
+            this.timeSystem.Start();
+            await this.transport.RunAsync(this.AcceptGuestOnMainThreadAsync).ConfigureAwait(false);
+            this.initialized.TrySetResult();
+        }
+        catch (Exception) when (this.IsDisposed)
+        {
+            this.initialized.TrySetCanceled(this.DisposeToken);
+        }
+        catch (Exception ex)
+        {
+            this.initialized.TrySetException(ex);
+            this.Dispose();
         }
     }
 
-    /// <summary>
-    /// Registers a guest on the game thread.  <see cref="WaitGuestConnect"/>
-    /// runs on an IO continuation; mutating the guest lists from there races
-    /// with <see cref="IOnFrameUpdate.OnFrameUpdate"/>.
-    /// </summary>
-    private async Task AcceptGuestOnMainThreadAsync(Stream stream, string guestGuid)
+    private async Task<bool> AcceptGuestOnMainThreadAsync(
+        MultiplexingStream.Channel channel, Stream stream, string guestGuid)
     {
         await this.GameContext;
-        this.AcceptGuest(stream, guestGuid);
-    }
-
-    private void AcceptGuest(Stream stream, string guestGuid)
-    {
         this.VerifyGameThread();
         if (this.IsDisposed)
         {
-            stream.Dispose();
-            return;
+            return false;
         }
-
-        if (string.IsNullOrWhiteSpace(guestGuid)
-            || this.guests.ContainsKey(guestGuid))
+        if (string.IsNullOrWhiteSpace(guestGuid) || this.guests.ContainsKey(guestGuid))
         {
-            this.Logger.Warning("Duplicate or empty guest GUID rejected: {guid}", guestGuid);
-            stream.Dispose();
-            return;
+            this.Logger.Warning("Duplicate or empty guest GUID rejected: {Guid}", guestGuid);
+            return false;
         }
 
-        var sguest = new ServerGuestConnection(this, stream, guestGuid);
-        sguest.GuestInfo.Guid = guestGuid;
-
-        System.Diagnostics.Debug.Assert(
-            string.Equals(sguest.GuestInfo.Guid, guestGuid, StringComparison.Ordinal),
-            "GuestInfo.Guid must match the connection GUID.");
-
-        this.guests.Add(guestGuid, sguest);
-        this.ClientFrames.Register(guestGuid, sguest.RequestClientFrames);
-
-        this.Logger.Information("Client Enter : {guid}", guestGuid);
+        // The connection owns stream and channel from here, including Start failure.
+        var guest = new ServerGuestConnection(this, stream, channel, guestGuid);
+        this.connections.Add(guest);
+        try
+        {
+            this.guests.Add(guestGuid, guest);
+            this.ClientFrames.Register(guestGuid, guest.RequestClientFrames);
+            guest.Start();
+            this.Logger.Information("Client Enter : {Guid}", guestGuid);
+        }
+        catch (Exception ex)
+        {
+            this.Logger.Error(ex, "Failed to start guest {Guid}", guestGuid);
+            guest.Dispose();
+        }
+        return true;
     }
 
-
-    /// <summary>
-    /// 按连接 GUID 查找客户端连接
-    /// </summary>
     public bool TryGetGuest(string guid, out ServerGuestConnection guest)
     {
         this.VerifyGameThread();
@@ -226,19 +178,49 @@ internal sealed class ServerSession : DisposableEventReceiver,
     public void RemoveGuest(ServerGuestConnection guest)
     {
         this.VerifyGameThread();
-        if (guest == null)
+        if (!this.guests.TryGetValue(guest.ConnectionGuid, out var current) || !ReferenceEquals(current, guest))
         {
             return;
         }
+        this.guests.Remove(guest.ConnectionGuid);
+        this.Cleanup(() => this.ClientFrames.Unregister(guest.ConnectionGuid), "guest frame channel");
+        this.Cleanup(() => this.Ghosts.RemoveGuest(guest.ConnectionGuid), "guest ghost");
+    }
 
-        var guid = guest.ConnectionGuid;
-        if (!this.guests.Remove(guid))
+    internal void ForgetStoppedConnection(ServerGuestConnection guest)
+    {
+        this.VerifyGameThread();
+        this.connections.Remove(guest);
+    }
+
+    // The initial load belongs to the session; a disconnected caller only cancels its own wait.
+    internal Task LoadSavedGameAsync(byte[] data)
+    {
+        this.VerifyGameThread();
+        ObjectDisposedException.ThrowIf(this.IsDisposed, this);
+        return this.loadTask ??= this.LoadSavedGameCoreAsync(data);
+    }
+
+    private async Task LoadSavedGameCoreAsync(byte[] data)
+    {
+        var game = this.Main;
+        var savePath = ServerMain.Instance.SavePath;
+        await Task.Yield().ConfigureAwait(false);
+        try
         {
-            return;
+            this.DisposeToken.ThrowIfCancellationRequested();
+            await File.WriteAllBytesAsync(savePath, data, this.DisposeToken).ConfigureAwait(false);
+            this.DisposeToken.ThrowIfCancellationRequested();
+            this.Logger.Information("Saving savedata to {Path}", savePath);
+            this.Logger.Information("Building game...");
+            await game.LaunchGame();
+            this.DisposeToken.ThrowIfCancellationRequested();
         }
-
-        this.ClientFrames.Unregister(guid);
-        this.Ghosts.RemoveGuest(guid);
+        catch
+        {
+            this.Dispose();
+            throw;
+        }
     }
 
     void IOnFrameUpdate.OnFrameUpdate(double dt)
@@ -249,7 +231,6 @@ internal sealed class ServerSession : DisposableEventReceiver,
         }
         this.VerifyGameThread();
         this.timeSystem.Tick();
-
         try
         {
             this.ClientFrames.Tick(this.CurrentTimeStamp);
@@ -262,89 +243,93 @@ internal sealed class ServerSession : DisposableEventReceiver,
         }
     }
 
-    void IOnServerEnterNewLevel.OnServerEnterNewLevel() => this.BeginLevelEpoch();
+    void IOnServerEnterNewLevel.OnServerEnterNewLevel()
+    {
+        if (!this.IsDisposed) this.BeginLevelEpoch();
+    }
 
-    /// <summary>
-    /// Starts a new server world epoch for a level load.  Called both by the
-    /// initial save-file load (IOnServerEnterNewLevel) and by the next-level
-    /// coordinator after the server itself has transitioned.
-    /// </summary>
     public void BeginLevelEpoch()
     {
         this.VerifyGameThread();
         ObjectDisposedException.ThrowIf(this.IsDisposed, this);
-        // 关卡本体已在事件前加载 怪物也已完成注册 此处不能清空寄存器
+        // Native mobs are already registered here; preserve them during epoch commit.
         this.AreaAffects.Clear();
         this.Broadcaster.BeginEpoch(this.CurrentTimeStamp);
         this.Ghosts.BeginEpoch(this.Broadcaster.Epoch);
     }
 
-    protected override void MyDispose()
-    {
-        if (this.IsGameThread)
-        {
-            this.DisposeOnGameThread();
-            return;
-        }
+    // Synchronous callers request shutdown; asynchronous callers join the same completion.
+    public void Dispose() => _ = this.StopAsync();
+    public ValueTask DisposeAsync() => new(this.StopAsync());
 
-        // A disconnect/process-exit callback must not block waiting for the game thread.
-        _ = this.DisposeOnGameThreadAsync().ContinueWith(
-            task => this.Logger.Error(task.Exception, "Server session dispose failed"),
-            CancellationToken.None,
-            TaskContinuationOptions.OnlyOnFaulted,
-            TaskScheduler.Default);
+    internal Task StopAsync()
+    {
+        lock (this.gate)
+        {
+            if (this.stopping) return this.stopped.Task;
+            this.stopping = true;
+            if (!this.initializationStarted) this.initialized.TrySetCanceled();
+        }
+        this.Cleanup(this.lifetime.Cancel, "session cancellation");
+        this.transport.StopAccepting();
+        _ = this.FinishStopAsync();
+        return this.stopped.Task;
     }
 
-    protected override ValueTask MyDisposeAsync() => new(this.DisposeOnGameThreadAsync());
-
-    private async Task DisposeOnGameThreadAsync()
+    private async Task FinishStopAsync()
     {
-        await this.GameContext;
-        this.DisposeOnGameThread();
+        try
+        {
+            await this.GameContext;
+            this.VerifyGameThread();
+            // Cancel native loading before joining RPC handlers that may be waiting for it.
+            this.Cleanup(() => this.mainThread?.Dispose(), "native game operations");
+            var closing = this.connections.ToArray();
+            foreach (var guest in closing) guest.Dispose();
+
+            await this.ObserveAsync(this.initialized.Task, "initialization");
+            if (this.loadTask != null) await this.ObserveAsync(this.loadTask, "initial game loading");
+            await Task.WhenAll(closing.Select(guest => guest.StopAsync()));
+
+            await this.GameContext;
+            this.VerifyGameThread();
+            if (this.eventsRegistered)
+            {
+                this.Cleanup(() => EventSystem.RemoveReceiver(this), "session game events");
+                this.eventsRegistered = false;
+            }
+            this.ClientFrames.CommandsReceived -= this.Ghosts.HandleCommands;
+            // Native teardown still needs entity lookup and the server hooks.
+            this.Cleanup(this.Ghosts.Clear, "world ghosts and mob modifiers");
+            this.Cleanup(this.Broadcaster.Clear, "world frame history");
+            this.Cleanup(this.ClientFrames.Clear, "client frames");
+            this.Cleanup(this.Entities.ResetWorld, "entity registry");
+            this.Cleanup(this.AreaAffects.Clear, "area affects");
+            this.guests.Clear();
+            this.mainThread = null;
+        }
+        catch (Exception ex)
+        {
+            this.Logger.Error(ex, "Server session shutdown failed");
+        }
+        finally
+        {
+            await this.ObserveAsync(this.transport.DisposeAsync().AsTask(), "Host transport shutdown");
+            this.Cleanup(this.lifetime.Dispose, "session cancellation source");
+            this.stopped.TrySetResult();
+        }
     }
 
-    private void DisposeOnGameThread()
+    private async Task ObserveAsync(Task task, string operation)
     {
-        this.VerifyGameThread();
-        this.Broadcaster.Clear();
-        this.ClientFrames.Clear();
-        this.Entities.ResetWorld();
-        this.AreaAffects.Clear();
-        this.Ghosts.Clear();
+        try { await task; }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { this.Logger.Warning(ex, "Server {Operation} ended during shutdown", operation); }
+    }
 
-        // Guests own their RPC + per-guest channel.  Dispose before the
-        // transport is torn down; RemoveGuest mutates the map, so iterate a copy.
-        foreach (var guest in this.guests.Values.ToArray())
-        {
-            this.DisposeSafely(guest, "ServerGuestConnection");
-        }
-
-        this.guests.Clear();
-
-        this.DisposeSafely(this.mainThread, "ServerMainThread");
-        this.mainThread = null;
-
-        this.DisposeSafely(this.mainChannelReader, "Server main channel reader");
-        this.mainChannelReader = null;
-        this.DisposeSafely(this.mainChannel, "Server main channel");
-        this.mainChannel = null;
-        if (this.multiplexingStream != null)
-        {
-            // Dispose() is obsolete; block the sync fallback on the async API.
-            try
-            {
-                DisposeAsyncBlocking(() => this.multiplexingStream.DisposeAsync());
-            }
-            catch (Exception ex)
-            {
-                this.Logger.Warning(ex, "Dispose failed: {Resource}", "Server multiplexing stream");
-            }
-            this.multiplexingStream = null;
-        }
-
-        this.DisposeSafely(this.inPipe, "Server in pipe");
-        this.DisposeSafely(this.outPipe, "Server out pipe");
-
-        base.MyDispose();
+    private void Cleanup(Action cleanup, string resource)
+    {
+        try { cleanup(); }
+        catch (Exception ex) { this.Logger.Warning(ex, "Server cleanup failed: {Resource}", resource); }
     }
 }
