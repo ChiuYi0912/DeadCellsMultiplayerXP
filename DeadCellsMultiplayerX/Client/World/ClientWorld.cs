@@ -70,7 +70,7 @@ internal sealed class ClientWorld : Disposable
             this.frameReceiver = new WorldFrameReceiver(session, minimumEpochExclusive);
             this.entityStore = new ClientEntityStore();
 
-            this.localHeroTracker = new LocalHeroTracker();
+            this.localHeroTracker = new LocalHeroTracker(session.CanRepairHeroTargetability);
             this.remoteHeroes = new RemoteHeroManager(session, this.localHeroTracker.State, localGuid, this.InterruptRemoteMobSkill,
                 this.frameReceiver.History, this.frameReceiver.HeroSpawns);
             this.actionReplay = new HeroActionReplay(localGuid, this.remoteHeroes.Present);

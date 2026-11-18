@@ -432,7 +432,8 @@ internal sealed class WorldFrameReceiver : IDisposable
 
         this.sequencer.ApplyDirect(baseline);
 
-        if (this.disposed || current != this.generation || this.Epoch != resync.Epoch)
+        if (this.disposed || current != this.generation || this.Epoch != resync.Epoch
+            || !this.session.CanApplyWorldEpoch(resync.Epoch))
         {
             return;
         }
@@ -447,7 +448,8 @@ internal sealed class WorldFrameReceiver : IDisposable
     /// </summary>
     private bool ObserveEpoch(int epoch)
     {
-        if (epoch < 0 || epoch <= this.minimumEpochExclusive || epoch < this.Epoch)
+        if (epoch < 0 || epoch <= this.minimumEpochExclusive || epoch < this.Epoch
+            || !this.session.CanApplyWorldEpoch(epoch))
         {
             this.sequencer.NoteDroppedOld();
             return false;
@@ -551,7 +553,8 @@ internal sealed class WorldFrameReceiver : IDisposable
     /// </summary>
     private void DeliverFrame(WorldFrame frame)
     {
-        if (this.disposed || frame == null || frame.Epoch != this.Epoch)
+        if (this.disposed || frame == null || frame.Epoch != this.Epoch
+            || !this.session.CanApplyWorldEpoch(frame.Epoch))
         {
             return;
         }
@@ -572,7 +575,7 @@ internal sealed class WorldFrameReceiver : IDisposable
 
         // 校验静态数据后通知实体做存在性对账
         this.ValidateSpawns(frame);
-        if (this.disposed || this.generation != current)
+        if (this.disposed || this.generation != current || !this.session.CanApplyWorldEpoch(frame.Epoch))
         {
             return;
         }

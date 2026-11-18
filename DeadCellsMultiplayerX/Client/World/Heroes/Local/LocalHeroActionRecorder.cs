@@ -129,7 +129,7 @@ internal sealed class LocalHeroActionRecorder(GuestGameSession session) : IClien
     private void RecordShield(BaseShield shield, ShieldIntentKind phase)
     {
         var hero = GuestGameSession.Game?.hero;
-        if (this.disposed || this.session.IsDisposed || shield == null || shield.destroyed
+        if (this.disposed || !this.session.CanRecordActions || shield == null || shield.destroyed
             || hero == null || !ReferenceEquals(shield.owner, hero)
             || shield.item == null || shield.item.posID is < 0 or > 1)
         {
@@ -203,7 +203,7 @@ internal sealed class LocalHeroActionRecorder(GuestGameSession session) : IClien
         return true;
     }
 
-    private bool CanRecord(Hero hero) => !this.disposed && !this.session.IsDisposed
+    private bool CanRecord(Hero hero) => !this.disposed && this.session.CanRecordActions
         && !hero.destroyed && ReferenceEquals(hero, GuestGameSession.Game?.hero);
 
     internal void DebugCastSkill(string itemId, int slot)

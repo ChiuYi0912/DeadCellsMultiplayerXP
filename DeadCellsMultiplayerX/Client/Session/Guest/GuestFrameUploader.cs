@@ -8,15 +8,15 @@ using Serilog;
 
 /// <summary>
 /// Owns the local frame capture buffer, upload backpressure and upload-failure
-/// state.  The session supplies the RPC delegate and identity; this class does
-/// not know about hooks, world state or timing.
+/// state. The session supplies identity, time, RPC and upload permission;
+/// this class does not own hooks or world state.
 /// </summary>
 internal sealed class GuestFrameUploader(
     string guid,
     Func<long> syncedTimeMs,
     Func<ClientWorldFrame, Task> upload,
     Func<long, IReadOnlyList<HeroCommand>> pendingCommands,
-    Func<bool> isServerReady,
+    Func<bool> canUploadFrames,
     ILogger logger)
 {
 
@@ -28,8 +28,8 @@ internal sealed class GuestFrameUploader(
             ?? throw new ArgumentNullException(nameof(syncedTimeMs));
     private readonly Func<ClientWorldFrame, Task> upload = upload
             ?? throw new ArgumentNullException(nameof(upload));
-    private readonly Func<bool> isServerReady = isServerReady
-            ?? throw new ArgumentNullException(nameof(isServerReady));
+    private readonly Func<bool> canUploadFrames = canUploadFrames
+            ?? throw new ArgumentNullException(nameof(canUploadFrames));
     private readonly ILogger logger = logger
             ?? throw new ArgumentNullException(nameof(logger));
 
@@ -46,7 +46,7 @@ internal sealed class GuestFrameUploader(
     /// <summary>Captures the local hero and sends at most one in-flight frame.</summary>
     public void CaptureAndUpload(Hero hero)
     {
-        if (!this.isServerReady() || this.disposed || this.UploadBroken)
+        if (!this.canUploadFrames() || this.disposed || this.UploadBroken)
         {
             return;
         }
@@ -58,6 +58,12 @@ internal sealed class GuestFrameUploader(
         }
 
         if (!this.sendBuffer.Capture(hero, this.guid, this.syncedTimeMs()))
+        {
+            return;
+        }
+
+        // Native state collection may reenter game code and change level permission.
+        if (!this.canUploadFrames() || this.disposed || this.UploadBroken)
         {
             return;
         }

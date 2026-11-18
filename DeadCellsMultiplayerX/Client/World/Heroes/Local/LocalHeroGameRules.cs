@@ -6,7 +6,7 @@ using dc.pr;
 /// <summary>Guest-only native corrections, kept separate from state observation and action recording.</summary>
 internal static class LocalHeroGameRules
 {
-    public static void Apply(Game game, Hero hero)
+    public static void Apply(Game game, Hero hero, Func<Hero, bool> canRepairTargetability)
     {
         if (hero.destroyed || !ReferenceEquals(hero, game.hero))
         {
@@ -37,7 +37,8 @@ internal static class LocalHeroGameRules
                 team.addMember(hero);
             }
         }
-        if (!hero._targetable && hero.life > 0 && !game.hasCinematic() && !game.paused)
+        if (!hero._targetable && hero.life > 0 && !game.hasCinematic() && !game.paused
+            && canRepairTargetability(hero))
         {
             hero.set_targetable(true);
         }

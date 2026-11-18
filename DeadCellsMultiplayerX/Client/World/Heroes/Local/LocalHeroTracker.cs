@@ -8,15 +8,18 @@ using DeadCellsMultiplayerX.Foundation.Lifecycle;
 /// <summary>Owns local hero event subscriptions and coordinates observation before game-rule repair.</summary>
 internal sealed class LocalHeroTracker : DisposableEventReceiver, IOnLocalHeroInitDone, IOnLocalHeroPostUpdate
 {
+    private readonly Func<Hero, bool> canRepairHeroTargetability;
 #if DEBUG
     private string lastLevelSignature = string.Empty;
 #endif
     public LocalHeroState State { get; } = new();
 
-    public LocalHeroTracker()
+    public LocalHeroTracker(Func<Hero, bool> canRepairHeroTargetability)
     {
         try
         {
+            this.canRepairHeroTargetability = canRepairHeroTargetability
+                ?? throw new ArgumentNullException(nameof(canRepairHeroTargetability));
             var game = Game.Class.ME;
             this.State.Capture(game, game?.hero, allowLevelFallback: true);
         }
@@ -56,7 +59,7 @@ internal sealed class LocalHeroTracker : DisposableEventReceiver, IOnLocalHeroIn
 #endif
         if (!this.IsDisposed && ReferenceEquals(game, Game.Class.ME) && ReferenceEquals(hero, game.hero))
         {
-            LocalHeroGameRules.Apply(game, hero);
+            LocalHeroGameRules.Apply(game, hero, this.canRepairHeroTargetability);
         }
     }
 }

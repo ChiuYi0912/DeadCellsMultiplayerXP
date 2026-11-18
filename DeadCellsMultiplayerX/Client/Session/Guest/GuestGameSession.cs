@@ -96,7 +96,7 @@ internal sealed partial class GuestGameSession
             () => this.SyncedTimeMs,
             this.UploadClientFrameAsync,
             this.localActions.Commands.GetPending,
-            () => this.protocolValidated && !this.IsDisposed,
+            () => this.CanUploadFrames,
             this.Logger);
     }
 
@@ -147,11 +147,25 @@ internal sealed partial class GuestGameSession
     internal ClientWorld? ClientWorld { get; private set; }
     internal GuestCombatPresentation Combat { get; }
     internal int PendingCommands => this.localActions.Commands.PendingCount;
+    internal bool CanUploadFrames => this.protocolValidated && !this.IsDisposed
+        && (this.LevelLifecycle?.CanUploadFrames ?? true);
+    internal bool CanRecordActions => !this.IsDisposed && (this.LevelLifecycle?.CanRecordActions ?? true);
+    internal bool CanTickWorld => !this.IsDisposed && (this.LevelLifecycle?.CanTickWorld ?? true);
+
+    internal bool CanApplyWorldEpoch(int epoch)
+        => !this.IsDisposed && (this.LevelLifecycle?.CanApplyWorldEpoch(epoch) ?? true);
+
+    internal bool CanRepairHeroTargetability(Hero hero)
+        => !this.IsDisposed && ReferenceEquals(hero, Game?.hero)
+            && (this.LevelLifecycle?.CanRepairHeroTargetability(hero) ?? true);
 
     // Private properties
     private ILogger Logger { get; }
     private GuestClockSync Clock { get; }
     private GuestFrameUploader Uploader { get; }
+    // Activated with voting/native callback/world replacement wiring in phase 5.
+    // Null keeps the current flow operational while those entry points are still disconnected.
+    private GuestLevelTransition? LevelLifecycle { get; set; }
 
     // Public methods
     public Task StartAsync()
@@ -228,6 +242,7 @@ internal sealed partial class GuestGameSession
         }
 #endif
 
+        this.LevelLifecycle?.ObserveServerEpoch(frame.Epoch);
         this.ClientWorld?.OnWorldFrame(frame);
         return Task.CompletedTask;
     }
@@ -251,7 +266,10 @@ internal sealed partial class GuestGameSession
         this.Clock.Tick();
 
         // 世界帧 NACK 调度/超时
-        this.ClientWorld?.Tick(this.SyncedTimeMs);
+        if (this.CanTickWorld)
+        {
+            this.ClientWorld?.Tick(this.SyncedTimeMs);
+        }
     }
 
     void IOnLocalHeroPostUpdate.OnPostUpdate(Hero hero)
@@ -297,6 +315,11 @@ internal sealed partial class GuestGameSession
             return;
         }
 
+        var lifecycle = this.LevelLifecycle;
+        if (lifecycle != null && !lifecycle.TryAcceptWorldEpoch(lifecycle.Generation, epoch))
+        {
+            return;
+        }
         this.Uploader.SetEpoch(epoch);
         this.localActions?.ObserveEpoch(epoch);
     }

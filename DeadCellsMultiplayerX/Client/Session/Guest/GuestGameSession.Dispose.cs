@@ -41,6 +41,7 @@ internal sealed partial class GuestGameSession
         try
         {
             await this.gameContext;
+            this.LevelLifecycle?.Stop();
 
             // Startup may have published the channel after the first stop request.
             // Close it before joining producers so a pending RPC can finish.
