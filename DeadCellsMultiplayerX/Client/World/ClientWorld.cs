@@ -1,6 +1,7 @@
 namespace DeadCellsMultiplayerX.Client.World;
 
 using dc.en;
+using dc.pr;
 using DeadCellsMultiplayerX.Client.Session.Guest;
 using DeadCellsMultiplayerX.Client.UI.DebugTools;
 using DeadCellsMultiplayerX.Client.World.Entities;
@@ -108,6 +109,21 @@ internal sealed class ClientWorld : Disposable
         {
             return;
         }
+        var levels = new List<Level>();
+        var subLevels = GuestGameSession.Game?.subLevels;
+        if (subLevels != null)
+        {
+            for (var i = 0; i < subLevels.length; i++)
+            {
+                if (subLevels.getDyn(i) is Level level)
+                {
+                    levels.Add(level);
+                }
+            }
+        }
+        this.remoteMobs.ClearLocalMobs(levels);
+        ObjectDisposedException.ThrowIf(this.IsDisposed, this);
+
         this.started = true;
         this.frameReceiver.Start();
     }

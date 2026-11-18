@@ -78,7 +78,8 @@ internal sealed class ClientMobReplicator(
 
         if (needsCleanup)
         {
-            this.ClearLocalLevelMobs(level);
+            // A sub-level can become available after the initial world takeover.
+            this.ClearLocalMobs([level]);
         }
 
         var descriptor =
@@ -348,24 +349,26 @@ internal sealed class ClientMobReplicator(
     }
 
     /// <summary>
-    /// 清掉指定关卡客户端本地加载的怪物
+    /// Removes local mobs during world takeover and when a later sub-level is first replicated.
     /// </summary>
-    private void ClearLocalLevelMobs(Level level)
+    public void ClearLocalMobs(IEnumerable<Level> levels)
     {
-        var entities = level.entities;
-        if (entities == null)
-        {
-            return;
-        }
-
         var toDestroy = new List<Mob>();
-        for (var i = 0; i < entities.length; i++)
+        foreach (var level in levels)
         {
-            if (entities.getDyn(i) is Mob mob
-                && !this.IsRemoteMob(mob)
-                && !mob.destroyed)
+            var entities = level.entities;
+            if (entities == null)
             {
-                toDestroy.Add(mob);
+                continue;
+            }
+            for (var i = 0; i < entities.length; i++)
+            {
+                if (entities.getDyn(i) is Mob mob
+                    && !this.IsRemoteMob(mob)
+                    && !mob.destroyed)
+                {
+                    toDestroy.Add(mob);
+                }
             }
         }
 

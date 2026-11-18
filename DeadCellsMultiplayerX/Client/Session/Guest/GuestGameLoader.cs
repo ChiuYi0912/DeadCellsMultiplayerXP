@@ -1,12 +1,11 @@
 namespace DeadCellsMultiplayerX.Client.Session.Guest;
 
 using dc;
-using dc.en;
 using dc.pr;
 using Serilog;
 using Microsoft.VisualStudio.Threading;
 
-/// <summary>Loads the native game and removes local mobs. The session owns replicated state.</summary>
+/// <summary>Loads the native save and waits for game initialization. ClientWorld owns takeover.</summary>
 internal sealed class GuestGameLoader(SynchronizationContext gameContext, ILogger logger)
 {
     public async Task<Game> LoadSavedGameAsync(CancellationToken cancellationToken)
@@ -33,26 +32,6 @@ internal sealed class GuestGameLoader(SynchronizationContext gameContext, ILogge
             }
         }
 
-        List<Entity> entities = [];
-        for (var i = 0; i < loadedGame.subLevels.length; i++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var level = loadedGame.subLevels.getDyn(i);
-            for (var j = 0; j < level.entities.length; j++)
-            {
-                var entity = level.entities.getDyn(j);
-                if (entity is Mob)
-                {
-                    entities.Add(entity);
-                }
-            }
-            foreach (var entity in entities)
-            {
-                entity.destroy();
-            }
-
-            entities.Clear();
-        }
         return loadedGame;
     }
 }
