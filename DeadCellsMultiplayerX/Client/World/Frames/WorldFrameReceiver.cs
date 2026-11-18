@@ -51,6 +51,7 @@ internal sealed class WorldFrameReceiver : IDisposable
         Log.ForContext("SourceContext", "WorldFrameReceiver");
 
     private readonly GuestGameSession session;
+    private readonly int minimumEpochExclusive;
     public WorldFrameHistory History { get; } = new();
     public HeroSpawnCache HeroSpawns { get; } = new();
     private readonly FrameDeliveryStats stats = new();
@@ -69,6 +70,7 @@ internal sealed class WorldFrameReceiver : IDisposable
     /// 当前重同步请求任务。
     /// </summary>
     private Task<WorldResync>? resyncTask;
+    private bool started;
     private bool disposed;
     private int generation;
 
@@ -77,9 +79,11 @@ internal sealed class WorldFrameReceiver : IDisposable
     /// </summary>
     private bool loggedFirstFrame;
 
-    public WorldFrameReceiver(GuestGameSession session)
+    public WorldFrameReceiver(GuestGameSession session, int minimumEpochExclusive = -1)
     {
+        ArgumentOutOfRangeException.ThrowIfLessThan(minimumEpochExclusive, -1);
         this.session = session;
+        this.minimumEpochExclusive = minimumEpochExclusive;
 
         this.sequencer = new FrameSequencer<WorldFrame>(
             new FrameSequencerPolicy
@@ -110,10 +114,6 @@ internal sealed class WorldFrameReceiver : IDisposable
                 }
             },
             log: message => Logger.Warning("{Message}", message));
-
-#if DEBUG
-        WorldFrameDebug.Receiver = this;
-#endif
     }
 
     /// <summary>
@@ -191,12 +191,20 @@ internal sealed class WorldFrameReceiver : IDisposable
     /// </summary>
     public event Action<WorldFrame>? FrameDelivered;
 
+    /// <summary>Raised after the baseline delivery handlers return without invalidating this receiver.</summary>
+    public event Action<int>? BaselineDelivered;
+
     public void Start()
     {
-        if (!this.disposed)
+        if (this.disposed || this.started)
         {
-            this.sequencer.Start();
+            return;
         }
+        this.started = true;
+#if DEBUG
+        WorldFrameDebug.Receiver = this;
+#endif
+        this.sequencer.Start();
     }
 
     /// <summary>
@@ -204,7 +212,7 @@ internal sealed class WorldFrameReceiver : IDisposable
     /// </summary>
     public void Receive(WorldFrame frame)
     {
-        if (this.disposed || frame == null)
+        if (!this.started || this.disposed || frame == null)
         {
             return;
         }
@@ -242,7 +250,7 @@ internal sealed class WorldFrameReceiver : IDisposable
     /// </summary>
     public void Tick(long nowMs)
     {
-        if (this.disposed)
+        if (!this.started || this.disposed)
         {
             return;
         }
@@ -272,7 +280,7 @@ internal sealed class WorldFrameReceiver : IDisposable
     /// </summary>
     public void RequestResync(string reason)
     {
-        if (this.disposed)
+        if (!this.started || this.disposed)
         {
             return;
         }
@@ -360,6 +368,7 @@ internal sealed class WorldFrameReceiver : IDisposable
         this.disposed = true;
         this.ResetCore();
         FrameDelivered = null;
+        BaselineDelivered = null;
 
 #if DEBUG
         if (WorldFrameDebug.Receiver == this)
@@ -374,7 +383,7 @@ internal sealed class WorldFrameReceiver : IDisposable
     /// </summary>
     public void ApplyResync(WorldResync resync)
     {
-        if (this.disposed || resync == null)
+        if (!this.started || this.disposed || resync == null)
         {
             return;
         }
@@ -423,9 +432,14 @@ internal sealed class WorldFrameReceiver : IDisposable
 
         this.sequencer.ApplyDirect(baseline);
 
+        if (this.disposed || current != this.generation || this.Epoch != resync.Epoch)
+        {
+            return;
+        }
         Logger.Information(
             "World resync applied: epoch={Epoch} seq={Sequence} heroes={Heroes}",
             resync.Epoch, resync.Sequence, baseline.Heroes.Count);
+        this.BaselineDelivered?.Invoke(resync.Epoch);
     }
 
     /// <summary>
@@ -433,7 +447,7 @@ internal sealed class WorldFrameReceiver : IDisposable
     /// </summary>
     private bool ObserveEpoch(int epoch)
     {
-        if (epoch < 0 || epoch < this.Epoch)
+        if (epoch < 0 || epoch <= this.minimumEpochExclusive || epoch < this.Epoch)
         {
             this.sequencer.NoteDroppedOld();
             return false;

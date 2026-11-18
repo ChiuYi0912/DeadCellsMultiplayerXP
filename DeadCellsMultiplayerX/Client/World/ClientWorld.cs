@@ -60,13 +60,14 @@ internal sealed class ClientWorld : Disposable
     /// 服务端权威的动态关卡区域镜像
     /// </summary>
     private readonly ClientAreaAffectState areaAffects;
+    private bool started;
 
-    public ClientWorld(GuestGameSession session, string localGuid)
+    public ClientWorld(GuestGameSession session, string localGuid, int minimumEpochExclusive = -1)
     {
         try
         {
             this.acknowledgeCommands = session.AcknowledgeCommands;
-            this.frameReceiver = new WorldFrameReceiver(session);
+            this.frameReceiver = new WorldFrameReceiver(session, minimumEpochExclusive);
             this.entityStore = new ClientEntityStore();
 
             this.localHeroTracker = new LocalHeroTracker();
@@ -85,7 +86,7 @@ internal sealed class ClientWorld : Disposable
             this.areaAffects = new ClientAreaAffectState(session);
 
             this.frameReceiver.FrameDelivered += this.ApplyDeliveredFrame;
-            this.frameReceiver.Start();
+            this.frameReceiver.BaselineDelivered += this.OnBaselineDelivered;
         }
         catch
         {
@@ -96,12 +97,27 @@ internal sealed class ClientWorld : Disposable
         }
     }
 
+    /// <summary>Raised after a baseline has been applied to this world's components.</summary>
+    public event Action<ClientWorld, int>? BaselineApplied;
+
+    /// <summary>The owner must publish this world before starting network delivery.</summary>
+    public void Start()
+    {
+        ObjectDisposedException.ThrowIf(this.IsDisposed, this);
+        if (this.started)
+        {
+            return;
+        }
+        this.started = true;
+        this.frameReceiver.Start();
+    }
+
     /// <summary>
     /// 处理接收到的世界帧
     /// </summary>
     public void OnWorldFrame(WorldFrame frame)
     {
-        if (!this.IsDisposed)
+        if (this.started && !this.IsDisposed)
         {
             this.frameReceiver.Receive(frame);
         }
@@ -112,7 +128,7 @@ internal sealed class ClientWorld : Disposable
     /// </summary>
     public void Tick(long nowMs)
     {
-        if (this.IsDisposed)
+        if (!this.started || this.IsDisposed)
         {
             return;
         }
@@ -247,12 +263,26 @@ internal sealed class ClientWorld : Disposable
             return;
         }
         this.actionReplay.ApplyFrame(frame);
+        if (this.IsDisposed)
+        {
+            return;
+        }
         this.entityReplication.ApplyFrame(frame);
+    }
+
+    private void OnBaselineDelivered(int epoch)
+    {
+        if (this.started && !this.IsDisposed && this.Epoch == epoch)
+        {
+            this.BaselineApplied?.Invoke(this, epoch);
+        }
     }
 
     protected override void MyDispose()
     {
+        this.BaselineApplied = null;
         this.frameReceiver?.FrameDelivered -= this.ApplyDeliveredFrame;
+        this.frameReceiver?.BaselineDelivered -= this.OnBaselineDelivered;
         this.DisposeSafely(this.frameReceiver, "world frame receiver");
         if (this.remoteHeroes != null && this.actionReplay != null)
         {

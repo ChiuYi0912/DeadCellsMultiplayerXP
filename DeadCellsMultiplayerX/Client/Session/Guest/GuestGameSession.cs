@@ -45,7 +45,7 @@ internal sealed partial class GuestGameSession
     private readonly LocalHeroActionRecorder localActions;
     private readonly TaskCompletionSource started =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
-    private readonly TaskCompletionSource initialWorld =
+    private readonly TaskCompletionSource initialWorldStarted =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource stopped =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -58,6 +58,7 @@ internal sealed partial class GuestGameSession
     private dc.pr.Game? loadedGame;
     private byte[]? saveData;
     private bool eventsRegistered;
+    private bool creatingWorld;
     private bool releasingWorld;
     private bool protocolValidated;
     private DebugHUD? debugHud;
@@ -364,7 +365,7 @@ internal sealed partial class GuestGameSession
             this.lifetime.Token.ThrowIfCancellationRequested();
 
             this.protocolValidated = true;
-            this.TryCreateWorld();
+            this.TryStartInitialWorld();
 
             if (this.LobbyInfo.Owner == this.LocalGuid)
             {
@@ -376,7 +377,7 @@ internal sealed partial class GuestGameSession
                 await this.Server.UploadSavedata(data);
             }
 
-            await this.initialWorld.Task.WaitAsync(this.lifetime.Token);
+            await this.initialWorldStarted.Task.WaitAsync(this.lifetime.Token);
 
             lock (this.gate)
             {
@@ -417,11 +418,11 @@ internal sealed partial class GuestGameSession
             this.lifetime.Token.ThrowIfCancellationRequested();
             this.saveData = data;
             this.loadedGame = await this.gameLoader.LoadSavedGameAsync(this.lifetime.Token);
-            this.TryCreateWorld();
+            this.TryStartInitialWorld();
         }
         catch (Exception ex)
         {
-            this.initialWorld.TrySetCanceled();
+            this.initialWorldStarted.TrySetCanceled();
             if (!this.IsDisposed)
             {
                 this.Logger.Error(ex, "Guest game loading failed");
@@ -463,8 +464,9 @@ internal sealed partial class GuestGameSession
 #endif
     }
 
-    private void TryCreateWorld()
+    private void TryStartInitialWorld()
     {
+        dc.pr.Game game;
         lock (this.gate)
         {
             if (this.state >= GuestLifetimeState.Stopping)
@@ -472,20 +474,87 @@ internal sealed partial class GuestGameSession
                 throw new OperationCanceledException(this.lifetime.Token);
             }
 
-            if (!this.protocolValidated || this.loadedGame == null || this.ClientWorld != null)
+            if (!this.protocolValidated || this.loadedGame == null
+                || this.ClientWorld != null || this.creatingWorld)
             {
                 return;
             }
+            game = this.loadedGame;
+        }
 
-            if (this.loadedGame != Game)
+        this.CreateWorld(game);
+        // Only the initial startup path completes this signal. A later world
+        // replacement must not change startup completion or wait for a baseline.
+        this.initialWorldStarted.TrySetResult();
+    }
+
+    private ClientWorld CreateWorld(dc.pr.Game game, int minimumEpochExclusive = -1)
+    {
+        CancellationToken cancellationToken;
+        lock (this.gate)
+        {
+            ObjectDisposedException.ThrowIf(this.state >= GuestLifetimeState.Stopping, this);
+            if (this.ClientWorld != null || this.creatingWorld)
+            {
+                throw new InvalidOperationException("A guest world already exists or is being created.");
+            }
+            cancellationToken = this.lifetime.Token;
+            this.creatingWorld = true;
+        }
+
+        ClientWorld? world = null;
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (game != Game)
             {
                 throw new InvalidOperationException("Guest game was replaced during initialization.");
             }
-
             this.Combat.ClearDeathPermissions();
-            this.ClientWorld = new ClientWorld(this, this.LocalGuid);
+            // Native component construction may reenter game code. Do not hold
+            // the session lock, and do not start network delivery in the constructor.
+            world = new ClientWorld(this, this.LocalGuid, minimumEpochExclusive);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (game != Game)
+            {
+                throw new InvalidOperationException("Guest game was replaced during initialization.");
+            }
+            lock (this.gate)
+            {
+                ObjectDisposedException.ThrowIf(this.state >= GuestLifetimeState.Stopping, this);
+                this.ClientWorld = world;
+            }
             this.Uploader.ResetLocalHeroState();
-            this.initialWorld.TrySetResult();
+            cancellationToken.ThrowIfCancellationRequested();
+            world.Start();
+            cancellationToken.ThrowIfCancellationRequested();
+            if (world.IsDisposed || !ReferenceEquals(this.ClientWorld, world))
+            {
+                throw new OperationCanceledException("Guest world was released during startup.", cancellationToken);
+            }
+            return world;
+        }
+        catch
+        {
+            if (world != null)
+            {
+                if (ReferenceEquals(this.ClientWorld, world))
+                {
+                    this.Cleanup(this.ReleaseWorld, "world startup rollback");
+                }
+                else
+                {
+                    this.Cleanup(world.Dispose, "unpublished world");
+                }
+            }
+            throw;
+        }
+        finally
+        {
+            lock (this.gate)
+            {
+                this.creatingWorld = false;
+            }
         }
     }
 
