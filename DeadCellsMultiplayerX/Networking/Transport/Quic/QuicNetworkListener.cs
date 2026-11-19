@@ -3,7 +3,6 @@ namespace DeadCellsMultiplayerX.Networking.Transport.Quic;
 using System.Net.Quic;
 using System.Net.Security;
 using System.Security.Cryptography.X509Certificates;
-using DeadCellsMultiplayerX.Utilities.Threading;
 
 internal sealed class QuicNetworkListener(string ip, int port) : BaseNetworkListener
 {
@@ -68,9 +67,18 @@ internal sealed class QuicNetworkListener(string ip, int port) : BaseNetworkList
         var current = this.listener
             ?? throw new ObjectDisposedException(nameof(QuicNetworkListener));
 
-        var connect = await current.AcceptConnectionAsync(cancellationToken.Combine(this.DisposeToken));
+        using var acceptLifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, this.DisposeToken);
+        var connect = await current.AcceptConnectionAsync(acceptLifetime.Token);
         var nc = new QuicNetworkConnect(connect, false);
-        await nc.Init(cancellationToken.Combine(this.DisposeToken));
-        return nc;
+        try
+        {
+            await nc.Init(acceptLifetime.Token);
+            return nc;
+        }
+        catch
+        {
+            await this.DisposeSafelyAsync(nc.DisposeAsync, "uninitialized QUIC connection");
+            throw;
+        }
     }
 }

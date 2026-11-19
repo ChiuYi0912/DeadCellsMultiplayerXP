@@ -1,5 +1,6 @@
 namespace DeadCellsMultiplayerX.Client.Session;
 
+using DeadCellsMultiplayerX.Diagnostics;
 using dc.en;
 using dc.pr;
 using dc.shader;

@@ -4,7 +4,7 @@ using dc.en;
 using dc.pr;
 using DeadCellsMultiplayerX.Engine.Adapters.Snapshots;
 using DeadCellsMultiplayerX.Networking.Time;
-using DeadCellsMultiplayerX.Server.Replication.Entities;
+using DeadCellsMultiplayerX.Server.World.Replication.Entities;
 using Serilog;
 
 /// <summary>

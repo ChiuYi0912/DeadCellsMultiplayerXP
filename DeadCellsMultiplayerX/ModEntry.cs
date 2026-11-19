@@ -1,5 +1,6 @@
-﻿namespace DeadCellsMultiplayerX;
+namespace DeadCellsMultiplayerX;
 
+using DeadCellsMultiplayerX.Diagnostics;
 using System.Runtime.ExceptionServices;
 using dc;
 using DeadCellsMultiplayerX.Composition;

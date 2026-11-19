@@ -8,16 +8,13 @@ using DeadCellsMultiplayerX.Engine.Utilities;
 /// 根据客户端上传状态解析关卡并确保 ServerHeroCombatProxy 存在。
 /// </summary>
 internal sealed class ServerHeroSpawner(
-    WorldState world,
-    SpawnSynchronizer spawns,
-    Func<Game?> gameProvider)
+    ServerActorState actorState,
+    SpawnSynchronizer spawns)
 {
-    private readonly WorldState world = world
-            ?? throw new ArgumentNullException(nameof(world));
+    private readonly ServerActorState actorState = actorState
+            ?? throw new ArgumentNullException(nameof(actorState));
     private readonly SpawnSynchronizer spawns = spawns
             ?? throw new ArgumentNullException(nameof(spawns));
-    private readonly Func<Game?> gameProvider = gameProvider
-            ?? throw new ArgumentNullException(nameof(gameProvider));
 
     /// <summary>
     /// 确保 guid 对应的 Ghost 在状态所在关卡存在；返回 null 表示当前不可创建。
@@ -39,7 +36,7 @@ internal sealed class ServerHeroSpawner(
             return null;
         }
 
-        var hero = this.world.GetOrCreate(guid);
+        var hero = this.actorState.GetOrCreate(guid);
         var created = hero.EnsureGhost(
             game, level, state.Pos.CX, state.Pos.CY);
 

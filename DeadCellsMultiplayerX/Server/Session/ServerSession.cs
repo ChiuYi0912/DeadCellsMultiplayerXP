@@ -1,10 +1,9 @@
 namespace DeadCellsMultiplayerX.Server.Session;
 
-using DeadCellsMultiplayerX.Contracts.Lobby;
+using DeadCellsMultiplayerX.Contracts.Levels;
 using DeadCellsMultiplayerX.Networking.Time;
 using DeadCellsMultiplayerX.Server.Session.Connection;
-using DeadCellsMultiplayerX.Server.Session.Interactions;
-using DeadCellsMultiplayerX.Server.World;
+using DeadCellsMultiplayerX.Server.Session.Voting;
 using Microsoft.VisualStudio.Threading;
 using ModCore.Events;
 using ModCore.Events.Interfaces.Game;
@@ -24,7 +23,7 @@ internal sealed class ServerSession : IEventReceiver, IOnFrameUpdate,
     // Keep ownership after roster removal until RPC dispatch and transport cleanup finish.
     private readonly HashSet<ServerGuestConnection> connections = [];
     private readonly Thread gameThread = Thread.CurrentThread;
-    // Borrowed from ServerMain; the composition root owns disposal.
+    // Borrowed from ServerRuntime; the composition root owns disposal.
     private WorldCoordinator? worlds;
     private bool initializationStarted;
     private bool stopping;
@@ -279,7 +278,7 @@ internal sealed class ServerSession : IEventReceiver, IOnFrameUpdate,
             // Join world producers before completing session shutdown.
             if (this.worlds != null)
             {
-                await this.worlds.CompleteOperationsAsync();
+                await this.worlds.WaitForOperationsAsync();
             }
 
             await Task.WhenAll(closing.Select(guest => guest.StopAsync()));

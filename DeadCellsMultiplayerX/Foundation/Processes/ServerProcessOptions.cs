@@ -2,7 +2,7 @@ namespace DeadCellsMultiplayerX.Foundation.Processes;
 
 /// <summary>
 /// 启动服务端 Worker 进程所需的端侧配置。
-/// 只描述“怎么启动”，不包含 ServerMain 或任何服务端实现类型。
+/// 只描述“怎么启动”，不包含 ServerRuntime 或任何服务端实现类型。
 /// </summary>
 internal sealed class ServerProcessOptions
 {

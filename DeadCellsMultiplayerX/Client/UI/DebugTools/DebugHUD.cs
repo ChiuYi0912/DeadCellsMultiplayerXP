@@ -1,5 +1,6 @@
 namespace DeadCellsMultiplayerX.Client.UI.DebugTools;
 
+using DeadCellsMultiplayerX.Diagnostics;
 using dc;
 using dc.h2d;
 using dc.haxe.ds;

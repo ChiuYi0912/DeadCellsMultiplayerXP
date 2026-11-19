@@ -1,5 +1,6 @@
 namespace DeadCellsMultiplayerX.Client.UI.Lobby.Views;
 
+using DeadCellsMultiplayerX.Diagnostics;
 using CoreLibrary.Utilities;
 using dc;
 using dc.h2d;

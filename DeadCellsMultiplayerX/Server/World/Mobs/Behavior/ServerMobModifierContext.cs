@@ -2,7 +2,7 @@ namespace DeadCellsMultiplayerX.Server.World.Mobs.Behavior;
 
 using dc.en;
 using DeadCellsMultiplayerX.Engine.Adapters.Mobs.Behavior;
-using DeadCellsMultiplayerX.Server.Replication.Entities;
+using DeadCellsMultiplayerX.Server.World.Replication.Entities;
 using DeadCellsMultiplayerX.Server.World.Actors;
 using DeadCellsMultiplayerX.Server.World.Mobs.Combat;
 

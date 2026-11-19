@@ -5,14 +5,14 @@ using dc.tool.atk;
 using dc.tool.weap;
 using DeadCellsMultiplayerX.Engine.Adapters.Heroes;
 using DeadCellsMultiplayerX.Engine.Hooks.Server;
-using DeadCellsMultiplayerX.Server.Core;
+using DeadCellsMultiplayerX.Server;
 
 /// <summary>
 /// 盾牌 Hook 路由。
 /// </summary>
-internal sealed class ServerShieldHookRouter(ServerMain server) : IServerShieldHookSink
+internal sealed class ServerShieldHookRouter(ServerRuntime server) : IServerShieldHookSink
 {
-    private readonly ServerMain server = server;
+    private readonly ServerRuntime server = server;
 
     public void OnCounterGrenade(
         Hook_BaseShield.orig_counterGrenade orig,
@@ -33,9 +33,9 @@ internal sealed class ServerShieldHookRouter(ServerMain server) : IServerShieldH
         }
 
         var world = this.server.Worlds?.CurrentWorld;
-        if (world?.Ghosts.TryGetCombatant(self.owner, out var hero) == true)
+        if (world?.Actors.TryGetCombatant(self.owner, out var hero) == true)
         {
-            world.Ghosts.Shield.OnBlock(
+            world.Actors.Shield.OnBlock(
                 hero, self, sourceAtk, fullParry);
         }
     }
@@ -54,9 +54,9 @@ internal sealed class ServerShieldHookRouter(ServerMain server) : IServerShieldH
         }
 
         var world = this.server.Worlds?.CurrentWorld;
-        if (world?.Ghosts.TryGetCombatant(self.owner, out _) == true)
+        if (world?.Actors.TryGetCombatant(self.owner, out _) == true)
         {
-            world.Ghosts.Shield.OnCounter(
+            world.Actors.Shield.OnCounter(
                 self, sourceAtk, fullParry);
         }
     }

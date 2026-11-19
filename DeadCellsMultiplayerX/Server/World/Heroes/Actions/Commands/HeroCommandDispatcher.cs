@@ -6,8 +6,8 @@ using DeadCellsMultiplayerX.Contracts.Actions;
 using DeadCellsMultiplayerX.Contracts.Loadout;
 using DeadCellsMultiplayerX.Diagnostics;
 using DeadCellsMultiplayerX.Engine.Utilities;
-using DeadCellsMultiplayerX.Server.Replication.Entities;
-using DeadCellsMultiplayerX.Server.Replication.Frames;
+using DeadCellsMultiplayerX.Server.World.Replication.Entities;
+using DeadCellsMultiplayerX.Server.World.Replication.Frames;
 using DeadCellsMultiplayerX.Server.World.Actors;
 using DeadCellsMultiplayerX.Server.World.Heroes.Actions.Execution;
 using DeadCellsMultiplayerX.Server.World.Heroes.Actions.Modules;
@@ -23,7 +23,7 @@ internal sealed class HeroCommandDispatcher
     private static readonly ILogger Logger =
         Log.ForContext("SourceContext", "HeroCommandDispatcher");
 
-    private readonly WorldState world;
+    private readonly ServerActorState actorState;
     private readonly ServerHeroSpawner spawner;
     private readonly SpawnSynchronizer spawns;
     private readonly ClientFrameCollector frames;
@@ -34,7 +34,7 @@ internal sealed class HeroCommandDispatcher
     private readonly HeroCommandJournal journal = new();
 
     public HeroCommandDispatcher(
-        WorldState world,
+        ServerActorState actorState,
         ServerHeroSpawner spawner,
         SpawnSynchronizer spawns,
         ClientFrameCollector frames,
@@ -43,7 +43,7 @@ internal sealed class HeroCommandDispatcher
         Func<long> clock,
         Func<Game?> game)
     {
-        this.world = world;
+        this.actorState = actorState;
         this.spawner = spawner;
         this.spawns = spawns;
         this.frames = frames;
@@ -82,11 +82,11 @@ internal sealed class HeroCommandDispatcher
 
             if (command != null)
             {
-                this.world.Find(senderGuid)?.Commands.Record(
+                this.actorState.Find(senderGuid)?.Commands.Record(
                     command.CommandId, outcome);
             }
 
-            this.world.RecordEvent(outcome);
+            this.actorState.RecordEvent(outcome);
             this.RecordJournal(
                 context, HeroRejection.ExecutionException, started, "Exception");
         }
@@ -104,7 +104,7 @@ internal sealed class HeroCommandDispatcher
             return;
         }
 
-        if (this.world.Epoch < 0 || command.Epoch != this.world.Epoch)
+        if (this.actorState.Epoch < 0 || command.Epoch != this.actorState.Epoch)
         {
             this.RecordJournal(context, HeroRejection.EpochMismatch, started, "EpochMismatch");
             return;
@@ -117,13 +117,13 @@ internal sealed class HeroCommandDispatcher
             return;
         }
 
-        var hero = this.world.GetOrCreate(senderGuid);
+        var hero = this.actorState.GetOrCreate(senderGuid);
 
         if (hero.Commands.TryGetCached(command.CommandId, out var cached)
             && cached != null)
         {
             // 重发同一命令时重播原结果；客户端按 OutcomeId 去重。
-            this.world.RecordEvent(cached);
+            this.actorState.RecordEvent(cached);
             this.RecordJournal(context, HeroRejection.None, started, "Duplicate");
             return;
         }
@@ -260,7 +260,7 @@ internal sealed class HeroCommandDispatcher
                 : HeroOutcomeStatus.Rejected);
 
         hero.Commands.Record(command.CommandId, outcome);
-        this.world.RecordEvent(outcome);
+        this.actorState.RecordEvent(outcome);
         this.RecordJournal(
             context, execution, started,
             outcome.Status == HeroOutcomeStatus.Executed ? "Executed" : "Rejected");
@@ -304,7 +304,7 @@ internal sealed class HeroCommandDispatcher
         var outcome = this.CreateOutcome(
             context, null, rejection, HeroOutcomeStatus.Rejected);
         hero.Commands.Record(context.Command.CommandId, outcome);
-        this.world.RecordEvent(outcome);
+        this.actorState.RecordEvent(outcome);
 
         if (rejection != HeroRejection.ExecutionException)
         {
@@ -329,7 +329,7 @@ internal sealed class HeroCommandDispatcher
         var outcome = new HeroOutcome
         {
             Epoch = command.Epoch,
-            OutcomeId = this.world.NextOutcomeId(),
+            OutcomeId = this.actorState.NextOutcomeId(),
             CommandId = command.CommandId,
             Cause = HeroOutcomeCause.Command,
             CasterGuid = context.SenderGuid,

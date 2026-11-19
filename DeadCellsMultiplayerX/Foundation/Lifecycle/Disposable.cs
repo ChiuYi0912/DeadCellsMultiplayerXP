@@ -15,7 +15,7 @@ public abstract class Disposable : IDisposable, IAsyncDisposable, IDisposableObs
     private readonly CancellationTokenSource disposedSource = new();
     private int disposed;
 
-    public CancellationToken DisposeToken => this.disposedSource.Token;
+    public CancellationToken DisposeToken { get; }
 
     public bool IsDisposed => Volatile.Read(ref this.disposed) != 0;
 
@@ -23,7 +23,11 @@ public abstract class Disposable : IDisposable, IAsyncDisposable, IDisposableObs
 
     protected abstract void MyDispose();
 
-    protected Disposable() => this.Logger = Log.ForContext(this.GetType());
+    protected Disposable()
+    {
+        this.DisposeToken = this.disposedSource.Token;
+        this.Logger = Log.ForContext(this.GetType());
+    }
 
     public void Dispose()
     {
@@ -33,7 +37,9 @@ public abstract class Disposable : IDisposable, IAsyncDisposable, IDisposableObs
         }
 
         GC.SuppressFinalize(this);
-        this.MyDispose();
+        try
+        { this.MyDispose(); }
+        finally { this.disposedSource.Dispose(); }
     }
 
     public async ValueTask DisposeAsync()
@@ -44,7 +50,9 @@ public abstract class Disposable : IDisposable, IAsyncDisposable, IDisposableObs
         }
 
         GC.SuppressFinalize(this);
-        await this.MyDisposeAsync().ConfigureAwait(false);
+        try
+        { await this.MyDisposeAsync().ConfigureAwait(false); }
+        finally { this.disposedSource.Dispose(); }
     }
 
     /// <summary>
@@ -69,7 +77,9 @@ public abstract class Disposable : IDisposable, IAsyncDisposable, IDisposableObs
             return false;
         }
 
-        this.disposedSource.Cancel();
+        try
+        { this.disposedSource.Cancel(); }
+        catch (AggregateException ex) { this.Logger.Warning(ex, "Lifetime cancellation callback failed"); }
         return true;
     }
 

@@ -8,7 +8,7 @@ using dc.libs.heaps.slib;
 using dc.pr;
 using dc.tool;
 using DeadCellsMultiplayerX.Engine.Hooks.Server;
-using DeadCellsMultiplayerX.Server.Core;
+using DeadCellsMultiplayerX.Server;
 using DeadCellsMultiplayerX.Server.Session;
 using Hashlink.Proxy.Clousre;
 using HaxeProxy.Runtime;
@@ -17,9 +17,9 @@ using ModCore.Utilities;
 /// <summary>
 /// 进程级生命周期、资源与存档 Hook 路由。
 /// </summary>
-internal sealed class ServerLifecycleHookRouter(ServerMain server) : IServerLifecycleHookSink
+internal sealed class ServerLifecycleHookRouter(ServerRuntime server) : IServerLifecycleHookSink
 {
-    private readonly ServerMain server = server;
+    private readonly ServerRuntime server = server;
     private Sound? soundEmpty;
 
     /// <summary>

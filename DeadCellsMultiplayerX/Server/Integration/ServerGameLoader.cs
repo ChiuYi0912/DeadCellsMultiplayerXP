@@ -1,6 +1,7 @@
 namespace DeadCellsMultiplayerX.Server.Integration;
 
 using dc;
+using DeadCellsMultiplayerX.Engine.Adapters.Levels;
 using dc.cine;
 using dc.pr;
 using Microsoft.VisualStudio.Threading;
@@ -14,7 +15,7 @@ internal sealed class ServerGameLoader(
     private readonly ILogger logger = Log.ForContext<ServerGameLoader>();
     private Game? enteredGame;
     private string? enteredLevelId;
-    private ServerLevelEntrySubscription? entry;
+    private LevelEntrySubscription? entry;
     private LevelTransition? enteredTransition;
 
     internal void OnLevelLoading(LevelTransition transition, string levelId)

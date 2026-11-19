@@ -4,21 +4,21 @@ using dc;
 using dc.en;
 using dc.tool.atk;
 using DeadCellsMultiplayerX.Engine.Hooks.Server;
-using DeadCellsMultiplayerX.Server.Core;
+using DeadCellsMultiplayerX.Server;
 
 /// <summary>
 /// Hero Hook 路由：服务端战斗代理的更新、伤害与颜色。
 /// </summary>
-internal sealed class ServerHeroHookRouter(ServerMain server) : IServerHeroHookSink
+internal sealed class ServerHeroHookRouter(ServerRuntime server) : IServerHeroHookSink
 {
-    private readonly ServerMain server = server;
+    private readonly ServerRuntime server = server;
 
     public void OnFixedUpdate(Hook_Hero.orig_fixedUpdate orig, Hero self)
     {
         var world = this.server.Worlds?.CurrentWorld;
-        if (world?.Ghosts.TryGetCombatant(self, out _) == true)
+        if (world?.Actors.TryGetCombatant(self, out _) == true)
         {
-            world.Ghosts.Aggro.RunAsHero(self, () => orig(self));
+            world.Actors.Aggro.RunAsHero(self, () => orig(self));
         }
         else
         {
@@ -29,9 +29,9 @@ internal sealed class ServerHeroHookRouter(ServerMain server) : IServerHeroHookS
     public void OnPostUpdate(Hook_Hero.orig_postUpdate orig, Hero self)
     {
         var world = this.server.Worlds?.CurrentWorld;
-        if (world?.Ghosts.TryGetCombatant(self, out _) == true)
+        if (world?.Actors.TryGetCombatant(self, out _) == true)
         {
-            world.Ghosts.Aggro.RunAsHero(self, () => orig(self));
+            world.Actors.Aggro.RunAsHero(self, () => orig(self));
         }
         else
         {
@@ -42,9 +42,9 @@ internal sealed class ServerHeroHookRouter(ServerMain server) : IServerHeroHookS
     public void OnDamage(Hook_Hero.orig_onDamage orig, Hero self, AttackData atk)
     {
         var world = this.server.Worlds?.CurrentWorld;
-        if (world?.Ghosts.TryGetCombatant(self, out _) == true)
+        if (world?.Actors.TryGetCombatant(self, out _) == true)
         {
-            world.Ghosts.Aggro.RunAsHero(self, () => orig(self, atk));
+            world.Actors.Aggro.RunAsHero(self, () => orig(self, atk));
         }
         else
         {
@@ -57,7 +57,7 @@ internal sealed class ServerHeroHookRouter(ServerMain server) : IServerHeroHookS
     /// </summary>
     public bool OnCanBeHitBy(Hook_Hero.orig_canBeHitBy orig, Hero self, Entity by)
     {
-        if (this.server.Worlds?.CurrentWorld?.Ghosts.TryGetCombatant(self, out _) == true)
+        if (this.server.Worlds?.CurrentWorld?.Actors.TryGetCombatant(self, out _) == true)
         {
             return !self.destroyed && self.life > 0;
         }

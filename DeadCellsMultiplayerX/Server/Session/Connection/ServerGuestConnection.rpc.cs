@@ -1,15 +1,14 @@
 namespace DeadCellsMultiplayerX.Server.Session.Connection;
 
-using dc;
-using dc.en;
+using DeadCellsMultiplayerX.Contracts.Levels;
 using DeadCellsMultiplayerX.Contracts.Lobby;
 using DeadCellsMultiplayerX.Contracts.Protocol;
 using DeadCellsMultiplayerX.Contracts.Snapshots;
 using DeadCellsMultiplayerX.Engine.Serialization;
+using DeadCellsMultiplayerX.Engine.Adapters.Levels;
 using DeadCellsMultiplayerX.Foundation.Versioning;
 using DeadCellsMultiplayerX.Networking.Rpc.Contracts;
 using Microsoft.VisualStudio.Threading;
-using ModCore.Utilities;
 
 internal sealed partial class ServerGuestConnection : IServerRPC
 {
@@ -158,75 +157,9 @@ internal sealed partial class ServerGuestConnection : IServerRPC
     {
         this.Session.VerifyGameThread();
         ObjectDisposedException.ThrowIf(this.IsDisposed || this.Session.IsDisposed, this);
-        var rect = request.Rect;
-        if (rect.X < 0)
-        {
-            rect.X = 0;
-        }
-        if (rect.Y < 0)
-        {
-            rect.Y = 0;
-        }
-        var areaInfo = new AreaInfo()
-        {
-            Rect = rect
-        };
-
-        var lvl = (dc.pr.Level)dc.pr.Game.Class.ME.subLevels.getDyn(request.SubLevelId);
-        var map = lvl.map;
-
-        areaInfo.Collision = new int[rect.Width * rect.Height];
-
-        // 碰撞箱
-        unsafe
-        {
-            var src = new Span<int>((void*)map.collisions.bytes, map.collisions.length);
-            for (var y = 0; y < rect.Height; y++)
-            {
-                var dst = new Span<int>(areaInfo.Collision, y * rect.Width, rect.Width);
-                src.Slice(((rect.Y + y) * map.wid) + rect.X, rect.Width).CopyTo(dst);
-            }
-        }
-
-        // Entity
-        {
-            var rx = rect.X;
-            var ry = rect.Y;
-            var rxt = rect.X + rect.Width;
-            var ryt = rect.Y + rect.Height;
-
-            foreach (Entity v in lvl.entities)
-            {
-                if (v is not Mob)
-                {
-                    continue;
-                }
-
-                if (v.cx >= rx && v.cx <= rxt && v.cy >= ry && v.cy <= ryt && v.visible)
-                {
-                    // EntityInfo inf = worldXDataDirector.GetEntityByPointer(v.HashlinkPointer)!;
-
-                    // if (inf != null)
-                    // {
-                    //     v.isOnScreen = true;
-
-                    //     FillEntityInfo(v, inf);
-
-                    //     areaInfo.Entities.Add(inf);
-                    // }
-                }
-            }
-        }
-
-        // foreach (var item in await Session.GetGuestsHeroInfos())
-        // {
-        //     item.remoteTime = Session.CurrentTimeStamp;
-        //     areaInfo.Entities.Add(item);
-        // }
-
-        return Task.FromResult(DCMXSerializers.MessagePack.Serialize(areaInfo));
+        var areaInfo = NativeLevelSnapshot.CollectArea(request.Rect, request.SubLevelId);
+        return Task.FromResult(GameDataSerializer.Serialize(areaInfo));
     }
-
 
     public Task<long> GetTimeStamp() => Task.FromResult(this.Session.CurrentTimeStamp);
 
@@ -257,7 +190,11 @@ internal sealed partial class ServerGuestConnection : IServerRPC
             var world = await this.worlds.WaitForWorldAsync(this.DisposeToken);
             await this.Session.GameContext;
             this.DisposeToken.ThrowIfCancellationRequested();
-            if (!ReferenceEquals(world, this.worlds.CurrentWorld) || !world.IsRunning) continue;
+            if (!ReferenceEquals(world, this.worlds.CurrentWorld) || !world.IsRunning)
+            {
+                continue;
+            }
+
             return world.Frames.GetFrames(request, this.Session.CurrentTimeStamp);
         }
     }
@@ -271,7 +208,11 @@ internal sealed partial class ServerGuestConnection : IServerRPC
             var world = await this.worlds.WaitForWorldAsync(this.DisposeToken);
             await this.Session.GameContext;
             this.DisposeToken.ThrowIfCancellationRequested();
-            if (!ReferenceEquals(world, this.worlds.CurrentWorld) || !world.IsRunning) continue;
+            if (!ReferenceEquals(world, this.worlds.CurrentWorld) || !world.IsRunning)
+            {
+                continue;
+            }
+
             return world.Frames.BuildResync(this.Session.CurrentTimeStamp);
         }
     }

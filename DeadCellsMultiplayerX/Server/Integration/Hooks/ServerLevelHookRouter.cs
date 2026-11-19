@@ -5,14 +5,14 @@ using dc.hl.types;
 using dc.tool;
 using DeadCellsMultiplayerX.Engine.Hooks.Server;
 using DeadCellsMultiplayerX.Engine.Adapters.Levels;
-using DeadCellsMultiplayerX.Server.Core;
+using DeadCellsMultiplayerX.Server;
 
 /// <summary>
 /// 转交主关卡加载完成通知，并登记服务端运行时创建的动态区域。
 /// </summary>
-internal sealed class ServerLevelHookRouter(ServerMain server) : IServerLevelHookSink
+internal sealed class ServerLevelHookRouter(ServerRuntime server) : IServerLevelHookSink
 {
-    private readonly ServerMain server = server;
+    private readonly ServerRuntime server = server;
 
     public void OnLoadNewLevel(Hook_LevelTransition.orig_loadNewLevel orig, LevelTransition self)
     {

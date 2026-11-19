@@ -4,13 +4,13 @@ using DeadCellsMultiplayerX.Client.Integration.Events;
 using DeadCellsMultiplayerX.Contracts.Lobby;
 using DeadCellsMultiplayerX.Foundation.Processes;
 using DeadCellsMultiplayerX.Networking.Transport;
-using DeadCellsMultiplayerX.Utilities.Threading;
+using DeadCellsMultiplayerX.Foundation.Lifecycle;
 using Microsoft.VisualStudio.Threading;
 
 internal sealed class HostClient(
     BaseNetworkListener listener,
     CancellationToken cancellationToken,
-    IServerProcessLauncher serverProcessLauncher) : ClientBase,
+    IServerProcessLauncher serverProcessLauncher) : DisposableEventReceiver,
     IOnGuestQuit
 {
     private readonly List<GuestConnection> guests = [];
@@ -101,6 +101,8 @@ internal sealed class HostClient(
 
     private async Task AcceptNewConnectTask()
     {
+        using var acceptLifetime = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken, this.DisposeToken, this.acceptGuestsCancelSource.Token);
         await Task.Yield().ConfigureAwait(false);
         while (!this.LobbyInfo.IsStarted)
         {
@@ -109,7 +111,7 @@ internal sealed class HostClient(
             cancellationToken.ThrowIfCancellationRequested();
 
             this.Logger.Information("Waiting connection...");
-            var connect = await listener.WaitConnect(cancellationToken.Combine(this.DisposeToken, this.acceptGuestsCancelSource.Token));
+            var connect = await listener.WaitConnect(acceptLifetime.Token);
 
             this.Logger.Information("Connecting...");
             var gConnect = new GuestConnection(this, connect);
@@ -128,6 +130,7 @@ internal sealed class HostClient(
 
     protected override void MyDispose()
     {
+        this.Logger.Information("Disposing client...");
         base.MyDispose();
         this.acceptGuestsCancelSource.Cancel();
         listener.Dispose();

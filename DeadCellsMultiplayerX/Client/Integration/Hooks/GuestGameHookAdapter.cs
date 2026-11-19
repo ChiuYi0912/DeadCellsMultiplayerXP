@@ -1,5 +1,6 @@
 namespace DeadCellsMultiplayerX.Client.Integration.Hooks;
 
+using DeadCellsMultiplayerX.Diagnostics;
 using dc;
 using dc.cine;
 using dc.en;

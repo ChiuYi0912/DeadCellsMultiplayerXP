@@ -4,14 +4,14 @@ using dc;
 using dc.en;
 using dc.libs.heaps.slib;
 using DeadCellsMultiplayerX.Engine.Hooks.Server;
-using DeadCellsMultiplayerX.Server.Core;
+using DeadCellsMultiplayerX.Server;
 
 /// <summary>
 /// 实体级 Hook 路由：颜色、可见性、销毁与注册表清理。
 /// </summary>
-internal sealed class ServerEntityHookRouter(ServerMain server) : IServerEntityHookSink
+internal sealed class ServerEntityHookRouter(ServerRuntime server) : IServerEntityHookSink
 {
-    private readonly ServerMain server = server;
+    private readonly ServerRuntime server = server;
 
     public void OnSetColorMap(
         Hook_Entity.orig_setColorMap orig,
@@ -30,7 +30,7 @@ internal sealed class ServerEntityHookRouter(ServerMain server) : IServerEntityH
     /// </summary>
     public bool OnCanBeDetected(Hook_Entity.orig_canBeDetected orig, Entity self)
     {
-        if (this.server.Worlds?.CurrentWorld?.Ghosts.TryGetCombatant(self, out _) == true)
+        if (this.server.Worlds?.CurrentWorld?.Actors.TryGetCombatant(self, out _) == true)
         {
             return !self.destroyed;
         }
@@ -44,7 +44,7 @@ internal sealed class ServerEntityHookRouter(ServerMain server) : IServerEntityH
 
         if (self is Mob mob)
         {
-            world?.Ghosts.Mobs.Detach(mob);
+            world?.Actors.Mobs.Detach(mob);
             world?.Entities.Unregister(mob);
         }
 

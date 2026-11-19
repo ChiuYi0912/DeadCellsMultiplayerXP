@@ -8,7 +8,7 @@ using DeadCellsMultiplayerX.Contracts.Entities;
 using DeadCellsMultiplayerX.Contracts.MobBehavior;
 using DeadCellsMultiplayerX.Engine.Adapters.Mobs.Behavior;
 using DeadCellsMultiplayerX.Engine.Utilities;
-using DeadCellsMultiplayerX.Server.Replication.Entities;
+using DeadCellsMultiplayerX.Server.World.Replication.Entities;
 using DeadCellsMultiplayerX.Server.World.Actors;
 using DeadCellsMultiplayerX.Server.World.Mobs.Behavior.Zombie;
 using DeadCellsMultiplayerX.Server.World.Mobs.Combat;

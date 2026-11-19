@@ -1,10 +1,10 @@
 namespace DeadCellsMultiplayerX.Server.World;
 
 using DeadCellsMultiplayerX.Contracts.Snapshots;
-using DeadCellsMultiplayerX.Server.Replication.Areas;
-using DeadCellsMultiplayerX.Server.Replication.Entities;
-using DeadCellsMultiplayerX.Server.Replication.Entities.Mobs;
-using DeadCellsMultiplayerX.Server.Replication.Frames;
+using DeadCellsMultiplayerX.Server.World.Replication.Areas;
+using DeadCellsMultiplayerX.Server.World.Replication.Entities;
+using DeadCellsMultiplayerX.Server.World.Replication.Entities.Mobs;
+using DeadCellsMultiplayerX.Server.World.Replication.Frames;
 using DeadCellsMultiplayerX.Server.World.Actors;
 using Serilog;
 
@@ -22,26 +22,26 @@ internal sealed class ServerWorld : IDisposable
     public int Epoch { get; }
     public ClientFrameCollector ClientFrames { get; } = new();
     public ServerEntityRegistry Entities { get; } = new();
-    private ServerEntityHandlerRegistry EntityHandlers { get; } = new();
     public ServerLevelAreaAffectRegistry AreaAffects { get; } = new();
     public EntityFrameBuilder EntityBuilder { get; }
     public WorldFrameBuilder Frames { get; }
-    public ServerActorManager Ghosts { get; }
+    public ServerActorRuntime Actors { get; }
 
     public ServerWorld(Func<long> getTime, int epoch)
     {
         this.getTime = getTime;
         this.Epoch = epoch;
         this.token = this.lifetime.Token;
-        this.EntityHandlers.Register(new ServerMobEntityHandler(this.Entities));
-        this.EntityBuilder = new(this.Entities, this.EntityHandlers);
-        this.Ghosts = new(this.ClientFrames, this.Entities, this.EntityBuilder.History,
+        var entityHandlers = new ServerEntityHandlerRegistry();
+        entityHandlers.Register(new ServerMobEntityHandler(this.Entities));
+        this.EntityBuilder = new(this.Entities, entityHandlers);
+        this.Actors = new(this.ClientFrames, this.Entities, this.EntityBuilder.History,
             getTime, () => this.ClientFrames.Epoch);
-        this.ClientFrames.CommandsReceived += this.Ghosts.HandleCommands;
-        this.Frames = new(this.ClientFrames, this.EntityBuilder, this.Ghosts, this.AreaAffects);
+        this.ClientFrames.CommandsReceived += this.Actors.HandleCommands;
+        this.Frames = new(this.ClientFrames, this.EntityBuilder, this.Actors, this.AreaAffects);
         // Initialize before native creation registers entities and attaches modifiers.
         this.Frames.BeginEpoch(epoch);
-        this.Ghosts.BeginEpoch(epoch);
+        this.Actors.BeginEpoch(epoch);
     }
 
     public void AddGuest(string guid, Func<ClientFrameRangeRequest, Task<ClientFrameBundle>> requestFrames)
@@ -54,7 +54,7 @@ internal sealed class ServerWorld : IDisposable
     {
         this.VerifyActive();
         this.ClientFrames.Unregister(guid);
-        this.Ghosts.RemoveGuest(guid);
+        this.Actors.RemoveGuest(guid);
     }
 
     public WorldFrame? Tick(double dt, IReadOnlyCollection<string> guests)
@@ -66,7 +66,7 @@ internal sealed class ServerWorld : IDisposable
         }
         var now = this.getTime();
         this.ClientFrames.Tick(now);
-        this.Ghosts.Tick(now, guests);
+        this.Actors.Tick(now, guests);
         return this.Frames.Build(dt, now);
     }
 
@@ -118,9 +118,9 @@ internal sealed class ServerWorld : IDisposable
         this.IsDisposed = true;
         this.IsRunning = false;
         this.Cleanup(this.lifetime.Cancel, "world cancellation");
-        this.ClientFrames.CommandsReceived -= this.Ghosts.HandleCommands;
+        this.ClientFrames.CommandsReceived -= this.Actors.HandleCommands;
         // Hooks still need entity lookup while native proxies and modifiers detach.
-        this.Cleanup(this.Ghosts.Clear, "ghosts and mob modifiers");
+        this.Cleanup(this.Actors.Clear, "ghosts and mob modifiers");
         this.Cleanup(this.Frames.Clear, "world frame history");
         this.Cleanup(this.ClientFrames.Clear, "client frames");
         this.Cleanup(this.Entities.ResetWorld, "entity registry");

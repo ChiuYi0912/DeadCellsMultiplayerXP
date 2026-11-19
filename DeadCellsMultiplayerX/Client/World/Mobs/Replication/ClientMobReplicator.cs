@@ -83,7 +83,7 @@ internal sealed class ClientMobReplicator(
         }
 
         var descriptor =
-            DCMXSerializers.MessagePack.Deserialize<LevelMob>(spawn.EntityData);
+            GameDataSerializer.Deserialize<LevelMob>(spawn.EntityData);
 
         if (descriptor == null)
         {

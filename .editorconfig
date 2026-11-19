@@ -467,14 +467,9 @@ dotnet_analyzer_diagnostic.severity = none
 [DeadCellsMultiplayerX/Client/Session/ClientRuntime.cs]
 dotnet_diagnostic.CA1001.severity = none
 
-[DeadCellsMultiplayerX/Server/Core/ServerMain.cs]
-dotnet_diagnostic.CA1001.severity = none
 
 # Existing constructor parameter order is part of the internal API.
 [DeadCellsMultiplayerX/Client/Session/Host/HostClient.cs]
-dotnet_diagnostic.CA1068.severity = none
-
-[DeadCellsMultiplayerX/Client/Session/Guest/GuestWorldLoader.cs]
 dotnet_diagnostic.CA1068.severity = none
 
 # Local self-signed QUIC certificates are intentional for the loopback mod transport.

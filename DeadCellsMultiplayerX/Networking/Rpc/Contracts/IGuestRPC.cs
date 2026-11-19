@@ -1,7 +1,7 @@
 namespace DeadCellsMultiplayerX.Networking.Rpc.Contracts;
 
+using DeadCellsMultiplayerX.Contracts.Levels;
 using DeadCellsMultiplayerX.Contracts.Snapshots;
-using DeadCellsMultiplayerX.Contracts.Lobby;
 using PolyType;
 using StreamJsonRpc;
 

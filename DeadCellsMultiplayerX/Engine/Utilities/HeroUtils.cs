@@ -119,7 +119,7 @@ public static class HeroUtils
         spawn.MainSprite ??= new SpriteInfo();
         spawn.MainSprite.AtlasName = "atlas/" + spawn.ColorMapModel + ".atlas";
         spawn.MainSprite.GroupName = hero.spr.groupName.ToString();
-        spawn.MainSprite.PivotData = DCMXSerializers.MessagePack.Serialize(hero.spr?.pivot);
+        spawn.MainSprite.PivotData = GameDataSerializer.Serialize(hero.spr?.pivot);
         spawn.MainSprite.Parent = spawn.GUID;
     }
 
@@ -142,7 +142,7 @@ public static class HeroUtils
             var data = array.getDyn(i);
             var virtuals = ((HaxeProxyBase)data)
                 .ToVirtual<virtual_animationIntensity_animationScale_animationSpeed_animationTextureMask_inner_key_outer_power_>();
-            spawn.GlowData.Add(i, DCMXSerializers.MessagePack.Serialize(virtuals));
+            spawn.GlowData.Add(i, GameDataSerializer.Serialize(virtuals));
         }
     }
 

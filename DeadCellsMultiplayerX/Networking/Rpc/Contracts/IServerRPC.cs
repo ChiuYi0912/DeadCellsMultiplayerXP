@@ -1,5 +1,6 @@
 namespace DeadCellsMultiplayerX.Networking.Rpc.Contracts;
 
+using DeadCellsMultiplayerX.Contracts.Levels;
 using DeadCellsMultiplayerX.Contracts.Lobby;
 using DeadCellsMultiplayerX.Contracts.Protocol;
 using DeadCellsMultiplayerX.Contracts.Snapshots;

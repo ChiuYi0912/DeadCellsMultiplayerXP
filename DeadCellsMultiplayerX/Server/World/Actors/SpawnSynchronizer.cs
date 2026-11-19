@@ -1,6 +1,6 @@
 namespace DeadCellsMultiplayerX.Server.World.Actors;
 
-using DeadCellsMultiplayerX.Server.Replication.Frames;
+using DeadCellsMultiplayerX.Server.World.Replication.Frames;
 
 internal sealed class SpawnSynchronizer(ClientFrameCollector frames)
 {

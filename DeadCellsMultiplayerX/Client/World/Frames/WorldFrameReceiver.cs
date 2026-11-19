@@ -1,5 +1,6 @@
 namespace DeadCellsMultiplayerX.Client.World.Frames;
 
+using DeadCellsMultiplayerX.Diagnostics;
 using DeadCellsMultiplayerX.Client.Session.Guest;
 using DeadCellsMultiplayerX.Contracts.Snapshots;
 using DeadCellsMultiplayerX.Networking.Frames;

@@ -1,7 +1,10 @@
 namespace DeadCellsMultiplayerX.Client.Session.Guest;
 
+using DeadCellsMultiplayerX.Diagnostics;
+using DeadCellsMultiplayerX.Contracts.Levels;
 using System.Diagnostics.CodeAnalysis;
 using dc.cine;
+using DeadCellsMultiplayerX.Engine.Adapters.Levels;
 using dc.en;
 using DeadCellsMultiplayerX.Client.Integration.Events;
 using DeadCellsMultiplayerX.Client.Integration.Hooks;
@@ -66,7 +69,7 @@ internal sealed partial class GuestGameSession
 
     // Level and world lifecycle
     private readonly GuestLevelTransition levelLifecycle = new();
-    private GuestLevelEntrySubscription? levelEntrySubscription;
+    private LevelEntrySubscription? levelEntrySubscription;
     private Task? levelVoteTask;
     private volatile string? serverTransitionTarget;
     private TaskCompletionSource? worldCreationCompleted;
@@ -520,7 +523,7 @@ internal sealed partial class GuestGameSession
         }
         // Install after native construction; loadNewLevel preserves this subscription.
         this.ClearLevelEntrySubscription();
-        this.levelEntrySubscription = new GuestLevelEntrySubscription(transition,
+        this.levelEntrySubscription = new LevelEntrySubscription(transition,
             () => this.OnNativeLevelEntered(generation, transition, game, levelId));
     }
 

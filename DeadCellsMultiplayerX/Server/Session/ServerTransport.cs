@@ -178,13 +178,15 @@ internal sealed class ServerTransport(ILogger logger) : System.IAsyncDisposable
 
     private void Cleanup(Action action, string resource)
     {
-        try { action(); }
+        try
+        { action(); }
         catch (Exception ex) { this.logger.Warning(ex, "Transport cleanup failed: {Resource}", resource); }
     }
 
     private async Task ObserveAsync(Task task, string operation)
     {
-        try { await task.ConfigureAwait(false); }
+        try
+        { await task.ConfigureAwait(false); }
         catch (OperationCanceledException) when (this.acceptingStopped) { }
         catch (Exception ex) { this.logger.Debug(ex, "Transport operation ended: {Operation}", operation); }
     }

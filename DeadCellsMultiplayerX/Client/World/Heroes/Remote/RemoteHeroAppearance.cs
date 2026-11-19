@@ -36,7 +36,7 @@ internal sealed class RemoteHeroAppearance(RemoteHero owner)
             return false;
         }
         this.owner.spr.pivot.copyFrom(
-            DCMXSerializers.MessagePack.Deserialize<SpritePivot>(spawn.MainSprite.PivotData));
+            GameDataSerializer.Deserialize<SpritePivot>(spawn.MainSprite.PivotData));
         this.owner.setColorMap(spawn.ColorMapModel.AsHaxeString(), spawn.ColorMapSkin.AsHaxeString(), null);
         foreach (var (index, data) in spawn.GlowData)
         {
@@ -45,7 +45,7 @@ internal sealed class RemoteHeroAppearance(RemoteHero owner)
                 continue;
             }
             this.owner.setGlowData(index,
-                DCMXSerializers.MessagePack.Deserialize<virtual_animationIntensity_animationScale_animationSpeed_animationTextureMask_inner_key_outer_power_>(data),
+                GameDataSerializer.Deserialize<virtual_animationIntensity_animationScale_animationSpeed_animationTextureMask_inner_key_outer_power_>(data),
                 this.owner.spr);
         }
         this.appliedVersion = spawn.Version;

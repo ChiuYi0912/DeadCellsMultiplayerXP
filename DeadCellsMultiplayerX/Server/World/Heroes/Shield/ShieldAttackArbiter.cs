@@ -6,7 +6,7 @@ using dc.tool.weap;
 using DeadCellsMultiplayerX.Contracts.Actions;
 using DeadCellsMultiplayerX.Engine.Adapters.Items;
 using DeadCellsMultiplayerX.Engine.Utilities;
-using DeadCellsMultiplayerX.Server.Replication.Entities;
+using DeadCellsMultiplayerX.Server.World.Replication.Entities;
 using DeadCellsMultiplayerX.Server.World.Actors;
 using Serilog;
 
@@ -15,7 +15,7 @@ using Serilog;
 /// 不重新判定 Block/Partial；判定来自 AttackTargetImpl.updateHitResult。
 /// </summary>
 internal sealed class ShieldAttackArbiter(
-    WorldState world,
+    ServerActorState actorState,
     ServerEntityRegistry entities,
     Func<long> clock)
 {
@@ -73,8 +73,8 @@ internal sealed class ShieldAttackArbiter(
         var engineHero = hero.Ghost.Hero;
         var outcome = new HeroOutcome
         {
-            Epoch = world.Epoch,
-            OutcomeId = world.NextOutcomeId(),
+            Epoch = actorState.Epoch,
+            OutcomeId = actorState.NextOutcomeId(),
             CommandId = 0,
             Cause = HeroOutcomeCause.WorldEvent,
             CasterGuid = hero.OwnerGuid,
@@ -118,7 +118,7 @@ internal sealed class ShieldAttackArbiter(
         // onShieldBlock 与 shieldCounterAttack 在同一次原生调用栈内先后触发；
         // 先记录引用，counter 到达时把 Countered 改成 true，帧发布前即可看到最终值。
         this.pendingBlocks[shield] = outcome;
-        world.RecordEvent(outcome);
+        actorState.RecordEvent(outcome);
 
         Logger.Information(
             "Shield block: guid={Guid} kind={Kind} source={Source} " +

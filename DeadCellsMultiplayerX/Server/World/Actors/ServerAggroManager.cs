@@ -5,7 +5,7 @@ using dc.en;
 using dc.pr;
 using dc.tool.atk;
 using DeadCellsMultiplayerX.Engine.Hooks.Shared;
-using DeadCellsMultiplayerX.Server.Replication.Entities;
+using DeadCellsMultiplayerX.Server.World.Replication.Entities;
 using Serilog;
 
 /// <summary>

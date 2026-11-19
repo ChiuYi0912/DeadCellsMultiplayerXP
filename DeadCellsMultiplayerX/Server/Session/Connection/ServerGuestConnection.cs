@@ -1,5 +1,6 @@
 ﻿namespace DeadCellsMultiplayerX.Server.Session.Connection;
 
+using DeadCellsMultiplayerX.Contracts.Levels;
 using System.Diagnostics;
 using dc.en;
 using DeadCellsMultiplayerX.Contracts.Lobby;
@@ -8,7 +9,6 @@ using DeadCellsMultiplayerX.Diagnostics;
 using DeadCellsMultiplayerX.Networking.Rpc.Contracts;
 using DeadCellsMultiplayerX.Networking.Transport;
 using DeadCellsMultiplayerX.Server.Integration.Events;
-using DeadCellsMultiplayerX.Server.World;
 using Microsoft.VisualStudio.Threading;
 using ModCore.Events;
 using ModCore.Modules;

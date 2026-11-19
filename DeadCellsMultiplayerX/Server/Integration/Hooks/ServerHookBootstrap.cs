@@ -2,15 +2,15 @@ namespace DeadCellsMultiplayerX.Server.Integration.Hooks;
 
 using DeadCellsMultiplayerX.Engine.Hooks.Server;
 using DeadCellsMultiplayerX.Engine.Hooks.Shared;
-using DeadCellsMultiplayerX.Server.Core;
+using DeadCellsMultiplayerX.Server;
 
 /// <summary>
 /// 服务端 Hook 组合根。
 /// 每个 Hook 只由一个 Binding 安装一次，再路由到具体 Router。
 /// </summary>
-internal sealed class ServerHookBootstrap(ServerMain server) : IDisposable
+internal sealed class ServerHookBootstrap(ServerRuntime server) : IDisposable
 {
-    private readonly ServerMain server = server;
+    private readonly ServerRuntime server = server;
     private readonly HookGroup group = new();
 
     public void Install()

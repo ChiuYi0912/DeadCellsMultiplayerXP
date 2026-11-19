@@ -1,5 +1,6 @@
 namespace DeadCellsMultiplayerX.Client.UI.DebugTools;
 
+using DeadCellsMultiplayerX.Diagnostics;
 using dc;
 using DeadCellsMultiplayerX.Client.World.Entities;
 using DeadCellsMultiplayerX.Contracts.Entities;

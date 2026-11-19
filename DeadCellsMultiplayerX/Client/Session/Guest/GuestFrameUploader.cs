@@ -1,5 +1,6 @@
 namespace DeadCellsMultiplayerX.Client.Session.Guest;
 
+using DeadCellsMultiplayerX.Diagnostics;
 using dc.en;
 using dc.pr;
 using DeadCellsMultiplayerX.Contracts.Actions;

@@ -2,13 +2,13 @@ namespace DeadCellsMultiplayerX.Server.World.Actors;
 
 using dc;
 using dc.pr;
-using DeadCellsMultiplayerX.Server.Replication.Frames;
+using DeadCellsMultiplayerX.Server.World.Replication.Frames;
 
 /// <summary>
 /// 服务端 Hero 队伍同步入口：编排生成、状态镜像与战斗状态更新。
 /// </summary>
 internal sealed class ServerTeamManager(
-    WorldState world,
+    ServerActorState actorState,
     ClientFrameCollector frames,
     ServerHeroSpawner spawner,
     Func<Game?> gameProvider)
@@ -18,7 +18,7 @@ internal sealed class ServerTeamManager(
     /// </summary>
     private const long STALE_STATE_MS = 2000;
 
-    private readonly WorldState world = world;
+    private readonly ServerActorState actorState = actorState;
 
     /// <summary>
     /// 客户端上传的帧数据，提供每个 guid 的英雄状态
@@ -34,7 +34,7 @@ internal sealed class ServerTeamManager(
     /// 当前可战斗 Hero
     /// </summary>
     public IReadOnlyCollection<ServerHero> Combatants
-        => this.world.Actors;
+        => this.actorState.Actors;
 
     /// <summary>
     /// 用客户端最新上传状态同步所有 Hero
@@ -60,7 +60,7 @@ internal sealed class ServerTeamManager(
             if (!this.frames.TryGetHeroState(guid, out var state))
             {
                 // 本地 Hero 死亡后客户端停止上传，服务端要把目标关闭
-                if (this.world.Find(guid) is { } stale
+                if (this.actorState.Find(guid) is { } stale
                     && stale.LastStateMs > 0
                     && nowMs - stale.LastStateMs > STALE_STATE_MS)
                 {
@@ -78,7 +78,7 @@ internal sealed class ServerTeamManager(
             var hero = spawner.Ensure(game, guid, state, out var level);
             if (hero?.Ghost == null || level == null)
             {
-                this.world.Find(guid)?.DisableCombat();
+                this.actorState.Find(guid)?.DisableCombat();
                 continue;
             }
 
@@ -98,7 +98,7 @@ internal sealed class ServerTeamManager(
     /// </summary>
     public bool TryGet(string guid, out ServerHero hero)
     {
-        var found = this.world.Find(guid);
+        var found = this.actorState.Find(guid);
         if (found != null)
         {
             hero = found;
@@ -114,7 +114,7 @@ internal sealed class ServerTeamManager(
     /// </summary>
     public bool TryGet(Entity entity, out ServerHero hero)
     {
-        var found = this.world.FindByHero(entity);
+        var found = this.actorState.FindByHero(entity);
         if (found != null)
         {
             hero = found;
@@ -129,14 +129,14 @@ internal sealed class ServerTeamManager(
     /// 断线清理
     /// </summary>
     public void Forget(string guid)
-        => this.world.Find(guid)?.DisableCombat();
+        => this.actorState.Find(guid)?.DisableCombat();
 
     /// <summary>
     /// 世界重置
     /// </summary>
     public void Clear()
     {
-        foreach (var hero in this.world.Actors)
+        foreach (var hero in this.actorState.Actors)
         {
             hero.DisableCombat();
         }
@@ -153,7 +153,7 @@ internal sealed class ServerTeamManager(
             return;
         }
 
-        if (this.world.FindByHero(hero) != null)
+        if (this.actorState.FindByHero(hero) != null)
         {
             return;
         }
