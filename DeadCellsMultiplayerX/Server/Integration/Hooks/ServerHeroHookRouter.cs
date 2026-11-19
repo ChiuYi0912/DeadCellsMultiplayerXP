@@ -15,10 +15,10 @@ internal sealed class ServerHeroHookRouter(ServerMain server) : IServerHeroHookS
 
     public void OnFixedUpdate(Hook_Hero.orig_fixedUpdate orig, Hero self)
     {
-        var session = this.server.Session;
-        if (session?.Ghosts.TryGetCombatant(self, out _) == true)
+        var world = this.server.Worlds?.CurrentWorld;
+        if (world?.Ghosts.TryGetCombatant(self, out _) == true)
         {
-            session.Ghosts.Aggro.RunAsHero(self, () => orig(self));
+            world.Ghosts.Aggro.RunAsHero(self, () => orig(self));
         }
         else
         {
@@ -28,10 +28,10 @@ internal sealed class ServerHeroHookRouter(ServerMain server) : IServerHeroHookS
 
     public void OnPostUpdate(Hook_Hero.orig_postUpdate orig, Hero self)
     {
-        var session = this.server.Session;
-        if (session?.Ghosts.TryGetCombatant(self, out _) == true)
+        var world = this.server.Worlds?.CurrentWorld;
+        if (world?.Ghosts.TryGetCombatant(self, out _) == true)
         {
-            session.Ghosts.Aggro.RunAsHero(self, () => orig(self));
+            world.Ghosts.Aggro.RunAsHero(self, () => orig(self));
         }
         else
         {
@@ -41,10 +41,10 @@ internal sealed class ServerHeroHookRouter(ServerMain server) : IServerHeroHookS
 
     public void OnDamage(Hook_Hero.orig_onDamage orig, Hero self, AttackData atk)
     {
-        var session = this.server.Session;
-        if (session?.Ghosts.TryGetCombatant(self, out _) == true)
+        var world = this.server.Worlds?.CurrentWorld;
+        if (world?.Ghosts.TryGetCombatant(self, out _) == true)
         {
-            session.Ghosts.Aggro.RunAsHero(self, () => orig(self, atk));
+            world.Ghosts.Aggro.RunAsHero(self, () => orig(self, atk));
         }
         else
         {
@@ -57,7 +57,7 @@ internal sealed class ServerHeroHookRouter(ServerMain server) : IServerHeroHookS
     /// </summary>
     public bool OnCanBeHitBy(Hook_Hero.orig_canBeHitBy orig, Hero self, Entity by)
     {
-        if (this.server.Session?.Ghosts.TryGetCombatant(self, out _) == true)
+        if (this.server.Worlds?.CurrentWorld?.Ghosts.TryGetCombatant(self, out _) == true)
         {
             return !self.destroyed && self.life > 0;
         }

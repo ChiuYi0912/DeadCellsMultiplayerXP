@@ -8,7 +8,7 @@ using DeadCellsMultiplayerX.Contracts.Entities;
 using DeadCellsMultiplayerX.Contracts.MobBehavior;
 using DeadCellsMultiplayerX.Engine.Adapters.Mobs.Behavior;
 using DeadCellsMultiplayerX.Engine.Utilities;
-using DeadCellsMultiplayerX.Server.Session;
+using DeadCellsMultiplayerX.Server.Replication.Entities;
 using DeadCellsMultiplayerX.Server.World.Actors;
 using DeadCellsMultiplayerX.Server.World.Mobs.Behavior.Zombie;
 using DeadCellsMultiplayerX.Server.World.Mobs.Combat;
@@ -20,26 +20,31 @@ using GameZombie = dc.en.mob.Zombie;
 /// </summary>
 internal sealed class ServerMobModifierRegistry
 {
-    private readonly ServerSession session;
+    private readonly ServerEntityRegistry entities;
+    private readonly Func<int> getEpoch;
+    private readonly Func<long> getTime;
     private readonly ServerTeamManager teams;
     private readonly IServerMobAttackRouter attacks;
     private readonly IServerMobEventOutbox events;
     private readonly MobModifierRegistry<ServerMobModifierContext> inner = new();
 
     public ServerMobModifierRegistry(
-        ServerSession session,
+        ServerEntityRegistry entities,
+        Func<int> getEpoch, Func<long> getTime,
         ServerTeamManager teams,
         IServerMobAttackRouter attacks,
         IServerMobEventOutbox events)
     {
-        this.session = session;
+        this.entities = entities;
+        this.getEpoch = getEpoch;
+        this.getTime = getTime;
         this.teams = teams;
         this.attacks = attacks;
         this.events = events;
 
         this.inner.Register<GameZombie>(
             ctx => new ZombieServerModifier(
-                ctx.Session, ctx.Teams, ctx.Attacks));
+                ctx.Entities, () => ctx.Epoch, () => ctx.CurrentTimeStamp, ctx.Teams, ctx.Attacks));
     }
 
     /// <summary>
@@ -56,14 +61,14 @@ internal sealed class ServerMobModifierRegistry
     public bool TryAttach(Mob mob, long tick)
     {
         if (mob == null
-            || !this.session.Entities.TryGetNetId(mob, out var netId))
+            || !this.entities.TryGetNetId(mob, out var netId))
         {
             return false;
         }
 
         var context = new ServerMobModifierContext(
             mob, netId, tick,
-            this.session, this.teams, this.attacks, this.events);
+            this.entities, this.getEpoch, this.getTime, this.teams, this.attacks, this.events);
 
         return this.inner.TryAttach(context);
     }
@@ -120,7 +125,7 @@ internal sealed class ServerMobModifierRegistry
     private void CollectSkillPrepare(
         Mob mob, OldSkill skill, Entity target, int? data, long tick)
     {
-        if (!this.session.Entities.TryGetNetId(mob, out var netId))
+        if (!this.entities.TryGetNetId(mob, out var netId))
         {
             return;
         }
@@ -135,7 +140,7 @@ internal sealed class ServerMobModifierRegistry
 
         this.attacks.SubmitSkill(new MobModifierEvent
         {
-            Epoch = this.session.Frames.Epoch,
+            Epoch = this.getEpoch(),
             NetId = netId,
             EntityKind = EntityKind.Mob,
             Kind = MobModifierEventKind.ActionStarted,

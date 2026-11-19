@@ -8,8 +8,7 @@ using Microsoft.VisualStudio.Threading;
 using Serilog;
 
 /// <summary>
-/// Owns cross-level loading, transition tasks and publication order. ServerMain owns this coordinator;
-/// W1 temporarily uses the world's components in ServerSession until ServerWorld is extracted.
+/// Owns the current world, loading and transitions. ServerMain owns this coordinator.
 /// </summary>
 internal sealed class WorldCoordinator : IDisposable, System.IAsyncDisposable
 {
@@ -26,6 +25,8 @@ internal sealed class WorldCoordinator : IDisposable, System.IAsyncDisposable
     private Task? activeOperation;
     private TaskCompletionSource? stopped;
 
+    public ServerWorld? CurrentWorld { get; private set; }
+
     public WorldCoordinator(ServerSession session, string savePath)
     {
         session.VerifyGameThread();
@@ -34,6 +35,7 @@ internal sealed class WorldCoordinator : IDisposable, System.IAsyncDisposable
         this.loader = new(session.GameContext, Thread.CurrentThread, savePath);
         this.lifetime = CancellationTokenSource.CreateLinkedTokenSource(session.DisposeToken);
         this.token = this.lifetime.Token;
+        this.CurrentWorld = new(() => session.CurrentTimeStamp);
     }
 
     public Task LoadInitialGameAsync(byte[] data)
@@ -80,7 +82,7 @@ internal sealed class WorldCoordinator : IDisposable, System.IAsyncDisposable
         var savedGame = await this.loader.LoadSavedGameAsync(data, this.token).ConfigureAwait(false);
         await this.session.GameContext;
         this.ThrowIfStopping();
-        this.session.BeginLevelEpoch();
+        this.CurrentWorld!.BeginLevelEpoch();
         this.ThrowIfStopping();
         this.session.NotifyInitialLevel(savedGame);
         this.ThrowIfStopping();
@@ -92,7 +94,7 @@ internal sealed class WorldCoordinator : IDisposable, System.IAsyncDisposable
         await this.loader.EnterNextLevelAsync(levelId, this.token);
         await this.session.GameContext;
         this.ThrowIfStopping();
-        this.session.BeginLevelEpoch();
+        this.CurrentWorld!.BeginLevelEpoch();
         this.ThrowIfStopping();
         this.session.NotifyNextLevel(levelId);
         this.ThrowIfStopping();
@@ -152,7 +154,7 @@ internal sealed class WorldCoordinator : IDisposable, System.IAsyncDisposable
 
     private void ThrowIfStopping() => this.token.ThrowIfCancellationRequested();
 
-    // Session borrows this barrier while it still owns the world components in W1.
+    // Session joins world producers before it finishes draining connections.
     internal async Task CompleteOperationsAsync()
     {
         await this.session.GameContext;
@@ -189,6 +191,7 @@ internal sealed class WorldCoordinator : IDisposable, System.IAsyncDisposable
         }
         this.lifetime.Cancel();
         this.saveAvailable.TrySetCanceled(this.token);
+        this.session.Dispose();
         _ = this.FinishStopAsync(completion);
         return completion.Task;
     }
@@ -198,8 +201,12 @@ internal sealed class WorldCoordinator : IDisposable, System.IAsyncDisposable
         try
         {
             await this.CompleteOperationsAsync();
+            // RPC dispatch and connection removal must finish before native world cleanup.
+            await this.session.Completion;
             await this.session.GameContext;
             this.loader.ResetObservation();
+            this.CurrentWorld?.Dispose();
+            this.CurrentWorld = null;
         }
         catch (Exception ex) { this.logger.Warning(ex, "World coordinator shutdown failed"); }
         finally

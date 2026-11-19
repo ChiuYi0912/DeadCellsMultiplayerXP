@@ -108,14 +108,14 @@ internal static class DebugConsoleCommands
     [ConsoleMethod("dcmp-hero-journal", "打印服务端动作处理日志")]
     public static void HeroJournal(TextWriter writer, int count = 32)
     {
-        var session = ServerMain.Instance?.Session;
-        if (session == null)
+        var world = ServerMain.Instance?.Worlds?.CurrentWorld;
+        if (world == null)
         {
-            writer.WriteLine("Server session is not available in this process.");
+            writer.WriteLine("Server world is not available in this process.");
             return;
         }
 
-        session.Ghosts.Journal.Dump(writer, count);
+        world.Ghosts.Journal.Dump(writer, count);
     }
 
     [ConsoleMethod("dcmp-worldframe-stats", "打印客户端世界帧统计")]

@@ -6,7 +6,7 @@ using DeadCellsMultiplayerX.Contracts.Entities;
 using DeadCellsMultiplayerX.Contracts.MobBehavior;
 using DeadCellsMultiplayerX.Engine.Adapters.Mobs.Behavior;
 using DeadCellsMultiplayerX.Engine.Utilities;
-using DeadCellsMultiplayerX.Server.Session;
+using DeadCellsMultiplayerX.Server.Replication.Entities;
 using DeadCellsMultiplayerX.Server.World.Actors;
 using DeadCellsMultiplayerX.Server.World.Mobs.Combat;
 using Serilog;
@@ -17,14 +17,15 @@ using GameZombie = dc.en.mob.Zombie;
 /// 当前只验证注册、依赖注入、InitHook 和 hook 分发；
 /// </summary>
 internal sealed class ZombieServerModifier(
-    ServerSession session,
+    ServerEntityRegistry entities,
+    Func<int> getEpoch, Func<long> getTime,
     ServerTeamManager teams,
     IServerMobAttackRouter attacks) : MobModifierBase<GameZombie>
 {
     private static readonly ILogger Logger =
         Log.ForContext("SourceContext", "ZombieServerModifier");
 
-    private readonly ServerSession session = session;
+    private readonly ServerEntityRegistry entities = entities;
     private readonly ServerTeamManager teams = teams;
     private readonly IServerMobAttackRouter attacks = attacks;
 
@@ -44,20 +45,20 @@ internal sealed class ZombieServerModifier(
             return;
         }
 
-        if (this.session.Entities.TryGetNetId(
+        if (this.entities.TryGetNetId(
                 context.Mob, out var netId))
         {
             this.attacks.SubmitSkill(
                 new MobModifierEvent
                 {
-                    Epoch = this.session.Frames.Epoch,
+                    Epoch = getEpoch(),
                     NetId = netId,
                     EntityKind = EntityKind.Mob,
                     Kind = MobModifierEventKind.ActionStarted,
                     TargetGuid = combatant.OwnerGuid,
                     SkillId = skill.id.ToString(),
                     SkillRatio = data,
-                    ServerTimeMs = this.session.CurrentTimeStamp,
+                    ServerTimeMs = getTime(),
                     LevelId = combatant.Level?.map?.id?.ToString()
                         ?? string.Empty,
                     SubLevelIndex = combatant.Level

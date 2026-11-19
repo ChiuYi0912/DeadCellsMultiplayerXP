@@ -6,7 +6,7 @@ using DeadCellsMultiplayerX.Contracts.Actions;
 using DeadCellsMultiplayerX.Contracts.EntityEvents;
 using DeadCellsMultiplayerX.Diagnostics;
 using DeadCellsMultiplayerX.Server.Replication.Frames;
-using DeadCellsMultiplayerX.Server.Session;
+using DeadCellsMultiplayerX.Server.Replication.Entities;
 using DeadCellsMultiplayerX.Server.World.Heroes.Actions.Commands;
 using DeadCellsMultiplayerX.Server.World.Heroes.Shield;
 using DeadCellsMultiplayerX.Server.World.Mobs.Behavior;
@@ -29,39 +29,40 @@ internal sealed class ServerActorManager : IServerEntityEventSource
     private readonly ServerMobEventOutbox mobEvents;
     private readonly ServerMobAttackRouter mobAttacks;
 
-    public ServerActorManager(ServerSession session)
+    public ServerActorManager(ClientFrameCollector frames, ServerEntityRegistry entities,
+        ServerEntityHistory history, Func<long> getTime, Func<int> getEpoch)
     {
         this.world = new WorldState();
-        this.spawns = new SpawnSynchronizer(session.ClientFrames);
+        this.spawns = new SpawnSynchronizer(frames);
         var spawner = new ServerHeroSpawner(
             this.world, this.spawns, () => Game.Class.ME);
         this.Shield = new ShieldAttackArbiter(
-            this.world, session.Entities, () => session.CurrentTimeStamp);
+            this.world, entities, getTime);
         this.teams = new ServerTeamManager(
             this.world,
-            session.ClientFrames,
+            frames,
             spawner,
             () => Game.Class.ME);
         this.Aggro = new ServerAggroManager(
             this.teams,
-            session.Entities,
+            entities,
             () => Game.Class.ME);
         this.dispatcher = new HeroCommandDispatcher(
             this.world,
             spawner,
             this.spawns,
-            session.ClientFrames,
-            session.Entities,
-            session.EntityPublisher.History,
-            () => session.CurrentTimeStamp,
+            frames,
+            entities,
+            history,
+            getTime,
             () => Game.Class.ME);
 
         this.mobEvents = new ServerMobEventOutbox();
         this.mobAttacks = new ServerMobAttackRouter(events: this.mobEvents);
         var mobModifiers = new ServerMobModifierRegistry(
-            session, this.teams, this.mobAttacks, this.mobEvents);
+            entities, getEpoch, getTime, this.teams, this.mobAttacks, this.mobEvents);
         this.Mobs = new ServerMobRuntime(
-            mobModifiers, this.Aggro, () => session.CurrentTimeStamp);
+            mobModifiers, this.Aggro, getTime);
     }
 
     /// <summary>

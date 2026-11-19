@@ -30,12 +30,12 @@ internal sealed class ServerMobHookRouter(ServerMain server) : IServerMobHookSin
         Ref<int> lifeTier)
     {
         var mob = orig(k, level, cx, cy, dmgTier, lifeTier);
-        var session = this.server.Session;
+        var world = this.server.Worlds?.CurrentWorld;
 
-        if (session != null)
+        if (world != null)
         {
-            session.Entities.Register(mob, null, level);
-            session.Ghosts.Mobs.TryAttach(mob);
+            world.Entities.Register(mob, null, level);
+            world.Ghosts.Mobs.TryAttach(mob);
         }
 
         int? safelifeTier = lifeTier.IsNull ? 0 : lifeTier.value;
@@ -50,12 +50,12 @@ internal sealed class ServerMobHookRouter(ServerMain server) : IServerMobHookSin
         dc.level.Mob m)
     {
         var mob = orig(self, m);
-        var session = this.server.Session;
+        var world = this.server.Worlds?.CurrentWorld;
 
-        if (session != null)
+        if (world != null)
         {
-            session.Entities.Register(mob, m, self);
-            session.Ghosts.Mobs.TryAttach(mob);
+            world.Entities.Register(mob, m, self);
+            world.Ghosts.Mobs.TryAttach(mob);
         }
 
         EventSystem.BroadcastEvent<IOnAttachMob, IOnAttachMob.Data>(new(m, mob));
@@ -65,8 +65,8 @@ internal sealed class ServerMobHookRouter(ServerMain server) : IServerMobHookSin
 
     public void OnDie(Hook_Mob.orig_onDie orig, Mob self)
     {
-        var session = this.server.Session;
-        var runtime = session?.Ghosts.Mobs;
+        var world = this.server.Worlds?.CurrentWorld;
+        var runtime = world?.Ghosts.Mobs;
 
         if (runtime != null)
         {
@@ -77,12 +77,12 @@ internal sealed class ServerMobHookRouter(ServerMain server) : IServerMobHookSin
             orig(self);
         }
 
-        session?.Entities.MarkDead(self);
+        world?.Entities.MarkDead(self);
     }
 
     public void OnPreUpdate(Hook_Mob.orig_preUpdate orig, Mob self)
     {
-        var runtime = this.server.Session?.Ghosts.Mobs;
+        var runtime = this.server.Worlds?.CurrentWorld?.Ghosts.Mobs;
 
         if (runtime != null)
         {
@@ -96,7 +96,7 @@ internal sealed class ServerMobHookRouter(ServerMain server) : IServerMobHookSin
 
     public void OnFixedUpdate(Hook_Mob.orig_fixedUpdate orig, Mob self)
     {
-        var runtime = this.server.Session?.Ghosts.Mobs;
+        var runtime = this.server.Worlds?.CurrentWorld?.Ghosts.Mobs;
 
         if (runtime == null)
         {
@@ -109,7 +109,7 @@ internal sealed class ServerMobHookRouter(ServerMain server) : IServerMobHookSin
 
     public void OnPostUpdate(Hook_Mob.orig_postUpdate orig, Mob self)
     {
-        var runtime = this.server.Session?.Ghosts.Mobs;
+        var runtime = this.server.Worlds?.CurrentWorld?.Ghosts.Mobs;
 
         if (runtime != null)
         {
@@ -123,7 +123,7 @@ internal sealed class ServerMobHookRouter(ServerMain server) : IServerMobHookSin
 
     public void OnDamage(Hook_Mob.orig_onDamage orig, Mob self, AttackData atk)
     {
-        var runtime = this.server.Session?.Ghosts.Mobs;
+        var runtime = this.server.Worlds?.CurrentWorld?.Ghosts.Mobs;
 
         if (runtime != null)
         {
@@ -140,7 +140,7 @@ internal sealed class ServerMobHookRouter(ServerMain server) : IServerMobHookSin
         Mob self,
         AttackData atk)
     {
-        var runtime = this.server.Session?.Ghosts.Mobs;
+        var runtime = this.server.Worlds?.CurrentWorld?.Ghosts.Mobs;
 
         if (runtime != null)
         {
@@ -158,7 +158,7 @@ internal sealed class ServerMobHookRouter(ServerMain server) : IServerMobHookSin
     public void OnUpdateThreat(Hook_Mob.orig_updateThreat orig, Mob self)
     {
         orig(self);
-        this.server.Session?.Ghosts.Mobs.OnThreatUpdated(self);
+        this.server.Worlds?.CurrentWorld?.Ghosts.Mobs.OnThreatUpdated(self);
     }
 
     /// <summary>
@@ -169,7 +169,7 @@ internal sealed class ServerMobHookRouter(ServerMain server) : IServerMobHookSin
         Mob self,
         Entity target)
     {
-        var runtime = this.server.Session?.Ghosts.Mobs;
+        var runtime = this.server.Worlds?.CurrentWorld?.Ghosts.Mobs;
 
         if (runtime != null
             && runtime.TryRedirectNemesis(self, target, out var redirected))
@@ -191,7 +191,7 @@ internal sealed class ServerMobHookRouter(ServerMain server) : IServerMobHookSin
     /// </summary>
     public void OnBehaviourAi(Hook_Mob.orig_behaviourAi orig, Mob self)
     {
-        var runtime = this.server.Session?.Ghosts.Mobs;
+        var runtime = this.server.Worlds?.CurrentWorld?.Ghosts.Mobs;
 
         if (runtime != null && runtime.OnBehaviourAi(self))
         {
@@ -203,7 +203,7 @@ internal sealed class ServerMobHookRouter(ServerMain server) : IServerMobHookSin
 
     public bool OnAiLocked(Hook_Mob.orig_aiLocked orig, Mob self)
     {
-        var runtime = this.server.Session?.Ghosts.Mobs;
+        var runtime = this.server.Worlds?.CurrentWorld?.Ghosts.Mobs;
 
         if (runtime == null)
         {
@@ -225,7 +225,7 @@ internal sealed class ServerMobHookRouter(ServerMain server) : IServerMobHookSin
 
         if (prepared)
         {
-            this.server.Session?.Ghosts.Mobs.OnSkillPrepare(self, data);
+            this.server.Worlds?.CurrentWorld?.Ghosts.Mobs.OnSkillPrepare(self, data);
         }
 
         return prepared;
@@ -239,7 +239,7 @@ internal sealed class ServerMobHookRouter(ServerMain server) : IServerMobHookSin
         OldMobSkill self,
         double? ratio)
     {
-        this.server.Session?.Ghosts.Mobs.OnSkillExecute(self);
+        this.server.Worlds?.CurrentWorld?.Ghosts.Mobs.OnSkillExecute(self);
 
         orig(self, ratio);
     }

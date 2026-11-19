@@ -32,10 +32,10 @@ internal sealed class ServerShieldHookRouter(ServerMain server) : IServerShieldH
             return;
         }
 
-        var session = this.server.Session;
-        if (session?.Ghosts.TryGetCombatant(self.owner, out var hero) == true)
+        var world = this.server.Worlds?.CurrentWorld;
+        if (world?.Ghosts.TryGetCombatant(self.owner, out var hero) == true)
         {
-            session.Ghosts.Shield.OnBlock(
+            world.Ghosts.Shield.OnBlock(
                 hero, self, sourceAtk, fullParry);
         }
     }
@@ -53,10 +53,10 @@ internal sealed class ServerShieldHookRouter(ServerMain server) : IServerShieldH
             return;
         }
 
-        var session = this.server.Session;
-        if (session?.Ghosts.TryGetCombatant(self.owner, out _) == true)
+        var world = this.server.Worlds?.CurrentWorld;
+        if (world?.Ghosts.TryGetCombatant(self.owner, out _) == true)
         {
-            session.Ghosts.Shield.OnCounter(
+            world.Ghosts.Shield.OnCounter(
                 self, sourceAtk, fullParry);
         }
     }

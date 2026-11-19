@@ -34,6 +34,6 @@ internal sealed class ServerLevelHookRouter(ServerMain server) : IServerLevelHoo
         ArrayObj affixes)
     {
         orig(self, x, y, durationS, a, aDurationS, aValue, affixes);
-        this.server.Session?.AreaAffects.Register(self);
+        this.server.Worlds?.CurrentWorld?.AreaAffects.Register(self);
     }
 }

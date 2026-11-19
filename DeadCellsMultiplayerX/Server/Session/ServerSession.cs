@@ -1,14 +1,9 @@
 namespace DeadCellsMultiplayerX.Server.Session;
 
 using DeadCellsMultiplayerX.Networking.Time;
-using DeadCellsMultiplayerX.Server.Replication.Areas;
-using DeadCellsMultiplayerX.Server.Replication.Entities;
-using DeadCellsMultiplayerX.Server.Replication.Entities.Mobs;
-using DeadCellsMultiplayerX.Server.Replication.Frames;
 using DeadCellsMultiplayerX.Server.Session.Connection;
 using DeadCellsMultiplayerX.Server.Session.Interactions;
 using DeadCellsMultiplayerX.Server.World;
-using DeadCellsMultiplayerX.Server.World.Actors;
 using Microsoft.VisualStudio.Threading;
 using ModCore.Events;
 using ModCore.Events.Interfaces.Game;
@@ -73,23 +68,10 @@ internal sealed class ServerSession : IEventReceiver, IOnFrameUpdate,
     }
 
     internal ServerLevelTransitionGateway LevelTransitions { get; private set; } = null!;
-    public ClientFrameCollector ClientFrames { get; } = new();
-    public ServerEntityRegistry Entities { get; } = new();
-    public ServerEntityHandlerRegistry EntityHandlers { get; } = new();
-    public ServerLevelAreaAffectRegistry AreaAffects { get; } = new();
-    public EntityFrameBuilder EntityPublisher { get; }
-    public WorldFrameBuilder Frames { get; }
-    public ServerActorManager Ghosts { get; }
-
     public ServerSession()
     {
         this.DisposeToken = this.lifetime.Token;
         this.transport = new(this.Logger);
-        this.EntityHandlers.Register(new ServerMobEntityHandler(this.Entities));
-        this.EntityPublisher = new EntityFrameBuilder(this.Entities, this.EntityHandlers);
-        this.Ghosts = new ServerActorManager(this);
-        this.ClientFrames.CommandsReceived += this.Ghosts.HandleCommands;
-        this.Frames = new WorldFrameBuilder(this.ClientFrames, this.EntityPublisher, this.Ghosts, this.AreaAffects);
         EventSystem.AddReceiver(this);
         this.eventsRegistered = true;
     }
@@ -160,7 +142,7 @@ internal sealed class ServerSession : IEventReceiver, IOnFrameUpdate,
         try
         {
             this.guests.Add(guestGuid, guest);
-            this.ClientFrames.Register(guestGuid, guest.RequestClientFrames);
+            this.worlds!.CurrentWorld!.AddGuest(guestGuid, guest.RequestClientFrames);
             guest.Start();
             this.Logger.Information("Client Enter : {Guid}", guestGuid);
         }
@@ -186,8 +168,7 @@ internal sealed class ServerSession : IEventReceiver, IOnFrameUpdate,
             return;
         }
         this.guests.Remove(guest.ConnectionGuid);
-        this.Cleanup(() => this.ClientFrames.Unregister(guest.ConnectionGuid), "guest frame channel");
-        this.Cleanup(() => this.Ghosts.RemoveGuest(guest.ConnectionGuid), "guest ghost");
+        this.Cleanup(() => this.worlds?.CurrentWorld?.RemoveGuest(guest.ConnectionGuid), "guest world state");
     }
 
     internal void ForgetStoppedConnection(ServerGuestConnection guest)
@@ -236,9 +217,7 @@ internal sealed class ServerSession : IEventReceiver, IOnFrameUpdate,
         this.timeSystem.Tick();
         try
         {
-            this.ClientFrames.Tick(this.CurrentTimeStamp);
-            this.Ghosts.Tick(this.CurrentTimeStamp, this.ConnectedGuestIds);
-            var frame = this.Frames.Build(dt, this.CurrentTimeStamp);
+            var frame = this.worlds?.CurrentWorld?.Tick(dt, this.ConnectedGuestIds);
             if (frame != null)
             {
                 foreach (var guest in this.guests.Values.ToArray())
@@ -251,16 +230,6 @@ internal sealed class ServerSession : IEventReceiver, IOnFrameUpdate,
         {
             this.Logger.Error(ex, "World frame tick failed");
         }
-    }
-
-    public void BeginLevelEpoch()
-    {
-        this.VerifyGameThread();
-        ObjectDisposedException.ThrowIf(this.IsDisposed, this);
-        // Native mobs are already registered here; preserve them during epoch commit.
-        this.AreaAffects.Clear();
-        this.Frames.BeginEpoch(this.CurrentTimeStamp);
-        this.Ghosts.BeginEpoch(this.Frames.Epoch);
     }
 
     // Synchronous callers request shutdown; asynchronous callers join the same completion.
@@ -302,7 +271,7 @@ internal sealed class ServerSession : IEventReceiver, IOnFrameUpdate,
 
             await this.ObserveAsync(this.initialized.Task, "initialization");
             // Session cancellation already canceled the coordinator's linked lifetime.
-            // Join its producers before clearing the world components still owned here in W1.
+            // Join world producers before completing session shutdown.
             if (this.worlds != null)
             {
                 await this.worlds.CompleteOperationsAsync();
@@ -317,13 +286,6 @@ internal sealed class ServerSession : IEventReceiver, IOnFrameUpdate,
                 this.Cleanup(() => EventSystem.RemoveReceiver(this), "session game events");
                 this.eventsRegistered = false;
             }
-            this.ClientFrames.CommandsReceived -= this.Ghosts.HandleCommands;
-            // Native teardown still needs entity lookup and the server hooks.
-            this.Cleanup(this.Ghosts.Clear, "world ghosts and mob modifiers");
-            this.Cleanup(this.Frames.Clear, "world frame history");
-            this.Cleanup(this.ClientFrames.Clear, "client frames");
-            this.Cleanup(this.Entities.ResetWorld, "entity registry");
-            this.Cleanup(this.AreaAffects.Clear, "area affects");
             this.guests.Clear();
             this.worlds = null;
         }

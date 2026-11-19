@@ -3,7 +3,6 @@ namespace DeadCellsMultiplayerX.Server.World.Mobs.Behavior;
 using dc.en;
 using DeadCellsMultiplayerX.Engine.Adapters.Mobs.Behavior;
 using DeadCellsMultiplayerX.Server.Replication.Entities;
-using DeadCellsMultiplayerX.Server.Session;
 using DeadCellsMultiplayerX.Server.World.Actors;
 using DeadCellsMultiplayerX.Server.World.Mobs.Combat;
 
@@ -14,7 +13,8 @@ internal sealed class ServerMobModifierContext(
     Mob mob,
     uint netId,
     long tick,
-    ServerSession session,
+    ServerEntityRegistry entities,
+    Func<int> getEpoch, Func<long> getTime,
     ServerTeamManager teams,
     IServerMobAttackRouter attacks,
     IServerMobEventOutbox events) : IMobModifierContext
@@ -32,15 +32,9 @@ internal sealed class ServerMobModifierContext(
     /// <inheritdoc />
     public long Tick { get; } = tick;
 
-    /// <summary>
-    /// 服务端会话。
-    /// </summary>
-    public ServerSession Session { get; } = session;
-
-    /// <summary>
-    /// 服务端通用实体注册表。
-    /// </summary>
-    public ServerEntityRegistry Entities => this.Session.Entities;
+    public ServerEntityRegistry Entities { get; } = entities;
+    public int Epoch => getEpoch();
+    public long CurrentTimeStamp => getTime();
 
     /// <summary>
     /// Ghost 队伍管理器。
@@ -60,11 +54,6 @@ internal sealed class ServerMobModifierContext(
     /// <inheritdoc />
     public T GetService<T>() where T : class
     {
-        if (typeof(T) == typeof(ServerSession))
-        {
-            return (T)(object)this.Session;
-        }
-
         if (typeof(T) == typeof(ServerEntityRegistry))
         {
             return (T)(object)this.Entities;

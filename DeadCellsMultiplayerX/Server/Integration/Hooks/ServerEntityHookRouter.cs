@@ -30,7 +30,7 @@ internal sealed class ServerEntityHookRouter(ServerMain server) : IServerEntityH
     /// </summary>
     public bool OnCanBeDetected(Hook_Entity.orig_canBeDetected orig, Entity self)
     {
-        if (this.server.Session?.Ghosts.TryGetCombatant(self, out _) == true)
+        if (this.server.Worlds?.CurrentWorld?.Ghosts.TryGetCombatant(self, out _) == true)
         {
             return !self.destroyed;
         }
@@ -40,12 +40,12 @@ internal sealed class ServerEntityHookRouter(ServerMain server) : IServerEntityH
 
     public void OnDispose(Hook_Entity.orig_dispose orig, Entity self)
     {
-        var session = this.server.Session;
+        var world = this.server.Worlds?.CurrentWorld;
 
         if (self is Mob mob)
         {
-            session?.Ghosts.Mobs.Detach(mob);
-            session?.Entities.Unregister(mob);
+            world?.Ghosts.Mobs.Detach(mob);
+            world?.Entities.Unregister(mob);
         }
 
         orig(self);

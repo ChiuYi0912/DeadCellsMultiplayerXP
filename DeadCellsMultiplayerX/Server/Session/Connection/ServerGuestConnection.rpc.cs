@@ -25,7 +25,7 @@ internal sealed partial class ServerGuestConnection : IServerRPC
             ServerMajor = ProtocolVersion.Major,
             ServerMinor = ProtocolVersion.Minor,
             Capabilities = ProtocolVersion.SupportedCapabilities,
-            Epoch = this.Session.Frames.Epoch,
+            Epoch = this.worlds.CurrentWorld!.Frames.Epoch,
         };
 
         if (request == null)
@@ -250,7 +250,7 @@ internal sealed partial class ServerGuestConnection : IServerRPC
         {
             return Task.CompletedTask;
         }
-        this.Session.ClientFrames.OnFrame(this.ConnectionGuid, frame);
+        this.worlds.CurrentWorld!.ClientFrames.OnFrame(this.ConnectionGuid, frame);
         return Task.CompletedTask;
     }
 
@@ -258,14 +258,14 @@ internal sealed partial class ServerGuestConnection : IServerRPC
     {
         this.Session.VerifyGameThread();
         ObjectDisposedException.ThrowIf(this.IsDisposed || this.Session.IsDisposed, this);
-        return Task.FromResult(this.Session.Frames.GetFrames(request, this.Session.CurrentTimeStamp));
+        return Task.FromResult(this.worlds.CurrentWorld!.Frames.GetFrames(request, this.Session.CurrentTimeStamp));
     }
 
     public Task<WorldResync> RequestWorldResync(int knownEpoch)
     {
         this.Session.VerifyGameThread();
         ObjectDisposedException.ThrowIf(this.IsDisposed || this.Session.IsDisposed, this);
-        return Task.FromResult(this.Session.Frames.BuildResync(this.Session.CurrentTimeStamp));
+        return Task.FromResult(this.worlds.CurrentWorld!.Frames.BuildResync(this.Session.CurrentTimeStamp));
     }
 
 }
