@@ -1,4 +1,4 @@
-namespace DeadCellsMultiplayerX.Server.World.Actors;
+namespace DeadCellsMultiplayerX.Server.World.Heroes.Replication;
 
 using DeadCellsMultiplayerX.Contracts.Snapshots;
 

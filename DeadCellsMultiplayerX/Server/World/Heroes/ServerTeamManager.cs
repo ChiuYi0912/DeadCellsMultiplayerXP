@@ -1,8 +1,9 @@
-namespace DeadCellsMultiplayerX.Server.World.Actors;
+namespace DeadCellsMultiplayerX.Server.World.Heroes;
 
 using dc;
 using dc.pr;
 using DeadCellsMultiplayerX.Server.World.Replication.Frames;
+using DeadCellsMultiplayerX.Server.World.Heroes.Replication;
 
 /// <summary>
 /// 服务端 Hero 队伍同步入口：编排生成、状态镜像与战斗状态更新。

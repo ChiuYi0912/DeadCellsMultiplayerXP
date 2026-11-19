@@ -4,7 +4,7 @@ using DeadCellsMultiplayerX.Contracts.EntityEvents;
 using DeadCellsMultiplayerX.Contracts.Snapshots;
 using DeadCellsMultiplayerX.Server.World.Replication.Areas;
 using DeadCellsMultiplayerX.Server.World.Replication.Entities;
-using DeadCellsMultiplayerX.Server.World.Actors;
+using DeadCellsMultiplayerX.Server.World;
 using Serilog;
 
 /// <summary>

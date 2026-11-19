@@ -1,8 +1,9 @@
-namespace DeadCellsMultiplayerX.Server.World.Actors;
+namespace DeadCellsMultiplayerX.Server.World.Heroes;
 
 using dc.pr;
 using DeadCellsMultiplayerX.Contracts.Snapshots;
 using DeadCellsMultiplayerX.Engine.Utilities;
+using DeadCellsMultiplayerX.Server.World.Heroes.Replication;
 
 /// <summary>
 /// 根据客户端上传状态解析关卡并确保 ServerHeroCombatProxy 存在。

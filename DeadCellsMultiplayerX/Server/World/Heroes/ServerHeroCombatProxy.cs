@@ -1,4 +1,4 @@
-namespace DeadCellsMultiplayerX.Server.World.Actors;
+namespace DeadCellsMultiplayerX.Server.World.Heroes;
 
 using dc;
 using dc.en.hero;

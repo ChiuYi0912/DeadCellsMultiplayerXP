@@ -1,7 +1,8 @@
-namespace DeadCellsMultiplayerX.Server.World.Actors;
+namespace DeadCellsMultiplayerX.Server.World.Heroes;
 
 using dc;
 using DeadCellsMultiplayerX.Contracts.Actions;
+using DeadCellsMultiplayerX.Server.World.Heroes.Actions;
 
 /// <summary>
 /// 服务端 Ghost 世界

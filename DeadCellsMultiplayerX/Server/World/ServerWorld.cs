@@ -5,7 +5,6 @@ using DeadCellsMultiplayerX.Server.World.Replication.Areas;
 using DeadCellsMultiplayerX.Server.World.Replication.Entities;
 using DeadCellsMultiplayerX.Server.World.Replication.Entities.Mobs;
 using DeadCellsMultiplayerX.Server.World.Replication.Frames;
-using DeadCellsMultiplayerX.Server.World.Actors;
 using Serilog;
 
 /// <summary>Owns world state and components. WorldCoordinator owns its lifetime.</summary>

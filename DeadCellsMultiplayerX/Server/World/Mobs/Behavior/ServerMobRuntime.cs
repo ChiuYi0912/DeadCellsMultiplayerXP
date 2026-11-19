@@ -6,7 +6,7 @@ using dc.tool;
 using dc.tool._Cooldown;
 using dc.tool.atk;
 using dc.tool.skill;
-using DeadCellsMultiplayerX.Server.World.Actors;
+using DeadCellsMultiplayerX.Server.World.Mobs.Combat;
 
 /// <summary>
 /// 服务端 mob 运行时：把 Hook 的 Mob 生命周期、AI、伤害与技能事件

@@ -1,8 +1,9 @@
-namespace DeadCellsMultiplayerX.Server.World.Actors;
+namespace DeadCellsMultiplayerX.Server.World.Heroes;
 
 using dc;
 using dc.pr;
 using DeadCellsMultiplayerX.Simulation.Actions;
+using DeadCellsMultiplayerX.Server.World.Heroes.Replication;
 
 /// <summary>
 /// 一个客户端在服务端的 Hero 聚合：身份、引擎体、装备镜像、命令账本与战斗视图。

@@ -1,4 +1,4 @@
-namespace DeadCellsMultiplayerX.Server.World.Actors;
+namespace DeadCellsMultiplayerX.Server.World.Mobs.Combat;
 
 using dc;
 using dc.en;
@@ -7,6 +7,7 @@ using dc.tool.atk;
 using DeadCellsMultiplayerX.Engine.Hooks.Shared;
 using DeadCellsMultiplayerX.Server.World.Replication.Entities;
 using Serilog;
+using DeadCellsMultiplayerX.Server.World.Heroes;
 
 /// <summary>
 /// 服务端 Ghost 仇恨协调器

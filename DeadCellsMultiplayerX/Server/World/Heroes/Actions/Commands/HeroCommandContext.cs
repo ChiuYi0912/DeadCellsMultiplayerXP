@@ -3,7 +3,7 @@ namespace DeadCellsMultiplayerX.Server.World.Heroes.Actions.Commands;
 using dc.pr;
 using DeadCellsMultiplayerX.Contracts.Actions;
 using DeadCellsMultiplayerX.Contracts.Snapshots;
-using DeadCellsMultiplayerX.Server.World.Actors;
+using DeadCellsMultiplayerX.Server.World.Heroes;
 
 /// <summary>
 /// 一次动作命令从校验到执行所需的不可变上下文。

@@ -8,11 +8,12 @@ using DeadCellsMultiplayerX.Diagnostics;
 using DeadCellsMultiplayerX.Engine.Utilities;
 using DeadCellsMultiplayerX.Server.World.Replication.Entities;
 using DeadCellsMultiplayerX.Server.World.Replication.Frames;
-using DeadCellsMultiplayerX.Server.World.Actors;
+using DeadCellsMultiplayerX.Server.World.Heroes;
 using DeadCellsMultiplayerX.Server.World.Heroes.Actions.Execution;
 using DeadCellsMultiplayerX.Server.World.Heroes.Actions.Modules;
 using DeadCellsMultiplayerX.Simulation.Actions;
 using Serilog;
+using DeadCellsMultiplayerX.Server.World.Heroes.Replication;
 
 /// <summary>
 /// 动作命令的唯一入口：信封校验 -> 结果去重 -> 模块校验/执行 -> 生成 outcome。

@@ -7,7 +7,7 @@ using DeadCellsMultiplayerX.Contracts.Actions;
 using DeadCellsMultiplayerX.Engine.Adapters.Items;
 using DeadCellsMultiplayerX.Engine.Utilities;
 using DeadCellsMultiplayerX.Server.World.Replication.Entities;
-using DeadCellsMultiplayerX.Server.World.Actors;
+using DeadCellsMultiplayerX.Server.World.Heroes;
 using Serilog;
 
 /// <summary>

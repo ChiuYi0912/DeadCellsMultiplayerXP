@@ -1,4 +1,4 @@
-namespace DeadCellsMultiplayerX.Server.World.Actors;
+namespace DeadCellsMultiplayerX.Server.World;
 
 using dc;
 using dc.pr;
@@ -12,6 +12,8 @@ using DeadCellsMultiplayerX.Server.World.Heroes.Shield;
 using DeadCellsMultiplayerX.Server.World.Mobs.Behavior;
 using DeadCellsMultiplayerX.Server.World.Mobs.Combat;
 using Serilog;
+using DeadCellsMultiplayerX.Server.World.Heroes;
+using DeadCellsMultiplayerX.Server.World.Heroes.Replication;
 
 /// <summary>
 /// 服务端 Ghost 入口。
