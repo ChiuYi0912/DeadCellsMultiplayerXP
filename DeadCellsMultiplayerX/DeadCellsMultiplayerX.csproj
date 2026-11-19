@@ -18,11 +18,11 @@
 
   <ItemGroup>
     <PackageReference Include="DeadCellsCoreModding.MDK" Version="1.0.1" />
-    <PackageReference Include="Microsoft.Native.Quic.MsQuic.OpenSSL" Version="2.5.8" />
-    <PackageReference Include="StbImageSharp" Version="2.30.15" />
-    <PackageReference Include="Steamworks.NET" Version="20.2.0" />
-    <PackageReference Include="MessagePack" Version="3.1.7" />
-    <PackageReference Include="StreamJsonRpc" Version="2.25.29" />
+    <PackageReference Include="Microsoft.Native.Quic.MsQuic.OpenSSL" Version="2.6.4" GeneratePathProperty="true" />
+    <PackageReference Include="StbImageSharp" Version="2.30.16" />
+    <PackageReference Include="Steamworks.NET" Version="2024.8.0" />
+    <PackageReference Include="MessagePack" Version="3.1.12" />
+    <PackageReference Include="StreamJsonRpc" Version="2.26.150" />
 
     <ModDependency Include="DebugConsole" />
   </ItemGroup>
@@ -50,6 +50,12 @@
   <ItemGroup>
     <PackAssets Include="Assets/**/*" RootInPak="DeadCellsMultiplayerX" />
   </ItemGroup>
+
+  <Target Name="StageMsQuic" BeforeTargets="GetCopyToOutputDirectoryItems">
+    <Copy SourceFiles="$(PkgMicrosoft_Native_Quic_MsQuic_OpenSSL)/build/native/bin/x64/msquic.dll"
+          DestinationFiles="$(MSBuildProjectDirectory)/msquic.dll"
+          SkipUnchangedFiles="true" />
+  </Target>
 
   <Target Name="StageNuGetDeps" AfterTargets="Build" BeforeTargets="CopyOutputFiles">
     <MakeDir Directories="libs\StreamJsonRpc;libs\StbImageSharp;libs\Steamworks" />

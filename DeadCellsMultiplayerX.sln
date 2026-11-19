@@ -12,16 +12,26 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MobTestMod", "tools\MobTest
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
 		Debug|x64 = Debug|x64
+		Release|Any CPU = Release|Any CPU
 		Release|x64 = Release|x64
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{DF3C1D72-760B-414C-9C60-D92CA64ADD9A}.Debug|Any CPU.ActiveCfg = Debug|x64
+		{DF3C1D72-760B-414C-9C60-D92CA64ADD9A}.Debug|Any CPU.Build.0 = Debug|x64
 		{DF3C1D72-760B-414C-9C60-D92CA64ADD9A}.Debug|x64.ActiveCfg = Debug|x64
 		{DF3C1D72-760B-414C-9C60-D92CA64ADD9A}.Debug|x64.Build.0 = Debug|x64
+		{DF3C1D72-760B-414C-9C60-D92CA64ADD9A}.Release|Any CPU.ActiveCfg = Release|x64
+		{DF3C1D72-760B-414C-9C60-D92CA64ADD9A}.Release|Any CPU.Build.0 = Release|x64
 		{DF3C1D72-760B-414C-9C60-D92CA64ADD9A}.Release|x64.ActiveCfg = Release|x64
 		{DF3C1D72-760B-414C-9C60-D92CA64ADD9A}.Release|x64.Build.0 = Release|x64
+		{FB46AE62-3AF7-4EC8-9BDE-61A9EA264F27}.Debug|Any CPU.ActiveCfg = Debug|x64
+		{FB46AE62-3AF7-4EC8-9BDE-61A9EA264F27}.Debug|Any CPU.Build.0 = Debug|x64
 		{FB46AE62-3AF7-4EC8-9BDE-61A9EA264F27}.Debug|x64.ActiveCfg = Debug|x64
 		{FB46AE62-3AF7-4EC8-9BDE-61A9EA264F27}.Debug|x64.Build.0 = Debug|x64
+		{FB46AE62-3AF7-4EC8-9BDE-61A9EA264F27}.Release|Any CPU.ActiveCfg = Release|x64
+		{FB46AE62-3AF7-4EC8-9BDE-61A9EA264F27}.Release|Any CPU.Build.0 = Release|x64
 		{FB46AE62-3AF7-4EC8-9BDE-61A9EA264F27}.Release|x64.ActiveCfg = Release|x64
 		{FB46AE62-3AF7-4EC8-9BDE-61A9EA264F27}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
