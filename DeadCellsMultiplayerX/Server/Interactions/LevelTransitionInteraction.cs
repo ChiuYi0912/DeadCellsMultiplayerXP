@@ -2,19 +2,11 @@ namespace DeadCellsMultiplayerX.Server.Interactions;
 
 internal sealed class LevelTransitionInteraction(
     Func<string, CancellationToken, ValueTask> serverEnterLevel,
-    Action beginEpoch,
-    Func<string, ValueTask> guestsEnterLevel,
     Func<int, int>? nextIndex = null)
     : ServerInteraction<string, string>
 {
     private readonly Func<string, CancellationToken, ValueTask> serverEnterLevel = serverEnterLevel
             ?? throw new ArgumentNullException(nameof(serverEnterLevel));
-
-    private readonly Action beginEpoch = beginEpoch
-            ?? throw new ArgumentNullException(nameof(beginEpoch));
-
-    private readonly Func<string, ValueTask> guestsEnterLevel = guestsEnterLevel
-            ?? throw new ArgumentNullException(nameof(guestsEnterLevel));
 
     private readonly Func<int, int> nextIndex = nextIndex ?? Random.Shared.Next;
 
@@ -72,12 +64,9 @@ internal sealed class LevelTransitionInteraction(
         return ResolutionStatus.Resolved;
     }
 
-    protected override async ValueTask CommitAsync(string levelId, CancellationToken cancellationToken)
-    {
-        await this.serverEnterLevel(levelId, cancellationToken);
-        this.beginEpoch();
-    }
+    protected override ValueTask CommitAsync(string levelId, CancellationToken cancellationToken)
+        => this.serverEnterLevel(levelId, cancellationToken);
 
     protected override ValueTask PublishAsync(string levelId, CancellationToken cancellationToken)
-        => this.guestsEnterLevel(levelId);
+        => ValueTask.CompletedTask;
 }

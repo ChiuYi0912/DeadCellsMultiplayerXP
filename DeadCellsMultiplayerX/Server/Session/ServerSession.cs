@@ -1,14 +1,13 @@
 namespace DeadCellsMultiplayerX.Server.Session;
 
 using DeadCellsMultiplayerX.Networking.Time;
-using DeadCellsMultiplayerX.Server.Core;
-using DeadCellsMultiplayerX.Server.Integration.Events;
 using DeadCellsMultiplayerX.Server.Replication.Areas;
 using DeadCellsMultiplayerX.Server.Replication.Entities;
 using DeadCellsMultiplayerX.Server.Replication.Entities.Mobs;
 using DeadCellsMultiplayerX.Server.Replication.Frames;
 using DeadCellsMultiplayerX.Server.Session.Connection;
 using DeadCellsMultiplayerX.Server.Session.Interactions;
+using DeadCellsMultiplayerX.Server.World;
 using DeadCellsMultiplayerX.Server.World.Actors;
 using Microsoft.VisualStudio.Threading;
 using ModCore.Events;
@@ -16,7 +15,7 @@ using ModCore.Events.Interfaces.Game;
 using Nerdbank.Streams;
 using Serilog;
 
-internal sealed class ServerSession : IEventReceiver, IOnFrameUpdate, IOnServerEnterNewLevel,
+internal sealed class ServerSession : IEventReceiver, IOnFrameUpdate,
     IDisposable, System.IAsyncDisposable
 {
     private readonly Lock gate = new();
@@ -29,8 +28,8 @@ internal sealed class ServerSession : IEventReceiver, IOnFrameUpdate, IOnServerE
     // Keep ownership after roster removal until RPC dispatch and transport cleanup finish.
     private readonly HashSet<ServerGuestConnection> connections = [];
     private readonly Thread gameThread = Thread.CurrentThread;
-    private Task? loadTask;
-    private ServerMainThread? mainThread;
+    // Borrowed from ServerMain; the composition root owns disposal.
+    private WorldCoordinator? worlds;
     private bool initializationStarted;
     private bool stopping;
     private bool eventsRegistered;
@@ -73,7 +72,7 @@ internal sealed class ServerSession : IEventReceiver, IOnFrameUpdate, IOnServerE
         }
     }
 
-    internal ServerLevelTransitionGateway LevelTransitions { get; }
+    internal ServerLevelTransitionGateway LevelTransitions { get; private set; } = null!;
     public ClientFrameCollector ClientFrames { get; } = new();
     public ServerEntityRegistry Entities { get; } = new();
     public ServerEntityHandlerRegistry EntityHandlers { get; } = new();
@@ -81,7 +80,6 @@ internal sealed class ServerSession : IEventReceiver, IOnFrameUpdate, IOnServerE
     public EntityFrameBuilder EntityPublisher { get; }
     public WorldFramePublisher Broadcaster { get; }
     public ServerActorManager Ghosts { get; }
-    public ServerMainThread Main => this.mainThread ?? throw new InvalidOperationException("Server game is not initialized.");
 
     public ServerSession()
     {
@@ -92,21 +90,27 @@ internal sealed class ServerSession : IEventReceiver, IOnFrameUpdate, IOnServerE
         this.Ghosts = new ServerActorManager(this);
         this.ClientFrames.CommandsReceived += this.Ghosts.HandleCommands;
         this.Broadcaster = new WorldFramePublisher(this.ClientFrames, this.EntityPublisher, this.Ghosts, this.AreaAffects);
-        this.LevelTransitions = new ServerLevelTransitionGateway(this, this.Logger);
         EventSystem.AddReceiver(this);
         this.eventsRegistered = true;
     }
 
     /// <summary>Starts the Host transport and completes when initial guest admission ends.</summary>
-    public Task Init()
+    public Task Init(WorldCoordinator worlds)
     {
         lock (this.gate)
         {
             ObjectDisposedException.ThrowIf(this.IsDisposed, this);
             if (this.initializationStarted)
             {
+                if (!ReferenceEquals(this.worlds, worlds))
+                {
+                    throw new InvalidOperationException("Server session already has a world coordinator.");
+                }
+
                 return this.initialized.Task;
             }
+            this.worlds = worlds;
+            this.LevelTransitions = new ServerLevelTransitionGateway(this, worlds, this.Logger);
             this.initializationStarted = true;
         }
         _ = this.RunInitializationAsync();
@@ -120,7 +124,6 @@ internal sealed class ServerSession : IEventReceiver, IOnFrameUpdate, IOnServerE
             await this.GameContext;
             this.VerifyGameThread();
             this.DisposeToken.ThrowIfCancellationRequested();
-            this.mainThread = new(this.GameContext, this.gameThread);
             this.timeSystem.Start();
             await this.transport.RunAsync(this.AcceptGuestOnMainThreadAsync).ConfigureAwait(false);
             this.initialized.TrySetResult();
@@ -152,7 +155,7 @@ internal sealed class ServerSession : IEventReceiver, IOnFrameUpdate, IOnServerE
         }
 
         // The connection owns stream and channel from here, including Start failure.
-        var guest = new ServerGuestConnection(this, stream, channel, guestGuid);
+        var guest = new ServerGuestConnection(this, this.worlds!, stream, channel, guestGuid);
         this.connections.Add(guest);
         try
         {
@@ -193,33 +196,33 @@ internal sealed class ServerSession : IEventReceiver, IOnFrameUpdate, IOnServerE
         this.connections.Remove(guest);
     }
 
-    // The initial load belongs to the session; a disconnected caller only cancels its own wait.
-    internal Task LoadSavedGameAsync(byte[] data)
+    internal void NotifyInitialLevel(byte[] savedGame)
     {
         this.VerifyGameThread();
         ObjectDisposedException.ThrowIf(this.IsDisposed, this);
-        return this.loadTask ??= this.LoadSavedGameCoreAsync(data);
+        foreach (var guest in this.guests.Values.ToArray())
+        {
+            if (this.IsDisposed)
+            {
+                break;
+            }
+
+            guest.NotifyInitialLevel(savedGame);
+        }
     }
 
-    private async Task LoadSavedGameCoreAsync(byte[] data)
+    internal void NotifyNextLevel(string levelId)
     {
-        var game = this.Main;
-        var savePath = ServerMain.Instance.SavePath;
-        await Task.Yield().ConfigureAwait(false);
-        try
+        this.VerifyGameThread();
+        ObjectDisposedException.ThrowIf(this.IsDisposed, this);
+        foreach (var guest in this.guests.Values.ToArray())
         {
-            this.DisposeToken.ThrowIfCancellationRequested();
-            await File.WriteAllBytesAsync(savePath, data, this.DisposeToken).ConfigureAwait(false);
-            this.DisposeToken.ThrowIfCancellationRequested();
-            this.Logger.Information("Saving savedata to {Path}", savePath);
-            this.Logger.Information("Building game...");
-            await game.LaunchGame();
-            this.DisposeToken.ThrowIfCancellationRequested();
-        }
-        catch
-        {
-            this.Dispose();
-            throw;
+            if (this.IsDisposed)
+            {
+                break;
+            }
+
+            guest.NotifyNextLevel(levelId);
         }
     }
 
@@ -243,11 +246,6 @@ internal sealed class ServerSession : IEventReceiver, IOnFrameUpdate, IOnServerE
         }
     }
 
-    void IOnServerEnterNewLevel.OnServerEnterNewLevel()
-    {
-        if (!this.IsDisposed) this.BeginLevelEpoch();
-    }
-
     public void BeginLevelEpoch()
     {
         this.VerifyGameThread();
@@ -266,9 +264,16 @@ internal sealed class ServerSession : IEventReceiver, IOnFrameUpdate, IOnServerE
     {
         lock (this.gate)
         {
-            if (this.stopping) return this.stopped.Task;
+            if (this.stopping)
+            {
+                return this.stopped.Task;
+            }
+
             this.stopping = true;
-            if (!this.initializationStarted) this.initialized.TrySetCanceled();
+            if (!this.initializationStarted)
+            {
+                this.initialized.TrySetCanceled();
+            }
         }
         this.Cleanup(this.lifetime.Cancel, "session cancellation");
         this.transport.StopAccepting();
@@ -282,13 +287,20 @@ internal sealed class ServerSession : IEventReceiver, IOnFrameUpdate, IOnServerE
         {
             await this.GameContext;
             this.VerifyGameThread();
-            // Cancel native loading before joining RPC handlers that may be waiting for it.
-            this.Cleanup(() => this.mainThread?.Dispose(), "native game operations");
             var closing = this.connections.ToArray();
-            foreach (var guest in closing) guest.Dispose();
+            foreach (var guest in closing)
+            {
+                guest.Dispose();
+            }
 
             await this.ObserveAsync(this.initialized.Task, "initialization");
-            if (this.loadTask != null) await this.ObserveAsync(this.loadTask, "initial game loading");
+            // Session cancellation already canceled the coordinator's linked lifetime.
+            // Join its producers before clearing the world components still owned here in W1.
+            if (this.worlds != null)
+            {
+                await this.worlds.CompleteOperationsAsync();
+            }
+
             await Task.WhenAll(closing.Select(guest => guest.StopAsync()));
 
             await this.GameContext;
@@ -306,7 +318,7 @@ internal sealed class ServerSession : IEventReceiver, IOnFrameUpdate, IOnServerE
             this.Cleanup(this.Entities.ResetWorld, "entity registry");
             this.Cleanup(this.AreaAffects.Clear, "area affects");
             this.guests.Clear();
-            this.mainThread = null;
+            this.worlds = null;
         }
         catch (Exception ex)
         {
@@ -322,14 +334,20 @@ internal sealed class ServerSession : IEventReceiver, IOnFrameUpdate, IOnServerE
 
     private async Task ObserveAsync(Task task, string operation)
     {
-        try { await task; }
+        try
+        {
+            await task;
+        }
         catch (OperationCanceledException) { }
         catch (Exception ex) { this.Logger.Warning(ex, "Server {Operation} ended during shutdown", operation); }
     }
 
     private void Cleanup(Action cleanup, string resource)
     {
-        try { cleanup(); }
+        try
+        {
+            cleanup();
+        }
         catch (Exception ex) { this.Logger.Warning(ex, "Server cleanup failed: {Resource}", resource); }
     }
 }

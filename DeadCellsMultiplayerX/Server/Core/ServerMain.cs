@@ -3,6 +3,7 @@ namespace DeadCellsMultiplayerX.Server.Core;
 using dc;
 using DeadCellsMultiplayerX.Server.Integration.Hooks;
 using DeadCellsMultiplayerX.Server.Session;
+using DeadCellsMultiplayerX.Server.World;
 using Microsoft.VisualStudio.Threading;
 using ModCore;
 using ModCore.Events.Interfaces.Game;
@@ -38,6 +39,7 @@ internal sealed class ServerMain : Module<ServerMain>,
     private Task? shutdownTask;
 
     internal ServerSession? Session { get; private set; }
+    internal WorldCoordinator? Worlds { get; private set; }
     internal bool IsStopping { get; private set; }
 
     /// <summary>
@@ -60,15 +62,17 @@ internal sealed class ServerMain : Module<ServerMain>,
         {
             throw new InvalidOperationException("Server cannot attach another session.");
         }
+        var worlds = new WorldCoordinator(newSession, this.SavePath);
         this.Session = newSession;
-        this.sessionTask = this.ObserveSessionAsync(newSession);
+        this.Worlds = worlds;
+        this.sessionTask = this.ObserveSessionAsync(newSession, worlds);
     }
 
-    private async Task ObserveSessionAsync(ServerSession session)
+    private async Task ObserveSessionAsync(ServerSession session, WorldCoordinator worlds)
     {
         try
         {
-            await session.Init();
+            await session.Init(worlds);
         }
         catch (OperationCanceledException) when (session.IsDisposed) { }
         catch (Exception ex)
@@ -79,8 +83,13 @@ internal sealed class ServerMain : Module<ServerMain>,
 
         // Keep the session reachable by hooks until native and transport cleanup finishes.
         await session.Completion;
+        await worlds.DisposeAsync();
         await session.GameContext;
-        if (ReferenceEquals(this.Session, session)) this.Session = null;
+        if (ReferenceEquals(this.Session, session))
+        {
+            this.Session = null;
+            this.Worlds = null;
+        }
     }
 
     /// <summary>
@@ -143,6 +152,7 @@ internal sealed class ServerMain : Module<ServerMain>,
     private async Task FinishShutdownAsync()
     {
         var session = this.Session;
+        this.Worlds?.Dispose();
         if (session != null)
         {
             await session.DisposeAsync();

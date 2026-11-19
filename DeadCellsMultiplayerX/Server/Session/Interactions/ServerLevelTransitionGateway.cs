@@ -2,26 +2,16 @@ namespace DeadCellsMultiplayerX.Server.Session.Interactions;
 
 using DeadCellsMultiplayerX.Contracts.Lobby;
 using DeadCellsMultiplayerX.Server.Interactions;
+using DeadCellsMultiplayerX.Server.World;
 using Microsoft.VisualStudio.Threading;
 using Serilog;
 
 
-internal sealed class ServerLevelTransitionGateway
+internal sealed class ServerLevelTransitionGateway(ServerSession session, WorldCoordinator worlds, ILogger logger)
 {
-    private readonly ServerSession session;
-    private readonly ILogger logger;
-    private readonly LevelTransitionInteraction transition;
-
-    public ServerLevelTransitionGateway(ServerSession session, ILogger logger)
-    {
-        this.session = session ?? throw new ArgumentNullException(nameof(session));
-        this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
-
-        this.transition = new LevelTransitionInteraction(
-            serverEnterLevel: this.EnterLevelAsync,
-            beginEpoch: this.session.BeginLevelEpoch,
-            guestsEnterLevel: this.NotifyGuestsAsync);
-    }
+    private readonly ServerSession session = session ?? throw new ArgumentNullException(nameof(session));
+    private readonly ILogger logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly LevelTransitionInteraction transition = new(worlds.EnterNextLevelAsync);
 
     public ValueTask<InteractionDispatch> GusetEnterNextLevelAsync(
         string connectionGuid,
@@ -93,40 +83,6 @@ internal sealed class ServerLevelTransitionGateway
     }
 
     private string[] Participants() => [.. this.session.ConnectedGuestIds];
-
-    private ValueTask EnterLevelAsync(
-        string levelId,
-        CancellationToken cancellationToken)
-    {
-        _ = cancellationToken;
-        return new ValueTask(this.session.Main.EnterNextLevel(levelId));
-    }
-
-    private ValueTask NotifyGuestsAsync(string levelId)
-    {
-        foreach (var guest in this.session.ConnectedGuests)
-        {
-            try
-            {
-                _ = guest.Guest.EnterNextLevel(levelId)
-                    .ContinueWith(
-                        t => this.logger.Warning(
-                            t.Exception,
-                            "EnterNextLevel RPC failed: {Guid}",
-                            guest.ConnectionGuid),
-                        TaskContinuationOptions.OnlyOnFaulted);
-            }
-            catch (Exception ex)
-            {
-                this.logger.Warning(
-                    ex,
-                    "EnterNextLevel dispatch failed: {Guid}",
-                    guest.ConnectionGuid);
-            }
-        }
-
-        return ValueTask.CompletedTask;
-    }
 
     private void LogDispatch(InteractionDispatch dispatch)
     {

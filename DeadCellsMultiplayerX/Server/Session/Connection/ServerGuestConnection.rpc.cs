@@ -145,20 +145,13 @@ internal sealed partial class ServerGuestConnection : IServerRPC
     {
         this.Session.VerifyGameThread();
         ObjectDisposedException.ThrowIf(this.IsDisposed || this.Session.IsDisposed, this);
-        return this.Session.LoadSavedGameAsync(data).WaitAsync(this.DisposeToken);
+        return this.worlds.LoadInitialGameAsync(data).WaitAsync(this.DisposeToken);
     }
 
-    public async Task<byte[]> DownloadSavedata()
+    public Task<byte[]> DownloadSavedata()
     {
-        await this.Session.GameContext;
         ObjectDisposedException.ThrowIf(this.IsDisposed || this.Session.IsDisposed, this);
-        while (string.IsNullOrEmpty(this.Main.SavePath))
-        {
-            await Task.Delay(1, this.DisposeToken).ConfigureAwait(false);
-            await this.Session.GameContext;
-            this.DisposeToken.ThrowIfCancellationRequested();
-        }
-        return await File.ReadAllBytesAsync(this.Main.SavePath, this.DisposeToken).ConfigureAwait(false);
+        return this.worlds.ReadSavedGameAsync(this.DisposeToken);
     }
 
     public Task<byte[]> RequestAreaInfo(IServerRPC.AreaInfoRequest request)

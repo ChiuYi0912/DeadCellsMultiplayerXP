@@ -1,4 +1,4 @@
-namespace DeadCellsMultiplayerX.Server.Session.Connection;
+﻿namespace DeadCellsMultiplayerX.Server.Session.Connection;
 
 using System.Diagnostics;
 using dc.en;
@@ -8,6 +8,7 @@ using DeadCellsMultiplayerX.Diagnostics;
 using DeadCellsMultiplayerX.Networking.Rpc.Contracts;
 using DeadCellsMultiplayerX.Networking.Transport;
 using DeadCellsMultiplayerX.Server.Integration.Events;
+using DeadCellsMultiplayerX.Server.World;
 using Microsoft.VisualStudio.Threading;
 using ModCore.Events;
 using ModCore.Modules;
@@ -16,21 +17,21 @@ using Serilog;
 using StreamJsonRpc;
 
 /// <summary>Owns one guest's identity, RPC, inner mux and accepted outer channel.</summary>
-internal sealed partial class ServerGuestConnection : IEventReceiver, IOnServerEnterNewLevel,
-    IDisposable, System.IAsyncDisposable
+internal sealed partial class ServerGuestConnection : IDisposable, System.IAsyncDisposable
 {
     private readonly Lock gate = new();
     private readonly CancellationTokenSource lifetime = new();
     private readonly TaskCompletionSource stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Stream stream;
     private readonly MultiplexingStream.Channel channel;
+    private readonly WorldCoordinator worlds;
+    private readonly List<Task> nextLevelNotifications = [];
     private JsonRpc? rpc;
     private MultiplexingStream? rpcMux;
     private TraceSource? traceSource;
     private Task? versionDisconnectTask;
     private Task? initialLevelNotification;
     private bool stopping;
-    private bool eventsRegistered;
 
     public ILogger Logger { get; }
     public CancellationToken DisposeToken { get; }
@@ -38,14 +39,14 @@ internal sealed partial class ServerGuestConnection : IEventReceiver, IOnServerE
     public string ConnectionGuid { get; }
     public GuestInfo GuestInfo { get; set; }
     public ServerSession Session { get; }
-    public ServerMainThread Main => this.Session.Main;
     public IGuestRPC Guest { get; private set; } = null!;
 
-    public ServerGuestConnection(ServerSession session, Stream stream,
+    public ServerGuestConnection(ServerSession session, WorldCoordinator worlds, Stream stream,
         MultiplexingStream.Channel channel, string connectionGuid)
     {
         session.VerifyGameThread();
         this.Session = session;
+        this.worlds = worlds;
         this.stream = stream;
         this.channel = channel;
         this.ConnectionGuid = connectionGuid;
@@ -59,7 +60,10 @@ internal sealed partial class ServerGuestConnection : IEventReceiver, IOnServerE
     {
         this.Session.VerifyGameThread();
         ObjectDisposedException.ThrowIf(this.IsDisposed || this.Session.IsDisposed, this);
-        if (this.rpc != null) throw new InvalidOperationException("Guest RPC is already initialized.");
+        if (this.rpc != null)
+        {
+            throw new InvalidOperationException("Guest RPC is already initialized.");
+        }
 
         var rpc = this.stream.CreateJsonRpc("server-guest", NetLogSession.CreateJsonRpcFailureListener("server-guest"),
             out var mux, out var trace);
@@ -70,8 +74,6 @@ internal sealed partial class ServerGuestConnection : IEventReceiver, IOnServerE
         this.Guest = rpc.Attach<IGuestRPC>();
         rpc.SynchronizationContext = this.Session.GameContext;
         rpc.Disconnected += this.Rpc_Disconnected;
-        EventSystem.AddReceiver(this);
-        this.eventsRegistered = true;
         ObjectDisposedException.ThrowIf(this.IsDisposed || this.Session.IsDisposed, this);
         rpc.StartListening();
         this.Logger.Information("Connected.");
@@ -79,7 +81,11 @@ internal sealed partial class ServerGuestConnection : IEventReceiver, IOnServerE
 
     private void Rpc_Disconnected(object? sender, JsonRpcDisconnectedEventArgs e)
     {
-        if (e.Reason == DisconnectedReason.LocallyDisposed || this.IsDisposed) return;
+        if (e.Reason == DisconnectedReason.LocallyDisposed || this.IsDisposed)
+        {
+            return;
+        }
+
         this.Logger.Error(e.Exception, "Abort connection: {Reason}: {Description}", e.Reason, e.Description);
         // Never await DispatchCompletion from inside an RPC callback.
         this.Dispose();
@@ -93,12 +99,17 @@ internal sealed partial class ServerGuestConnection : IEventReceiver, IOnServerE
     {
         lock (this.gate)
         {
-            if (this.stopping) return this.stopped.Task;
+            if (this.stopping)
+            {
+                return this.stopped.Task;
+            }
+
             this.stopping = true;
         }
         this.Cleanup(this.lifetime.Cancel, "connection cancellation");
         Task muxStop;
-        try { muxStop = this.rpcMux?.DisposeAsync().AsTask() ?? Task.CompletedTask; }
+        try
+        { muxStop = this.rpcMux?.DisposeAsync().AsTask() ?? Task.CompletedTask; }
         catch (Exception ex)
         {
             this.Logger.Warning(ex, "Guest RPC mux close failed");
@@ -121,22 +132,34 @@ internal sealed partial class ServerGuestConnection : IEventReceiver, IOnServerE
                 await this.ObserveAsync(rpc.Completion, "RPC listener").ConfigureAwait(false);
                 await this.ObserveAsync(rpc.DispatchCompletion, "RPC dispatch").ConfigureAwait(false);
             }
-            if (this.versionDisconnectTask != null)
-                await this.ObserveAsync(this.versionDisconnectTask, "version rejection").ConfigureAwait(false);
-            if (this.initialLevelNotification != null)
-                await this.ObserveAsync(this.initialLevelNotification, "initial level notification").ConfigureAwait(false);
+            await this.Session.GameContext;
+            this.Session.VerifyGameThread();
+            var versionRejection = this.versionDisconnectTask;
+            var initialNotification = this.initialLevelNotification;
+            var nextNotifications = this.nextLevelNotifications.ToArray();
+            if (versionRejection != null)
+            {
+                await this.ObserveAsync(versionRejection, "version rejection").ConfigureAwait(false);
+            }
+
+            if (initialNotification != null)
+            {
+                await this.ObserveAsync(initialNotification, "initial level notification").ConfigureAwait(false);
+            }
+
+            foreach (var notification in nextNotifications)
+            {
+                await this.ObserveAsync(notification, "next level notification").ConfigureAwait(false);
+            }
 
             await this.Session.GameContext;
             this.Session.VerifyGameThread();
             this.Cleanup(() => this.Session.RemoveGuest(this), "guest roster and ghost");
-            if (this.eventsRegistered)
-            {
-                this.Cleanup(() => EventSystem.RemoveReceiver(this), "guest game events");
-                this.eventsRegistered = false;
-            }
             await this.ObserveAsync(muxStop, "RPC mux shutdown").ConfigureAwait(false);
             if (this.rpcMux != null)
+            {
                 await this.ObserveAsync(this.rpcMux.Completion, "RPC mux completion").ConfigureAwait(false);
+            }
 
             await this.Session.GameContext;
             this.Session.ForgetStoppedConnection(this);
@@ -147,7 +170,7 @@ internal sealed partial class ServerGuestConnection : IEventReceiver, IOnServerE
         }
         finally
         {
-            if (this.rpc != null) this.rpc.Disconnected -= this.Rpc_Disconnected;
+            this.rpc?.Disconnected -= this.Rpc_Disconnected;
             this.Cleanup(() => this.traceSource?.Close(), "RPC trace");
             this.Cleanup(this.lifetime.Dispose, "connection cancellation source");
             this.stopped.TrySetResult();
@@ -156,7 +179,11 @@ internal sealed partial class ServerGuestConnection : IEventReceiver, IOnServerE
 
     public void PushWorldFrame(WorldFrame frame)
     {
-        if (this.IsDisposed || this.rpc?.IsDisposed != false) return;
+        if (this.IsDisposed || this.rpc?.IsDisposed != false)
+        {
+            return;
+        }
+
         try
         {
             _ = this.Guest.SyncWorldFrame(frame).ContinueWith(
@@ -169,32 +196,66 @@ internal sealed partial class ServerGuestConnection : IEventReceiver, IOnServerE
     public Task<ClientFrameBundle> RequestClientFrames(ClientFrameRangeRequest request)
         => this.Guest.RequestClientFrames(request);
 
-    void IOnServerEnterNewLevel.OnServerEnterNewLevel()
+    internal void NotifyInitialLevel(byte[] data)
     {
-        if (this.IsDisposed || this.Session.IsDisposed) return;
+        if (this.IsDisposed || this.Session.IsDisposed)
+        {
+            return;
+        }
+
         this.Session.VerifyGameThread();
-        Debug.Assert(this.Main.SavePath != null);
-        this.initialLevelNotification ??= this.NotifyInitialLevelAsync(File.ReadAllBytes(this.Main.SavePath));
+        this.initialLevelNotification ??= this.NotifyInitialLevelAsync(data);
         EventSystem.BroadcastEvent<IOnHeroInitDone, Hero>(Game.Instance.HeroInstance!);
     }
 
     private async Task NotifyInitialLevelAsync(byte[] data)
     {
-        try { await this.Guest.EnterNewLevel(data).WaitAsync(this.DisposeToken); }
+        try
+        {
+            await this.Guest.EnterNewLevel(data).WaitAsync(this.DisposeToken);
+        }
         catch (OperationCanceledException) when (this.IsDisposed) { }
         catch (Exception ex) { this.Logger.Warning(ex, "Initial level notification failed"); }
     }
 
+    internal void NotifyNextLevel(string levelId)
+    {
+        if (this.IsDisposed || this.Session.IsDisposed)
+        {
+            return;
+        }
+
+        this.Session.VerifyGameThread();
+        this.nextLevelNotifications.RemoveAll(task => task.IsCompleted);
+        this.nextLevelNotifications.Add(this.NotifyNextLevelAsync(levelId));
+    }
+
+    private async Task NotifyNextLevelAsync(string levelId)
+    {
+        try
+        {
+            await this.Guest.EnterNextLevel(levelId).WaitAsync(this.DisposeToken);
+        }
+        catch (OperationCanceledException) when (this.IsDisposed) { }
+        catch (Exception ex) { this.Logger.Warning(ex, "EnterNextLevel RPC failed: {Guid}", this.ConnectionGuid); }
+    }
+
     private async Task ObserveAsync(Task task, string operation)
     {
-        try { await task; }
+        try
+        {
+            await task;
+        }
         catch (OperationCanceledException) { }
         catch (Exception ex) { this.Logger.Debug(ex, "Guest {Operation} ended during shutdown", operation); }
     }
 
     private void Cleanup(Action cleanup, string resource)
     {
-        try { cleanup(); }
+        try
+        {
+            cleanup();
+        }
         catch (Exception ex) { this.Logger.Warning(ex, "Guest cleanup failed: {Resource}", resource); }
     }
 }

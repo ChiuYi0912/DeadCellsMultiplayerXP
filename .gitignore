@@ -364,3 +364,5 @@ FodyWeavers.xsd
 /DeadCellsMultiplayerX/Properties/launchSettings.json
 .vscode/settings.json
 .omo/
+docs/ServerWorld-W1.md
+docs/ServerWorld-W0.md
