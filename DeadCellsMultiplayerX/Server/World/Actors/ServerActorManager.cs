@@ -164,11 +164,15 @@ internal sealed class ServerActorManager : IServerEntityEventSource
     public void SyncTalismans() => this.spawns.SyncAll(this.world.Actors);
 
     /// <summary>
-    /// 取出本帧待广播的动作结果
+    /// 读取待广播的动作结果
     /// </summary>
-    public List<HeroOutcome> DrainOutcomes() => this.world.DrainEvents();
+    public List<HeroOutcome> PeekOutcomes() => this.world.PeekEvents();
+
+    public void CommitOutcomes(int count) => this.world.CommitEvents(count);
 
     /// <inheritdoc />
-    public IReadOnlyList<EntityEvent> DrainEntityEvents()
-        => this.mobEvents.Drain();
+    public IReadOnlyList<EntityEvent> PeekEntityEvents() => this.mobEvents.Peek();
+
+    /// <inheritdoc />
+    public void CommitEntityEvents(int count) => this.mobEvents.Commit(count);
 }

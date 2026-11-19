@@ -4,17 +4,16 @@ using DeadCellsMultiplayerX.Contracts.EntityEvents;
 using DeadCellsMultiplayerX.Contracts.Snapshots;
 using DeadCellsMultiplayerX.Server.Replication.Areas;
 using DeadCellsMultiplayerX.Server.Replication.Entities;
-using DeadCellsMultiplayerX.Server.Session.Connection;
 using DeadCellsMultiplayerX.Server.World.Actors;
 using Serilog;
 
 /// <summary>
-/// 服务端世界帧广播器
+/// 服务端世界帧构建器
 /// 每个 tick 组装一帧完整世界状态
-/// 写入历史环并广播给所有客户端
+/// 写入历史环，交由会话发送
 /// 同时为客户端补发请求提供历史帧和全量基线
 /// </summary>
-internal sealed class WorldFramePublisher
+internal sealed class WorldFrameBuilder
 {
     /// <summary>
     /// 发送间隔秒数，对应 30Hz
@@ -26,7 +25,7 @@ internal sealed class WorldFramePublisher
     /// </summary>
     private const int MAX_HISTORY = 128;
 
-    private static readonly ILogger Logger = Log.ForContext("SourceContext", "WorldFrameBroadcaster");
+    private static readonly ILogger Logger = Log.ForContext("SourceContext", "WorldFrameBuilder");
 
     /// <summary>
     /// 世界帧收集器
@@ -64,9 +63,9 @@ internal sealed class WorldFramePublisher
     private double accumulator;
 
     /// <summary>
-    /// 创建世界帧广播器
+    /// 创建世界帧构建器
     /// </summary>
-    public WorldFramePublisher(
+    public WorldFrameBuilder(
         ClientFrameCollector collector,
         EntityFrameBuilder entityPublisher,
         ServerActorManager ghosts,
@@ -102,9 +101,9 @@ internal sealed class WorldFramePublisher
     public long Sequence { get; private set; } = -1;
 
     /// <summary>
-    /// 已广播帧数
+    /// 已构建并提交的帧数
     /// </summary>
-    public int BroadcastFrames { get; private set; }
+    public int BuiltFrames { get; private set; }
 
     /// <summary>
     /// 补发请求服务次数
@@ -130,19 +129,19 @@ internal sealed class WorldFramePublisher
     }
 
     /// <summary>
-    /// 按发送间隔推进广播
+    /// 按发送间隔构建并提交一帧
     /// </summary>
-    public void Tick(double dt, long serverTimeMs, IReadOnlyList<ServerGuestConnection> guests)
+    public WorldFrame? Build(double dt, long serverTimeMs)
     {
         this.accumulator += dt;
         if (this.accumulator < SEND_INTERVAL_SECONDS)
         {
-            return;
+            return null;
         }
 
         this.accumulator -= SEND_INTERVAL_SECONDS;
 
-        this.Emit(serverTimeMs, guests);
+        return this.BuildFrame(serverTimeMs);
     }
 
     /// <summary>
@@ -215,7 +214,7 @@ internal sealed class WorldFramePublisher
     /// <summary>
     /// 从所有实体事件来源收集本帧事件
     /// </summary>
-    private List<EntityEvent> DrainEntityEvents()
+    private List<EntityEvent> CollectEntityEvents(List<(IServerEntityEventSource Source, int Count)> pending)
     {
         if (this.eventSources.Count == 0)
         {
@@ -225,41 +224,51 @@ internal sealed class WorldFramePublisher
         var result = new List<EntityEvent>();
         foreach (var source in this.eventSources)
         {
-            result.AddRange(source.DrainEntityEvents());
+            var events = source.PeekEntityEvents();
+            result.AddRange(events);
+            pending.Add((source, events.Count));
         }
 
         return result;
     }
 
     /// <summary>
-    /// 组装并广播一帧世界状态
+    /// 组装并提交一帧世界状态
     /// </summary>
-    private void Emit(long serverTimeMs, IReadOnlyList<ServerGuestConnection> guests)
+    private WorldFrame BuildFrame(long serverTimeMs)
     {
-        this.Sequence++;
-        this.BroadcastFrames++;
-
         this.ghosts.SyncTalismans();
 
         var entities = this.entityPublisher.Collect(serverTimeMs);
-
+        List<(IServerEntityEventSource Source, int Count)> pending = [];
         var frame = new WorldFrame
         {
             Epoch = this.Epoch,
-            Sequence = this.Sequence,
+            Sequence = this.Sequence + 1,
             ServerTimeMs = serverTimeMs,
             Heroes = [.. this.collector.GetActiveHeroDynamics()],
-            Spawned = this.collector.DrainSpawnChanges(),
-            Despawned = this.collector.DrainRemoved(),
+            Spawned = this.collector.GetSpawnChanges(),
+            Despawned = this.collector.GetRemoved(),
             Entities = entities.Entities,
             SpawnedEntities = entities.Spawned,
             DespawnedEntities = entities.Despawned,
-            HeroOutcomes = this.ghosts.DrainOutcomes(),
+            HeroOutcomes = this.ghosts.PeekOutcomes(),
             AreaAffects = this.areaAffects.Collect(serverTimeMs),
-            EntityEvents = this.DrainEntityEvents(),
+            EntityEvents = this.CollectEntityEvents(pending),
         };
 
-        if (this.BroadcastFrames == 1)
+        // Native reads finish before any queue is consumed.
+        this.entityPublisher.Commit(serverTimeMs, entities);
+        this.collector.CommitChanges(frame.Spawned.Count, frame.Despawned.Count);
+        this.ghosts.CommitOutcomes(frame.HeroOutcomes.Count);
+        foreach (var (source, count) in pending)
+        {
+            source.CommitEntityEvents(count);
+        }
+        this.Sequence = frame.Sequence;
+        this.BuiltFrames++;
+
+        if (this.BuiltFrames == 1)
         {
             Logger.Information(
                 "First world frame emitted: epoch={Epoch} seq={Sequence} heroes={Heroes}",
@@ -272,9 +281,6 @@ internal sealed class WorldFramePublisher
             this.history.RemoveRange(0, this.history.Count - MAX_HISTORY);
         }
 
-        for (var i = 0; i < guests.Count; i++)
-        {
-            guests[i].PushWorldFrame(frame);
-        }
+        return frame;
     }
 }

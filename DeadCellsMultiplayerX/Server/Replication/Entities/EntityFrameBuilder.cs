@@ -50,7 +50,6 @@ internal sealed class EntityFrameBuilder(
             if (!entry.SpawnBroadcast)
             {
                 result.Spawned.Add(entry.Spawn);
-                entry.SpawnBroadcast = true;
             }
 
             var dynamicState = handler.BuildDynamic(entry, serverTimeMs);
@@ -60,10 +59,25 @@ internal sealed class EntityFrameBuilder(
             }
         }
 
-        result.Despawned.AddRange(this.registry.DrainRemoved());
-        this.History.Record(serverTimeMs, result.Entities);
+        result.Despawned.AddRange(this.registry.GetRemoved());
 
         return result;
+    }
+
+    /// <summary>
+    /// 世界帧成功构建后，确认生成/移除数据并记录历史。
+    /// </summary>
+    public void Commit(long serverTimeMs, EntityPublishResult result)
+    {
+        foreach (var spawn in result.Spawned)
+        {
+            if (this.registry.TryGet(spawn.NetId, out var entry))
+            {
+                entry.SpawnBroadcast = true;
+            }
+        }
+        this.registry.CommitRemoved(result.Despawned);
+        this.History.Record(serverTimeMs, result.Entities);
     }
 
     /// <summary>

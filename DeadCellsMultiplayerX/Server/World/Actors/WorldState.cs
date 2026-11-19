@@ -130,8 +130,9 @@ internal sealed class WorldState
         => this.events.Record(outcome);
 
     /// <summary>
-    /// 取出本帧全部结果
+    /// 读取待广播的动作结果
     /// </summary>
-    public List<HeroOutcome> DrainEvents()
-        => this.events.Drain();
+    public List<HeroOutcome> PeekEvents() => this.events.Peek();
+
+    public void CommitEvents(int count) => this.events.Commit(count);
 }

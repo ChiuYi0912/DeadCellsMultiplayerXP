@@ -295,33 +295,22 @@ internal sealed class ClientFrameCollector
     }
 
     /// <summary>
-    /// 取出并清空静态数据变化
+    /// 读取待广播的静态数据
     /// </summary>
-    public List<HeroSpawn> DrainSpawnChanges()
-    {
-        if (this.pendingSpawnChanges.Count == 0)
-        {
-            return [];
-        }
-
-        var result = this.pendingSpawnChanges.ToList();
-        this.pendingSpawnChanges.Clear();
-        return result;
-    }
+    public List<HeroSpawn> GetSpawnChanges() => [.. this.pendingSpawnChanges];
 
     /// <summary>
-    /// 取出并清空待移除 GUID
+    /// 读取待广播的移除 GUID
     /// </summary>
-    public List<string> DrainRemoved()
-    {
-        if (this.pendingRemoved.Count == 0)
-        {
-            return [];
-        }
+    public List<string> GetRemoved() => [.. this.pendingRemoved];
 
-        var result = this.pendingRemoved.ToList();
-        this.pendingRemoved.Clear();
-        return result;
+    /// <summary>
+    /// 只消费本次成功构建帧包含的变化。
+    /// </summary>
+    public void CommitChanges(int spawnCount, int removedCount)
+    {
+        this.pendingSpawnChanges.RemoveRange(0, spawnCount);
+        this.pendingRemoved.RemoveRange(0, removedCount);
     }
 
     /// <summary>

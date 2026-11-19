@@ -25,7 +25,7 @@ internal sealed partial class ServerGuestConnection : IServerRPC
             ServerMajor = ProtocolVersion.Major,
             ServerMinor = ProtocolVersion.Minor,
             Capabilities = ProtocolVersion.SupportedCapabilities,
-            Epoch = this.Session.Broadcaster.Epoch,
+            Epoch = this.Session.Frames.Epoch,
         };
 
         if (request == null)
@@ -258,14 +258,14 @@ internal sealed partial class ServerGuestConnection : IServerRPC
     {
         this.Session.VerifyGameThread();
         ObjectDisposedException.ThrowIf(this.IsDisposed || this.Session.IsDisposed, this);
-        return Task.FromResult(this.Session.Broadcaster.GetFrames(request, this.Session.CurrentTimeStamp));
+        return Task.FromResult(this.Session.Frames.GetFrames(request, this.Session.CurrentTimeStamp));
     }
 
     public Task<WorldResync> RequestWorldResync(int knownEpoch)
     {
         this.Session.VerifyGameThread();
         ObjectDisposedException.ThrowIf(this.IsDisposed || this.Session.IsDisposed, this);
-        return Task.FromResult(this.Session.Broadcaster.BuildResync(this.Session.CurrentTimeStamp));
+        return Task.FromResult(this.Session.Frames.BuildResync(this.Session.CurrentTimeStamp));
     }
 
 }

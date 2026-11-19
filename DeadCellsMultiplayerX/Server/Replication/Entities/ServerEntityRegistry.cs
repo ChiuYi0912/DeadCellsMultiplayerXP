@@ -138,16 +138,14 @@ internal sealed class ServerEntityRegistry
         return false;
     }
 
-    public List<EntityDespawn> DrainRemoved()
-    {
-        if (this.removed.Count == 0)
-        {
-            return [];
-        }
+    public List<EntityDespawn> GetRemoved() => new(this.removed.Values);
 
-        var result = new List<EntityDespawn>(this.removed.Values);
-        this.removed.Clear();
-        return result;
+    public void CommitRemoved(IReadOnlyList<EntityDespawn> despawned)
+    {
+        foreach (var entry in despawned)
+        {
+            this.removed.Remove(entry.NetId);
+        }
     }
 
     /// <summary>

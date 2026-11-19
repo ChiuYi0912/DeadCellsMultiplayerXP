@@ -21,17 +21,10 @@ internal sealed class ServerMobEventOutbox : IServerMobEventOutbox
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<MobModifierEvent> Drain()
-    {
-        if (this.pending.Count == 0)
-        {
-            return [];
-        }
+    public IReadOnlyList<MobModifierEvent> Peek() => this.pending.ToArray();
 
-        var result = this.pending.ToArray();
-        this.pending.Clear();
-        return result;
-    }
+    /// <inheritdoc />
+    public void Commit(int count) => this.pending.RemoveRange(0, count);
 
     /// <inheritdoc />
     public void Clear() => this.pending.Clear();

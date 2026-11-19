@@ -78,7 +78,7 @@ internal sealed class ServerSession : IEventReceiver, IOnFrameUpdate,
     public ServerEntityHandlerRegistry EntityHandlers { get; } = new();
     public ServerLevelAreaAffectRegistry AreaAffects { get; } = new();
     public EntityFrameBuilder EntityPublisher { get; }
-    public WorldFramePublisher Broadcaster { get; }
+    public WorldFrameBuilder Frames { get; }
     public ServerActorManager Ghosts { get; }
 
     public ServerSession()
@@ -89,7 +89,7 @@ internal sealed class ServerSession : IEventReceiver, IOnFrameUpdate,
         this.EntityPublisher = new EntityFrameBuilder(this.Entities, this.EntityHandlers);
         this.Ghosts = new ServerActorManager(this);
         this.ClientFrames.CommandsReceived += this.Ghosts.HandleCommands;
-        this.Broadcaster = new WorldFramePublisher(this.ClientFrames, this.EntityPublisher, this.Ghosts, this.AreaAffects);
+        this.Frames = new WorldFrameBuilder(this.ClientFrames, this.EntityPublisher, this.Ghosts, this.AreaAffects);
         EventSystem.AddReceiver(this);
         this.eventsRegistered = true;
     }
@@ -238,7 +238,14 @@ internal sealed class ServerSession : IEventReceiver, IOnFrameUpdate,
         {
             this.ClientFrames.Tick(this.CurrentTimeStamp);
             this.Ghosts.Tick(this.CurrentTimeStamp, this.ConnectedGuestIds);
-            this.Broadcaster.Tick(dt, this.CurrentTimeStamp, [.. this.guests.Values]);
+            var frame = this.Frames.Build(dt, this.CurrentTimeStamp);
+            if (frame != null)
+            {
+                foreach (var guest in this.guests.Values.ToArray())
+                {
+                    guest.PushWorldFrame(frame);
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -252,8 +259,8 @@ internal sealed class ServerSession : IEventReceiver, IOnFrameUpdate,
         ObjectDisposedException.ThrowIf(this.IsDisposed, this);
         // Native mobs are already registered here; preserve them during epoch commit.
         this.AreaAffects.Clear();
-        this.Broadcaster.BeginEpoch(this.CurrentTimeStamp);
-        this.Ghosts.BeginEpoch(this.Broadcaster.Epoch);
+        this.Frames.BeginEpoch(this.CurrentTimeStamp);
+        this.Ghosts.BeginEpoch(this.Frames.Epoch);
     }
 
     // Synchronous callers request shutdown; asynchronous callers join the same completion.
@@ -313,7 +320,7 @@ internal sealed class ServerSession : IEventReceiver, IOnFrameUpdate,
             this.ClientFrames.CommandsReceived -= this.Ghosts.HandleCommands;
             // Native teardown still needs entity lookup and the server hooks.
             this.Cleanup(this.Ghosts.Clear, "world ghosts and mob modifiers");
-            this.Cleanup(this.Broadcaster.Clear, "world frame history");
+            this.Cleanup(this.Frames.Clear, "world frame history");
             this.Cleanup(this.ClientFrames.Clear, "client frames");
             this.Cleanup(this.Entities.ResetWorld, "entity registry");
             this.Cleanup(this.AreaAffects.Clear, "area affects");

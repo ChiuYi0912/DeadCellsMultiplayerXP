@@ -50,7 +50,7 @@ internal sealed class ZombieServerModifier(
             this.attacks.SubmitSkill(
                 new MobModifierEvent
                 {
-                    Epoch = this.session.Broadcaster.Epoch,
+                    Epoch = this.session.Frames.Epoch,
                     NetId = netId,
                     EntityKind = EntityKind.Mob,
                     Kind = MobModifierEventKind.ActionStarted,

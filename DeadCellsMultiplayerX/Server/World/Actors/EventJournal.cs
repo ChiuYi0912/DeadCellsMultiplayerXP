@@ -16,19 +16,12 @@ internal sealed class EventJournal
         => this.pending.Add(outcome);
 
     /// <summary>
-    /// 取出本帧全部结果并清空
+    /// 读取待广播结果，不消费队列
     /// </summary>
-    public List<HeroOutcome> Drain()
-    {
-        if (this.pending.Count == 0)
-        {
-            return [];
-        }
+    public List<HeroOutcome> Peek() => [.. this.pending];
 
-        var result = new List<HeroOutcome>(this.pending);
-        this.pending.Clear();
-        return result;
-    }
+    /// <summary>消费成功构建帧包含的结果。</summary>
+    public void Commit(int count) => this.pending.RemoveRange(0, count);
 
     /// <summary>
     /// 世界重置时丢弃未广播事件
