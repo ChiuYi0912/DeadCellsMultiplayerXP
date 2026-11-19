@@ -142,7 +142,7 @@ internal sealed class ServerSession : IEventReceiver, IOnFrameUpdate,
         try
         {
             this.guests.Add(guestGuid, guest);
-            this.worlds!.CurrentWorld!.AddGuest(guestGuid, guest.RequestClientFrames);
+            this.worlds!.CurrentWorld?.AddGuest(guestGuid, guest.RequestClientFrames);
             guest.Start();
             this.Logger.Information("Client Enter : {Guid}", guestGuid);
         }

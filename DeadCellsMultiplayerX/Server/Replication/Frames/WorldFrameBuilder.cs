@@ -118,9 +118,9 @@ internal sealed class WorldFrameBuilder
     /// <summary>
     /// 世界重置 递增 epoch 序号归零 清空历史与收集器旧世界状态
     /// </summary>
-    public void BeginEpoch(long serverTimeMs)
+    public void BeginEpoch(int epoch)
     {
-        this.Epoch++;
+        this.Epoch = epoch;
         this.Sequence = -1;
         this.accumulator = 0;
         this.history.Clear();

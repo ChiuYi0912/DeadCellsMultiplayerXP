@@ -14,8 +14,12 @@ internal sealed class ServerWorld : IDisposable
     private readonly Thread gameThread = Thread.CurrentThread;
     private readonly Func<long> getTime;
     private readonly ILogger logger = Log.ForContext<ServerWorld>();
+    private readonly CancellationTokenSource lifetime = new();
+    private readonly CancellationToken token;
 
     public bool IsDisposed { get; private set; }
+    public bool IsRunning { get; private set; }
+    public int Epoch { get; }
     public ClientFrameCollector ClientFrames { get; } = new();
     public ServerEntityRegistry Entities { get; } = new();
     private ServerEntityHandlerRegistry EntityHandlers { get; } = new();
@@ -24,21 +28,26 @@ internal sealed class ServerWorld : IDisposable
     public WorldFrameBuilder Frames { get; }
     public ServerActorManager Ghosts { get; }
 
-    public ServerWorld(Func<long> getTime)
+    public ServerWorld(Func<long> getTime, int epoch)
     {
         this.getTime = getTime;
+        this.Epoch = epoch;
+        this.token = this.lifetime.Token;
         this.EntityHandlers.Register(new ServerMobEntityHandler(this.Entities));
         this.EntityBuilder = new(this.Entities, this.EntityHandlers);
         this.Ghosts = new(this.ClientFrames, this.Entities, this.EntityBuilder.History,
             getTime, () => this.ClientFrames.Epoch);
         this.ClientFrames.CommandsReceived += this.Ghosts.HandleCommands;
         this.Frames = new(this.ClientFrames, this.EntityBuilder, this.Ghosts, this.AreaAffects);
+        // Initialize before native creation registers entities and attaches modifiers.
+        this.Frames.BeginEpoch(epoch);
+        this.Ghosts.BeginEpoch(epoch);
     }
 
     public void AddGuest(string guid, Func<ClientFrameRangeRequest, Task<ClientFrameBundle>> requestFrames)
     {
         this.VerifyActive();
-        this.ClientFrames.Register(guid, requestFrames);
+        this.ClientFrames.Register(guid, request => requestFrames(request).WaitAsync(this.token));
     }
 
     public void RemoveGuest(string guid)
@@ -51,19 +60,36 @@ internal sealed class ServerWorld : IDisposable
     public WorldFrame? Tick(double dt, IReadOnlyCollection<string> guests)
     {
         this.VerifyActive();
+        if (!this.IsRunning)
+        {
+            return null;
+        }
         var now = this.getTime();
         this.ClientFrames.Tick(now);
         this.Ghosts.Tick(now, guests);
         return this.Frames.Build(dt, now);
     }
 
-    public void BeginLevelEpoch()
+    public void Start()
     {
         this.VerifyActive();
-        // Keep the existing reset semantics until per-level replacement is implemented.
-        this.AreaAffects.Clear();
-        this.Frames.BeginEpoch(this.getTime());
-        this.Ghosts.BeginEpoch(this.Frames.Epoch);
+        this.IsRunning = true;
+    }
+
+    public void Stop()
+    {
+        this.VerifyGameThread();
+        this.IsRunning = false;
+    }
+
+    public void AcceptFrame(string guid, ClientWorldFrame frame)
+    {
+        this.VerifyActive();
+        if (this.IsRunning && frame != null && frame.Epoch == this.Epoch)
+        {
+            this.ClientFrames.OnFrame(guid, frame);
+        }
+
     }
 
     private void VerifyActive()
@@ -75,14 +101,23 @@ internal sealed class ServerWorld : IDisposable
     private void VerifyGameThread()
     {
         if (Thread.CurrentThread != this.gameThread)
+        {
+
             throw new InvalidOperationException("Server world must be accessed on the game thread.");
+        }
+
     }
 
     public void Dispose()
     {
         this.VerifyGameThread();
-        if (this.IsDisposed) return;
+        if (this.IsDisposed)
+        {
+            return;
+        }
         this.IsDisposed = true;
+        this.IsRunning = false;
+        this.Cleanup(this.lifetime.Cancel, "world cancellation");
         this.ClientFrames.CommandsReceived -= this.Ghosts.HandleCommands;
         // Hooks still need entity lookup while native proxies and modifiers detach.
         this.Cleanup(this.Ghosts.Clear, "ghosts and mob modifiers");
@@ -90,11 +125,13 @@ internal sealed class ServerWorld : IDisposable
         this.Cleanup(this.ClientFrames.Clear, "client frames");
         this.Cleanup(this.Entities.ResetWorld, "entity registry");
         this.Cleanup(this.AreaAffects.Clear, "area affects");
+        this.lifetime.Dispose();
     }
 
     private void Cleanup(Action cleanup, string resource)
     {
-        try { cleanup(); }
+        try
+        { cleanup(); }
         catch (Exception ex) { this.logger.Warning(ex, "World cleanup failed: {Resource}", resource); }
     }
 }

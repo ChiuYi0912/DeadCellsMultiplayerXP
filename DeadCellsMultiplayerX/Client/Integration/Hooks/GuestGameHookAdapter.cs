@@ -1,16 +1,14 @@
 namespace DeadCellsMultiplayerX.Client.Integration.Hooks;
 
 using dc;
-using dc.achievements;
 using dc.cine;
 using dc.en;
-using dc.hl.types;
 using dc.level;
 using dc.pr;
 using dc.tool;
 using DeadCellsMultiplayerX.Client.Integration.Events;
 using DeadCellsMultiplayerX.Client.UI.DebugTools;
-using HashlinkNET.Native.Impl;
+using DeadCellsMultiplayerX.Engine.Adapters.Levels;
 using HaxeProxy.Runtime;
 using ModCore.Events;
 using ModCore.Utilities;
@@ -146,78 +144,8 @@ internal sealed class GuestGameHookAdapter(
     }
 
     public static void LevelTransition_loadNewLevel(
-           Hook_LevelTransition.orig_loadNewLevel orig, LevelTransition self)
-    {
-        if (self.heroPosAfterBossRuneReload != null)
-        {
-            var seed = Game.Class.ME.curLevel.map?.seed;
-            Game.Class.ME.loadMainLevel(self, self.mainId, Ref<bool>.In(true), seed);
-        }
-        else if (self.mainId != null)
-        {
-            Game.Class.ME.loadMainLevel(self, self.mainId, default, null);
-        }
-        else
-        {
-            Game.Class.ME.activateSubLevel(self.map, self.linkId,
-                Ref<bool>.In(true), Ref<bool>.In(self.playAfterZDoorCine));
-        }
-
-        Lib_std.gc_major.Invoke();
-
-        if (self.get_isADlcPLevel())
-        {
-            self.onEnteredLevel ??= new HlAction(() => { });
-#pragma warning disable CA1806 // 不要忽略方法结果
-            self.onEnteredLevel += () => new PurpleLevelIntro(self.mainId, Game.Class.ME.hero);
-#pragma warning restore CA1806 // 不要忽略方法结果
-        }
-
-        Main.Class.ME.fadeOut(Ref<double>.In(self.multFade));
-        self.afterTransitionCine();
-        if (self.walk == null && self.jump == null && self.climb == null && self.onEnteredLevel != null)
-        {
-            self.onEnteredLevel.Invoke();
-        }
-
-        if (self.heroPosAfterBossRuneReload != null)
-        {
-            var flaskRoom = FindFlaskRoom(Game.Class.ME.curLevel.map?.rooms!);
-            if (flaskRoom != null)
-            {
-                Game.Class.ME.hero.setPosCase(
-                    flaskRoom.x + self.heroPosAfterBossRuneReload.cx,
-                    flaskRoom.y + self.heroPosAfterBossRuneReload.cy, null!, null!);
-                Game.Class.ME.curLevel.afterBossRuneReload();
-            }
-        }
-
-        if (self.giveGentlemanAchievement)
-        {
-            Achievements.Class.setAchievement(new EAchievement.FEAT_PRISON_NOBREAK_DOOR(), default);
-        }
-
-        self.onLoad?.Invoke();
-    }
-
-    private static Room FindFlaskRoom(ArrayObj rooms)
-    {
-        if (rooms == null)
-        {
-            return null!;
-        }
-
-        for (var i = 0; i < rooms.length; i++)
-        {
-            Room room = rooms.getDyn(i);
-            if (room != null && room.rType.ToString() == "FlaskRoom")
-            {
-                return room;
-            }
-        }
-        return null!;
-    }
-
+        Hook_LevelTransition.orig_loadNewLevel orig, LevelTransition self)
+        => NativeLevelTransition.Load(self);
 
     private async Task SubmitVoteAsync(string levelId)
     {

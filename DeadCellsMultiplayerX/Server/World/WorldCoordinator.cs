@@ -24,8 +24,11 @@ internal sealed class WorldCoordinator : IDisposable, System.IAsyncDisposable
     private Task? transitionTask;
     private Task? activeOperation;
     private TaskCompletionSource? stopped;
+    private TaskCompletionSource worldReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private string? targetLevelId;
 
     public ServerWorld? CurrentWorld { get; private set; }
+    public int Epoch { get; private set; }
 
     public WorldCoordinator(ServerSession session, string savePath)
     {
@@ -35,7 +38,6 @@ internal sealed class WorldCoordinator : IDisposable, System.IAsyncDisposable
         this.loader = new(session.GameContext, Thread.CurrentThread, savePath);
         this.lifetime = CancellationTokenSource.CreateLinkedTokenSource(session.DisposeToken);
         this.token = this.lifetime.Token;
-        this.CurrentWorld = new(() => session.CurrentTimeStamp);
     }
 
     public Task LoadInitialGameAsync(byte[] data)
@@ -72,6 +74,9 @@ internal sealed class WorldCoordinator : IDisposable, System.IAsyncDisposable
 
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         this.activeOperation = this.transitionTask = completion.Task;
+        this.targetLevelId = levelId;
+        this.CurrentWorld?.Stop();
+        this.worldReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
         // Once accepted, only the coordinator lifetime cancels native work, not its caller's wait.
         _ = this.CompleteOperationAsync(this.EnterNextLevelCoreAsync(levelId), completion);
         return new(completion.Task);
@@ -82,7 +87,7 @@ internal sealed class WorldCoordinator : IDisposable, System.IAsyncDisposable
         var savedGame = await this.loader.LoadSavedGameAsync(data, this.token).ConfigureAwait(false);
         await this.session.GameContext;
         this.ThrowIfStopping();
-        this.CurrentWorld!.BeginLevelEpoch();
+        this.StartWorld();
         this.ThrowIfStopping();
         this.session.NotifyInitialLevel(savedGame);
         this.ThrowIfStopping();
@@ -94,7 +99,7 @@ internal sealed class WorldCoordinator : IDisposable, System.IAsyncDisposable
         await this.loader.EnterNextLevelAsync(levelId, this.token);
         await this.session.GameContext;
         this.ThrowIfStopping();
-        this.CurrentWorld!.BeginLevelEpoch();
+        this.StartWorld();
         this.ThrowIfStopping();
         this.session.NotifyNextLevel(levelId);
         this.ThrowIfStopping();
@@ -122,16 +127,49 @@ internal sealed class WorldCoordinator : IDisposable, System.IAsyncDisposable
         }
     }
 
-    internal void OnMainLevelLoaded(Game game, LevelTransition transition, string levelId)
+    internal void OnLevelLoading(LevelTransition transition)
     {
         this.session.VerifyGameThread();
-        if (this.token.IsCancellationRequested || this.activeOperation?.IsCompleted != false)
+        if (this.token.IsCancellationRequested || this.activeOperation?.IsCompleted != false) return;
+        // Sub-level activation keeps the current world; extend this branch when synchronized.
+        if (transition.mainId == null && transition.heroPosAfterBossRuneReload == null) return;
+        var levelId = transition.mainId?.ToString()
+            ?? Game.Class.ME.curLevel.map.id.ToString();
+        if (this.targetLevelId != null && this.targetLevelId != levelId)
+            throw new InvalidOperationException("Native level does not match the requested target.");
+        this.ReleaseWorld();
+        this.ThrowIfStopping();
+        this.CurrentWorld = new(() => this.session.CurrentTimeStamp, ++this.Epoch);
+        foreach (var guest in this.session.ConnectedGuests)
+            this.CurrentWorld.AddGuest(guest.ConnectionGuid, guest.RequestClientFrames);
+        this.loader.OnLevelLoading(transition, levelId);
+    }
+
+    private void StartWorld()
+    {
+        var world = this.CurrentWorld ?? throw new InvalidOperationException("Native loading did not create a world.");
+        world.Start();
+        this.targetLevelId = null;
+        this.worldReady.TrySetResult();
+    }
+
+    public async Task<ServerWorld> WaitForWorldAsync(CancellationToken cancellationToken)
+    {
+        using var wait = CancellationTokenSource.CreateLinkedTokenSource(this.token, cancellationToken);
+        while (true)
         {
-            return;
+            await this.session.GameContext;
+            wait.Token.ThrowIfCancellationRequested();
+            if (this.CurrentWorld is { IsRunning: true } world) return world;
+            await this.worldReady.Task.WaitAsync(wait.Token).ConfigureAwait(false);
         }
+    }
 
-
-        this.loader.OnMainLevelLoaded(game, transition, levelId);
+    private void ReleaseWorld()
+    {
+        // Keep lookup alive for reentrant native cleanup; detach before native level disposal.
+        this.CurrentWorld?.Dispose();
+        this.CurrentWorld = null;
     }
 
     public async Task<byte[]> ReadSavedGameAsync(CancellationToken cancellationToken)
@@ -204,9 +242,9 @@ internal sealed class WorldCoordinator : IDisposable, System.IAsyncDisposable
             // RPC dispatch and connection removal must finish before native world cleanup.
             await this.session.Completion;
             await this.session.GameContext;
-            this.loader.ResetObservation();
-            this.CurrentWorld?.Dispose();
-            this.CurrentWorld = null;
+            this.loader.Dispose();
+            this.ReleaseWorld();
+            this.targetLevelId = null;
         }
         catch (Exception ex) { this.logger.Warning(ex, "World coordinator shutdown failed"); }
         finally

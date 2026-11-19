@@ -25,7 +25,7 @@ internal sealed partial class ServerGuestConnection : IServerRPC
             ServerMajor = ProtocolVersion.Major,
             ServerMinor = ProtocolVersion.Minor,
             Capabilities = ProtocolVersion.SupportedCapabilities,
-            Epoch = this.worlds.CurrentWorld!.Frames.Epoch,
+            Epoch = this.worlds.Epoch,
         };
 
         if (request == null)
@@ -250,22 +250,36 @@ internal sealed partial class ServerGuestConnection : IServerRPC
         {
             return Task.CompletedTask;
         }
-        this.worlds.CurrentWorld!.ClientFrames.OnFrame(this.ConnectionGuid, frame);
+        this.worlds.CurrentWorld?.AcceptFrame(this.ConnectionGuid, frame);
         return Task.CompletedTask;
     }
 
-    public Task<WorldFrameBundle> RequestWorldFrames(WorldFrameRangeRequest request)
+    public async Task<WorldFrameBundle> RequestWorldFrames(WorldFrameRangeRequest request)
     {
         this.Session.VerifyGameThread();
         ObjectDisposedException.ThrowIf(this.IsDisposed || this.Session.IsDisposed, this);
-        return Task.FromResult(this.worlds.CurrentWorld!.Frames.GetFrames(request, this.Session.CurrentTimeStamp));
+        while (true)
+        {
+            var world = await this.worlds.WaitForWorldAsync(this.DisposeToken);
+            await this.Session.GameContext;
+            this.DisposeToken.ThrowIfCancellationRequested();
+            if (!ReferenceEquals(world, this.worlds.CurrentWorld) || !world.IsRunning) continue;
+            return world.Frames.GetFrames(request, this.Session.CurrentTimeStamp);
+        }
     }
 
-    public Task<WorldResync> RequestWorldResync(int knownEpoch)
+    public async Task<WorldResync> RequestWorldResync(int knownEpoch)
     {
         this.Session.VerifyGameThread();
         ObjectDisposedException.ThrowIf(this.IsDisposed || this.Session.IsDisposed, this);
-        return Task.FromResult(this.worlds.CurrentWorld!.Frames.BuildResync(this.Session.CurrentTimeStamp));
+        while (true)
+        {
+            var world = await this.worlds.WaitForWorldAsync(this.DisposeToken);
+            await this.Session.GameContext;
+            this.DisposeToken.ThrowIfCancellationRequested();
+            if (!ReferenceEquals(world, this.worlds.CurrentWorld) || !world.IsRunning) continue;
+            return world.Frames.BuildResync(this.Session.CurrentTimeStamp);
+        }
     }
 
 }

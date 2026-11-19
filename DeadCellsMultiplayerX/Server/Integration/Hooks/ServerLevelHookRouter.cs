@@ -2,11 +2,10 @@ namespace DeadCellsMultiplayerX.Server.Integration.Hooks;
 
 using dc.cine;
 using dc.hl.types;
-using dc.pr;
 using dc.tool;
 using DeadCellsMultiplayerX.Engine.Hooks.Server;
+using DeadCellsMultiplayerX.Engine.Adapters.Levels;
 using DeadCellsMultiplayerX.Server.Core;
-using HaxeProxy.Runtime;
 
 /// <summary>
 /// 转交主关卡加载完成通知，并登记服务端运行时创建的动态区域。
@@ -15,11 +14,10 @@ internal sealed class ServerLevelHookRouter(ServerMain server) : IServerLevelHoo
 {
     private readonly ServerMain server = server;
 
-    public void OnLoadMainLevel(Hook_Game.orig_loadMainLevel orig, Game self,
-        LevelTransition transition, dc.String levelId, Ref<bool> reload, int? seed)
+    public void OnLoadNewLevel(Hook_LevelTransition.orig_loadNewLevel orig, LevelTransition self)
     {
-        orig(self, transition, levelId, reload, seed);
-        this.server.Worlds?.OnMainLevelLoaded(self, transition, levelId.ToString());
+        this.server.Worlds?.OnLevelLoading(self);
+        NativeLevelTransition.Load(self);
     }
 
     public void OnAreaAffectInit(

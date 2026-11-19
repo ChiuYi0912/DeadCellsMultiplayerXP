@@ -9,12 +9,26 @@ using Serilog;
 
 /// <summary>Performs native loading and saving; cancellation and operation ownership belong to WorldCoordinator.</summary>
 internal sealed class ServerGameLoader(
-    SynchronizationContext gameContext, Thread gameThread, string savePath)
+    SynchronizationContext gameContext, Thread gameThread, string savePath) : IDisposable
 {
     private readonly ILogger logger = Log.ForContext<ServerGameLoader>();
-    private Game? loadedGame;
-    private LevelTransition? loadedTransition;
-    private string? loadedLevelId;
+    private Game? enteredGame;
+    private string? enteredLevelId;
+    private ServerLevelEntrySubscription? entry;
+    private LevelTransition? enteredTransition;
+
+    internal void OnLevelLoading(LevelTransition transition, string levelId)
+    {
+        this.VerifyGameThread();
+        this.ResetObservation();
+        this.entry = new(transition, () =>
+        {
+            this.VerifyGameThread();
+            this.enteredGame = Game.Class.ME;
+            this.enteredTransition = transition;
+            this.enteredLevelId = levelId;
+        });
+    }
 
     public async Task<byte[]> LoadSavedGameAsync(byte[] data, CancellationToken cancellationToken)
     {
@@ -52,21 +66,17 @@ internal sealed class ServerGameLoader(
         this.logger.Information("Server entered next level: {LevelId}", levelId);
     }
 
-    internal void OnMainLevelLoaded(Game game, LevelTransition transition, string levelId)
-    {
-        this.VerifyGameThread();
-        this.loadedGame = game;
-        this.loadedTransition = transition;
-        this.loadedLevelId = levelId;
-    }
-
     internal void ResetObservation()
     {
         this.VerifyGameThread();
-        this.loadedGame = null;
-        this.loadedTransition = null;
-        this.loadedLevelId = null;
+        this.enteredGame = null;
+        this.enteredLevelId = null;
+        this.enteredTransition = null;
+        this.entry?.Dispose();
+        this.entry = null;
     }
+
+    public void Dispose() => this.ResetObservation();
 
     private async Task WaitForGameReadyAsync(
         LevelTransition? expectedTransition, string? expectedLevelId, CancellationToken cancellationToken)
@@ -78,12 +88,12 @@ internal sealed class ServerGameLoader(
             this.VerifyGameThread();
             cancellationToken.ThrowIfCancellationRequested();
             var game = Game.Class.ME;
-            // W0: native loading may finish before Hero.initDone; Game/Hero may be reused.
+            // Entry identifies this operation; native Hero initialization can finish later.
             if (game?.curLevel == null || game.subLevels == null
                 || game.hero == null || game.hero.destroyed || !game.hero.initDone
-                || Main.Class.ME.isLoading || !ReferenceEquals(game, this.loadedGame)
-                || (expectedTransition != null && !ReferenceEquals(expectedTransition, this.loadedTransition))
-                || (expectedLevelId != null && !string.Equals(expectedLevelId, this.loadedLevelId, StringComparison.Ordinal)))
+                || Main.Class.ME.isLoading || !ReferenceEquals(game, this.enteredGame)
+                || (expectedTransition != null && !ReferenceEquals(expectedTransition, this.enteredTransition))
+                || (expectedLevelId != null && !string.Equals(expectedLevelId, this.enteredLevelId, StringComparison.Ordinal)))
             {
                 continue;
             }

@@ -1,7 +1,7 @@
 namespace DeadCellsMultiplayerX.Engine.Hooks.Server;
 
 using dc.tool;
-using dc.pr;
+using dc.cine;
 using DeadCellsMultiplayerX.Engine.Hooks.Shared;
 
 /// <summary>
@@ -15,8 +15,8 @@ internal static class ServerLevelHookBinding
 
         var group = new HookGroup();
         group.Add(new HookLease(() => Hook_LevelAreaAffect.init -= sink.OnAreaAffectInit));
-        group.Subscribe(() => Hook_Game.loadMainLevel += sink.OnLoadMainLevel,
-            () => Hook_Game.loadMainLevel -= sink.OnLoadMainLevel);
+        group.Subscribe(() => Hook_LevelTransition.loadNewLevel += sink.OnLoadNewLevel,
+            () => Hook_LevelTransition.loadNewLevel -= sink.OnLoadNewLevel);
         return group;
     }
 }
