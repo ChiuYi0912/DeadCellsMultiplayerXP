@@ -218,7 +218,7 @@ internal sealed partial class ServerGuestConnection : IDisposable, System.IAsync
         catch (Exception ex) { this.Logger.Warning(ex, "Initial level notification failed"); }
     }
 
-    internal void NotifyNextLevel(string levelId)
+    internal void NotifyNextLevel(LevelTransitionCommand command)
     {
         if (this.IsDisposed || this.Session.IsDisposed)
         {
@@ -227,14 +227,14 @@ internal sealed partial class ServerGuestConnection : IDisposable, System.IAsync
 
         this.Session.VerifyGameThread();
         this.nextLevelNotifications.RemoveAll(task => task.IsCompleted);
-        this.nextLevelNotifications.Add(this.NotifyNextLevelAsync(levelId));
+        this.nextLevelNotifications.Add(this.NotifyNextLevelAsync(command));
     }
 
-    private async Task NotifyNextLevelAsync(string levelId)
+    private async Task NotifyNextLevelAsync(LevelTransitionCommand command)
     {
         try
         {
-            await this.Guest.EnterNextLevel(levelId).WaitAsync(this.DisposeToken);
+            await this.Guest.EnterNextLevel(command).WaitAsync(this.DisposeToken);
         }
         catch (OperationCanceledException) when (this.IsDisposed) { }
         catch (Exception ex) { this.Logger.Warning(ex, "EnterNextLevel RPC failed: {Guid}", this.ConnectionGuid); }

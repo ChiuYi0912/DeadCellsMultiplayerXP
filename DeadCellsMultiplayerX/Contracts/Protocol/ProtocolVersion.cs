@@ -2,7 +2,7 @@ namespace DeadCellsMultiplayerX.Contracts.Protocol;
 
 public static class ProtocolVersion
 {
-    public const int Major = 2;
+    public const int Major = 3;
 
     public const int Minor = 0;
 

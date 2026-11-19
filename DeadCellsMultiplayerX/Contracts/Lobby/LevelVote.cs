@@ -10,4 +10,7 @@ public class LevelVote
     public string NextLevelID { get; set; } = "PrisonStart";
 
     public bool LevelSelected { get; set; }
+
+    /// <summary>投票所属的当前关卡，缺失时拒绝</summary>
+    public int Epoch { get; set; } = -1;
 }

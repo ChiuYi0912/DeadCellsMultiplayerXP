@@ -2,6 +2,7 @@ namespace DeadCellsMultiplayerX.Server.World;
 
 using dc.cine;
 using dc.pr;
+using DeadCellsMultiplayerX.Contracts.Lobby;
 using DeadCellsMultiplayerX.Server.Integration;
 using DeadCellsMultiplayerX.Server.Session;
 using Microsoft.VisualStudio.Threading;
@@ -78,7 +79,7 @@ internal sealed class WorldCoordinator : IDisposable, System.IAsyncDisposable
         this.CurrentWorld?.Stop();
         this.worldReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
         // Once accepted, only the coordinator lifetime cancels native work, not its caller's wait.
-        _ = this.CompleteOperationAsync(this.EnterNextLevelCoreAsync(levelId), completion);
+        _ = this.CompleteOperationAsync(this.EnterNextLevelCoreAsync(levelId, this.Epoch), completion);
         return new(completion.Task);
     }
 
@@ -94,14 +95,19 @@ internal sealed class WorldCoordinator : IDisposable, System.IAsyncDisposable
         this.saveAvailable.TrySetResult();
     }
 
-    private async Task EnterNextLevelCoreAsync(string levelId)
+    private async Task EnterNextLevelCoreAsync(string levelId, int fromEpoch)
     {
         await this.loader.EnterNextLevelAsync(levelId, this.token);
         await this.session.GameContext;
         this.ThrowIfStopping();
         this.StartWorld();
         this.ThrowIfStopping();
-        this.session.NotifyNextLevel(levelId);
+        this.session.NotifyNextLevel(new LevelTransitionCommand
+        {
+            FromEpoch = fromEpoch,
+            Epoch = this.Epoch,
+            LevelId = levelId,
+        });
         this.ThrowIfStopping();
     }
 
@@ -130,18 +136,31 @@ internal sealed class WorldCoordinator : IDisposable, System.IAsyncDisposable
     internal void OnLevelLoading(LevelTransition transition)
     {
         this.session.VerifyGameThread();
-        if (this.token.IsCancellationRequested || this.activeOperation?.IsCompleted != false) return;
+        if (this.token.IsCancellationRequested || this.activeOperation?.IsCompleted != false)
+        {
+            return;
+        }
         // Sub-level activation keeps the current world; extend this branch when synchronized.
-        if (transition.mainId == null && transition.heroPosAfterBossRuneReload == null) return;
+        if (transition.mainId == null && transition.heroPosAfterBossRuneReload == null)
+        {
+            return;
+        }
+
         var levelId = transition.mainId?.ToString()
             ?? Game.Class.ME.curLevel.map.id.ToString();
         if (this.targetLevelId != null && this.targetLevelId != levelId)
+        {
             throw new InvalidOperationException("Native level does not match the requested target.");
+        }
+
         this.ReleaseWorld();
         this.ThrowIfStopping();
         this.CurrentWorld = new(() => this.session.CurrentTimeStamp, ++this.Epoch);
         foreach (var guest in this.session.ConnectedGuests)
+        {
             this.CurrentWorld.AddGuest(guest.ConnectionGuid, guest.RequestClientFrames);
+        }
+
         this.loader.OnLevelLoading(transition, levelId);
     }
 
@@ -160,7 +179,11 @@ internal sealed class WorldCoordinator : IDisposable, System.IAsyncDisposable
         {
             await this.session.GameContext;
             wait.Token.ThrowIfCancellationRequested();
-            if (this.CurrentWorld is { IsRunning: true } world) return world;
+            if (this.CurrentWorld is { IsRunning: true } world)
+            {
+                return world;
+            }
+
             await this.worldReady.Task.WaitAsync(wait.Token).ConfigureAwait(false);
         }
     }

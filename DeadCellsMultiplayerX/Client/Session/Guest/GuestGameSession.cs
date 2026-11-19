@@ -363,16 +363,18 @@ internal sealed partial class GuestGameSession
     }
 
     /// <summary>Runs the native transition authorized by the server.</summary>
-    public Task EnterNextLevel(string levelid)
+    public Task EnterNextLevel(LevelTransitionCommand command)
     {
         ObjectDisposedException.ThrowIf(this.IsDisposed, this);
-        ArgumentException.ThrowIfNullOrEmpty(levelid);
-        if (this.serverTransitionTarget != null
-            || this.levelLifecycle.Phase is not (GuestLevelPhase.Ready or GuestLevelPhase.WaitingForServer))
+        if (command == null || string.IsNullOrWhiteSpace(command.LevelId)
+            || this.serverTransitionTarget != null
+            || !this.levelLifecycle.TryAuthorizeServerTransition(
+                command.FromEpoch, command.Epoch, this.ClientWorld?.Epoch ?? -1))
         {
-            this.Logger.Debug("Ignoring level command in {Phase}: {LevelId}", this.levelLifecycle.Phase, levelid);
+            this.Logger.Debug("Ignoring stale or duplicate level command in {Phase}", this.levelLifecycle.Phase);
             return Task.CompletedTask;
         }
+        var levelid = command.LevelId;
         this.Logger.Information("Entering next level: {LevelId}", levelid);
         this.serverTransitionTarget = levelid;
         LevelTransition.Class.@goto.Invoke(levelid.AsHaxeString());
@@ -487,6 +489,7 @@ internal sealed partial class GuestGameSession
                 PlyerID = this.LocalGuid,
                 NextLevelID = levelId,
                 LevelSelected = true,
+                Epoch = this.levelLifecycle.MinimumEpochExclusive,
             });
         }
         await this.levelVoteTask;

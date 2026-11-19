@@ -1,5 +1,6 @@
 namespace DeadCellsMultiplayerX.Server.Session;
 
+using DeadCellsMultiplayerX.Contracts.Lobby;
 using DeadCellsMultiplayerX.Networking.Time;
 using DeadCellsMultiplayerX.Server.Session.Connection;
 using DeadCellsMultiplayerX.Server.Session.Interactions;
@@ -169,6 +170,10 @@ internal sealed class ServerSession : IEventReceiver, IOnFrameUpdate,
         }
         this.guests.Remove(guest.ConnectionGuid);
         this.Cleanup(() => this.worlds?.CurrentWorld?.RemoveGuest(guest.ConnectionGuid), "guest world state");
+        if (!this.IsDisposed)
+        {
+            this.LevelTransitions.OnGuestRemoved(guest.ConnectionGuid);
+        }
     }
 
     internal void ForgetStoppedConnection(ServerGuestConnection guest)
@@ -192,7 +197,7 @@ internal sealed class ServerSession : IEventReceiver, IOnFrameUpdate,
         }
     }
 
-    internal void NotifyNextLevel(string levelId)
+    internal void NotifyNextLevel(LevelTransitionCommand command)
     {
         this.VerifyGameThread();
         ObjectDisposedException.ThrowIf(this.IsDisposed, this);
@@ -203,7 +208,7 @@ internal sealed class ServerSession : IEventReceiver, IOnFrameUpdate,
                 break;
             }
 
-            guest.NotifyNextLevel(levelId);
+            guest.NotifyNextLevel(command);
         }
     }
 

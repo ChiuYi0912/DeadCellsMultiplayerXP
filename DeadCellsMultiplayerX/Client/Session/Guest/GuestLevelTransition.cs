@@ -16,6 +16,7 @@ internal enum GuestLevelPhase
 internal sealed class GuestLevelTransition
 {
     private object? nativeTransition;
+    private int commandedEpoch = -1;
 
     public GuestLevelPhase Phase { get; private set; } = GuestLevelPhase.InitialLoading;
     public long Generation { get; private set; } = 1;
@@ -24,6 +25,7 @@ internal sealed class GuestLevelTransition
     public int MinimumEpochExclusive { get; private set; } = -1;
     public int CandidateEpoch { get; private set; } = -1;
     public int AcceptedEpoch { get; private set; } = -1;
+    public int ExpectedEpoch { get; private set; } = -1;
 
     public bool CanTickWorld => !this.IsStopped && this.Phase is
         GuestLevelPhase.Ready or GuestLevelPhase.WaitingForServer or GuestLevelPhase.SyncingWorld;
@@ -46,7 +48,8 @@ internal sealed class GuestLevelTransition
         {
             GuestLevelPhase.Ready => epoch == this.AcceptedEpoch,
             GuestLevelPhase.WaitingForServer => epoch == this.MinimumEpochExclusive,
-            GuestLevelPhase.SyncingWorld => epoch > this.MinimumEpochExclusive
+            GuestLevelPhase.SyncingWorld => (this.ExpectedEpoch < 0 || epoch == this.ExpectedEpoch)
+                && epoch > this.MinimumEpochExclusive
                 && epoch >= this.CandidateEpoch && epoch >= this.AcceptedEpoch,
             _ => false,
         };
@@ -55,6 +58,12 @@ internal sealed class GuestLevelTransition
     /// <summary>Records metadata only; observing a future epoch never starts a world or permits upload.</summary>
     public bool ObserveServerEpoch(int epoch)
     {
+        if (this.ExpectedEpoch >= 0 && (this.Phase is GuestLevelPhase.LoadingNative or GuestLevelPhase.SyncingWorld)
+            && epoch != this.ExpectedEpoch)
+        {
+            return false;
+        }
+
         var floor = Math.Max(this.MinimumEpochExclusive, this.AcceptedEpoch);
         if (this.IsStopped || epoch < 0 || epoch <= floor || epoch <= this.CandidateEpoch)
         {
@@ -84,10 +93,39 @@ internal sealed class GuestLevelTransition
         {
             return false;
         }
+        this.ExpectedEpoch = -1;
         this.BeginTransition(currentEpoch);
         this.TargetLevelId = levelId;
         this.Phase = GuestLevelPhase.WaitingForServer;
         generation = this.Generation;
+        return true;
+    }
+
+    public bool TryAuthorizeServerTransition(int fromEpoch, int epoch, int currentEpoch)
+    {
+        if (this.IsStopped || fromEpoch < 1 || epoch <= fromEpoch || epoch <= this.commandedEpoch
+            || fromEpoch != currentEpoch)
+        {
+            return false;
+        }
+
+        if (this.Phase == GuestLevelPhase.Ready && fromEpoch != this.AcceptedEpoch)
+        {
+            return false;
+        }
+
+        if (this.Phase == GuestLevelPhase.WaitingForServer && fromEpoch != this.MinimumEpochExclusive)
+        {
+            return false;
+        }
+
+        if (this.Phase is not (GuestLevelPhase.Ready or GuestLevelPhase.WaitingForServer))
+        {
+            return false;
+        }
+
+        this.commandedEpoch = this.ExpectedEpoch = epoch;
+        this.CandidateEpoch = epoch;
         return true;
     }
 

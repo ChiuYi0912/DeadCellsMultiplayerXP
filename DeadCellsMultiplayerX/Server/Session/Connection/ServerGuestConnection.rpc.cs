@@ -231,15 +231,9 @@ internal sealed partial class ServerGuestConnection : IServerRPC
     public Task<long> GetTimeStamp() => Task.FromResult(this.Session.CurrentTimeStamp);
 
 
-    public Task GusetEnterNextLevel(string plyerid, string levelid)
-        => this.Session.LevelTransitions
-            .GusetEnterNextLevelAsync(this.ConnectionGuid, plyerid, levelid)
-            .AsTask();
-
     public Task SubmitLevelVote(LevelVote info)
         => this.Session.LevelTransitions
-            .SubmitLevelVoteAsync(this.ConnectionGuid, info)
-            .AsTask();
+            .SubmitLevelVoteAsync(this.ConnectionGuid, info);
 
     public Task Ping() => Task.CompletedTask;
 

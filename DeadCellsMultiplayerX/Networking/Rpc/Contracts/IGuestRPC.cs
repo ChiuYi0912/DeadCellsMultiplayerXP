@@ -1,6 +1,7 @@
 namespace DeadCellsMultiplayerX.Networking.Rpc.Contracts;
 
 using DeadCellsMultiplayerX.Contracts.Snapshots;
+using DeadCellsMultiplayerX.Contracts.Lobby;
 using PolyType;
 using StreamJsonRpc;
 
@@ -19,7 +20,7 @@ internal partial interface IGuestRPC
     /// </summary>
     /// <param name="levelid"></param>
     /// <returns></returns>
-    public Task EnterNextLevel(string levelid);
+    public Task EnterNextLevel(LevelTransitionCommand command);
 
 
     /// <summary>

@@ -144,7 +144,7 @@ internal sealed class GuestGameHookAdapter(
     }
 
     public static void LevelTransition_loadNewLevel(
-        Hook_LevelTransition.orig_loadNewLevel orig, LevelTransition self)
+        Hook_LevelTransition.orig_loadNewLevel _, LevelTransition self)
         => NativeLevelTransition.Load(self);
 
     private async Task SubmitVoteAsync(string levelId)
