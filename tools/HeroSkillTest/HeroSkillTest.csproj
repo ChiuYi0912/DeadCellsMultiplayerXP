@@ -15,4 +15,8 @@
   <ItemGroup>
     <PackageReference Include="DeadCellsCoreModding.MDK" Version="1.0.1" />
   </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\DeadCellsMultiplayerX\DeadCellsMultiplayerX.csproj" />
+  </ItemGroup>
 </Project>

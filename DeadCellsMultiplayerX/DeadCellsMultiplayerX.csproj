@@ -17,6 +17,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="HeroSkillTest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="DeadCellsCoreModding.MDK" Version="1.0.1" />
     <PackageReference Include="Microsoft.Native.Quic.MsQuic.OpenSSL" Version="2.6.4" GeneratePathProperty="true" />
     <PackageReference Include="StbImageSharp" Version="2.30.16" />
